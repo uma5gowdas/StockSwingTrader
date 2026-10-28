@@ -280,7 +280,7 @@ EOF
     fi
     
     local vwma=$(echo "scale=2; $pv_sum / $v_sum" | bc -l)
-    local current_price=${prices[-1]}
+    local current_price=${prices[$((${#prices[@]} - 1))]}
     
     # Determine signal based on price position relative to VWMA
     local signal="at"
@@ -349,7 +349,7 @@ EOF
     fi
     
     # Momentum = current price - price N periods ago
-    local current_price=${prices[-1]}
+    local current_price=${prices[$((${#prices[@]} - 1))]}
     local prev_price=${prices[$((${#prices[@]} - period - 1))]}
     
     local momentum=$(echo "scale=4; $current_price - $prev_price" | bc -l)
