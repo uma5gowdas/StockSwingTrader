@@ -10,6 +10,14 @@
 source "$(dirname "${BASH_SOURCE[0]}")/trading_thresholds.sh" 2>/dev/null
 
 # ============================================================================
+# Broker Selection Support
+# ============================================================================
+# Global BROKER variable (set from main script)
+# Values: "alpaca" or "robinhood"
+# Trade journal logs both entry and exit with broker field for audit trail
+BROKER="${BROKER:-alpaca}"
+
+# ============================================================================
 # Initialization
 # ============================================================================
 
@@ -48,6 +56,7 @@ _generate_trade_id() {
 # Log a trade entry
 # Args: symbol, entry_price, qty, strategy, reason, [stop_price], [target_price]
 # Returns: Trade ID
+# Note: Broker field is automatically added from global BROKER variable
 log_trade_entry() {
     local symbol=$1
     local entry_price=$2
@@ -66,13 +75,14 @@ log_trade_entry() {
     # Generate trade ID
     local trade_id=$(_generate_trade_id "$symbol")
     
-    # Create trade record
+    # Create trade record with broker field
     local timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     local trade_record=$(cat <<EOF
 {
   "trade_id": "$trade_id",
   "symbol": "$symbol",
   "strategy": "$strategy",
+  "broker": "$BROKER",
   "date_open": "$timestamp",
   "entry_price": $entry_price,
   "quantity": $qty,
@@ -100,7 +110,8 @@ EOF
 
 # Close a trade (log exit)
 # Args: symbol, exit_price, reason, [trade_id]
-# Returns: Exit record with P&L
+# Returns: Exit record with P&L and broker information
+# Note: Broker field is preserved from entry, exit_reason added
 close_trade() {
     local symbol=$1
     local exit_price=$2

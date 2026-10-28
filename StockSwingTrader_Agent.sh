@@ -50,8 +50,12 @@ source "$SCRIPT_DIR/lib/sentiment.sh" 2>/dev/null || echo "WARNING: sentiment.sh
 source "$SCRIPT_DIR/lib/scoring.sh" 2>/dev/null || echo "WARNING: scoring.sh not found"
 source "$SCRIPT_DIR/lib/html_report.sh" 2>/dev/null || echo "WARNING: html_report.sh not found"
 
-# Load Alpaca broker module (optional, for trading integration)
-source "$SCRIPT_DIR/lib/alpaca_broker.sh" 2>/dev/null || log_warn "alpaca_broker.sh not found - trading features disabled"
+# Broker selection (default: Alpaca for backward compatibility)
+BROKER_CHOICE="${BROKER_CHOICE:-alpaca}"
+BROKER_PREFIX="alpaca_"
+BROKER_INITIALIZED_VAR="ALPACA_INITIALIZED"
+
+# Load broker modules will be done after argument parsing to support --broker flag
 
 # ============================================================================
 # Logging & Error Handling
@@ -84,36 +88,85 @@ log_warn() {
 }
 
 # ============================================================================
-# Alpaca Trading Functions
+# Broker Management Functions
 # ============================================================================
 
-# Initialize Alpaca connection
-alpaca_connect() {
-    if ! command -v alpaca_init &>/dev/null; then
-        log_error "Alpaca module not loaded"
+# Load the appropriate broker module based on broker choice
+load_broker_module() {
+    case "$BROKER_CHOICE" in
+        alpaca)
+            if [[ ! -f "$SCRIPT_DIR/lib/alpaca_broker.sh" ]]; then
+                log_error "Alpaca broker module not found: $SCRIPT_DIR/lib/alpaca_broker.sh"
+                return 1
+            fi
+            source "$SCRIPT_DIR/lib/alpaca_broker.sh" || {
+                log_error "Failed to load Alpaca broker module"
+                return 1
+            }
+            BROKER_PREFIX="alpaca_"
+            BROKER_INITIALIZED_VAR="ALPACA_INITIALIZED"
+            log_info "Loaded Alpaca broker module"
+            return 0
+            ;;
+        robinhood)
+            if [[ ! -f "$SCRIPT_DIR/lib/robinhood_broker.sh" ]]; then
+                log_error "Robinhood broker module not found: $SCRIPT_DIR/lib/robinhood_broker.sh"
+                return 1
+            fi
+            source "$SCRIPT_DIR/lib/robinhood_oauth.sh" || {
+                log_error "Failed to load Robinhood OAuth module"
+                return 1
+            }
+            source "$SCRIPT_DIR/lib/robinhood_broker.sh" || {
+                log_error "Failed to load Robinhood broker module"
+                return 1
+            }
+            BROKER_PREFIX="robinhood_"
+            BROKER_INITIALIZED_VAR="ROBINHOOD_INITIALIZED"
+            log_info "Loaded Robinhood broker module"
+            return 0
+            ;;
+        *)
+            log_error "Unknown broker: $BROKER_CHOICE"
+            return 1
+            ;;
+    esac
+}
+
+# Initialize broker connection
+broker_connect() {
+    local init_func="${BROKER_PREFIX}init"
+    
+    if ! command -v "$init_func" &>/dev/null; then
+        log_error "Broker initialization function not found: $init_func"
         return 1
     fi
     
-    log_info "Initializing Alpaca paper trading..."
-    if alpaca_init; then
-        log_info "Alpaca connection successful"
+    log_info "Initializing $BROKER_CHOICE broker..."
+    if $init_func; then
+        log_info "$BROKER_CHOICE connection successful"
         return 0
     else
-        log_error "Failed to initialize Alpaca connection"
+        log_error "Failed to initialize $BROKER_CHOICE connection"
         return 1
     fi
 }
 
-# Display account status
-show_alpaca_account() {
-    if [[ "$ALPACA_INITIALIZED" != "true" ]]; then
-        log_error "Alpaca not initialized"
+# Display account status (broker-agnostic)
+show_broker_account() {
+    local init_var_name="${BROKER_PREFIX}INITIALIZED"
+    local init_var="${!init_var_name}"
+    
+    if [[ "$init_var" != "true" ]]; then
+        log_error "Broker not initialized"
         return 1
     fi
     
-    log_info "Fetching Alpaca account information..."
+    log_info "Fetching $BROKER_CHOICE account information..."
     
-    local account_data=$(alpaca_get_account)
+    local get_account_func="${BROKER_PREFIX}get_account"
+    local account_data=$($get_account_func)
+    
     if [[ -z "$account_data" ]]; then
         log_error "Failed to retrieve account data"
         return 1
@@ -121,14 +174,14 @@ show_alpaca_account() {
     
     echo ""
     echo "============================================"
-    echo "ALPACA ACCOUNT STATUS"
+    echo "${BROKER_CHOICE^^} ACCOUNT STATUS"
     echo "============================================"
     
     if command -v jq &>/dev/null; then
         echo "Portfolio Value: $(echo "$account_data" | jq -r '.portfolio_value' | xargs printf '\$%.2f')"
         echo "Cash Balance:    $(echo "$account_data" | jq -r '.cash' | xargs printf '\$%.2f')"
         echo "Buying Power:    $(echo "$account_data" | jq -r '.buying_power' | xargs printf '\$%.2f')"
-        echo "Account Status:  $(echo "$account_data" | jq -r '.status')"
+        echo "Account Type:    $(echo "$account_data" | jq -r '.account_type')"
         echo "============================================"
     else
         echo "$account_data"
@@ -138,16 +191,21 @@ show_alpaca_account() {
     return 0
 }
 
-# Display all open positions
-show_alpaca_positions() {
-    if [[ "$ALPACA_INITIALIZED" != "true" ]]; then
-        log_error "Alpaca not initialized"
+# Display all open positions (broker-agnostic)
+show_broker_positions() {
+    local init_var_name="${BROKER_PREFIX}INITIALIZED"
+    local init_var="${!init_var_name}"
+    
+    if [[ "$init_var" != "true" ]]; then
+        log_error "Broker not initialized"
         return 1
     fi
     
-    log_info "Fetching open positions..."
+    log_info "Fetching open positions from $BROKER_CHOICE..."
     
-    local positions=$(alpaca_get_positions)
+    local get_positions_func="${BROKER_PREFIX}get_positions"
+    local positions=$($get_positions_func)
+    
     if [[ -z "$positions" ]]; then
         log_warn "No open positions"
         return 0
@@ -155,11 +213,11 @@ show_alpaca_positions() {
     
     echo ""
     echo "============================================"
-    echo "OPEN POSITIONS"
+    echo "OPEN POSITIONS (${BROKER_CHOICE^^})"
     echo "============================================"
     
     if command -v jq &>/dev/null; then
-        echo "$positions" | jq -r '.[] | "\(.symbol): \(.quantity) shares @ $\(.entry_price)"'
+        echo "$positions" | jq -r '.[] | "\(.symbol): \(.qty) shares @ $\(.avg_entry_price)"'
     else
         echo "$positions"
     fi
@@ -168,7 +226,7 @@ show_alpaca_positions() {
     return 0
 }
 
-# Place a buy order with confirmation
+# Place a buy order with confirmation (broker-agnostic)
 place_buy_order() {
     local symbol="$1"
     local qty="$2"
@@ -178,8 +236,11 @@ place_buy_order() {
         return 1
     fi
     
-    if [[ "$ALPACA_INITIALIZED" != "true" ]]; then
-        log_error "Alpaca not initialized"
+    local init_var_name="${BROKER_PREFIX}INITIALIZED"
+    local init_var="${!init_var_name}"
+    
+    if [[ "$init_var" != "true" ]]; then
+        log_error "Broker not initialized"
         return 1
     fi
     
@@ -194,7 +255,7 @@ place_buy_order() {
     
     echo ""
     echo "============================================"
-    echo "BUY ORDER CONFIRMATION"
+    echo "BUY ORDER CONFIRMATION (${BROKER_CHOICE^^})"
     echo "============================================"
     echo "Symbol:          $symbol"
     echo "Quantity:        $qty shares"
@@ -211,12 +272,15 @@ place_buy_order() {
         return 0
     fi
     
-    log_info "Placing buy order: $qty shares of $symbol"
-    local order=$(alpaca_place_order "$symbol" "$qty" "buy")
+    log_info "Placing buy order via $BROKER_CHOICE: $qty shares of $symbol"
+    
+    local place_order_func="${BROKER_PREFIX}place_order"
+    local order=$($place_order_func "$symbol" "$qty" "buy")
+    
     if [[ -n "$order" ]]; then
         log_info "Buy order placed successfully"
         echo ""
-        echo "✓ BUY ORDER PLACED"
+        echo "✓ BUY ORDER PLACED (${BROKER_CHOICE^^})"
         echo "$order"
         return 0
     else
@@ -225,7 +289,7 @@ place_buy_order() {
     fi
 }
 
-# Place a sell order with confirmation
+# Place a sell order with confirmation (broker-agnostic)
 place_sell_order() {
     local symbol="$1"
     local qty="$2"
@@ -235,8 +299,11 @@ place_sell_order() {
         return 1
     fi
     
-    if [[ "$ALPACA_INITIALIZED" != "true" ]]; then
-        log_error "Alpaca not initialized"
+    local init_var_name="${BROKER_PREFIX}INITIALIZED"
+    local init_var="${!init_var_name}"
+    
+    if [[ "$init_var" != "true" ]]; then
+        log_error "Broker not initialized"
         return 1
     fi
     
@@ -251,7 +318,7 @@ place_sell_order() {
     
     echo ""
     echo "============================================"
-    echo "SELL ORDER CONFIRMATION"
+    echo "SELL ORDER CONFIRMATION (${BROKER_CHOICE^^})"
     echo "============================================"
     echo "Symbol:             $symbol"
     echo "Quantity:           $qty shares"
@@ -268,12 +335,15 @@ place_sell_order() {
         return 0
     fi
     
-    log_info "Placing sell order: $qty shares of $symbol"
-    local order=$(alpaca_place_order "$symbol" "$qty" "sell")
+    log_info "Placing sell order via $BROKER_CHOICE: $qty shares of $symbol"
+    
+    local place_order_func="${BROKER_PREFIX}place_order"
+    local order=$($place_order_func "$symbol" "$qty" "sell")
+    
     if [[ -n "$order" ]]; then
         log_info "Sell order placed successfully"
         echo ""
-        echo "✓ SELL ORDER PLACED"
+        echo "✓ SELL ORDER PLACED (${BROKER_CHOICE^^})"
         echo "$order"
         return 0
     else
@@ -577,35 +647,48 @@ Options:
     --output-dir DIR                 Output directory for reports (default: output/reports)
     --debug                          Enable verbose debug logging
     
-    Alpaca Integration:
-    --alpaca                         Enable Alpaca paper trading mode
-    --check-account                  Display account balance and details
-    --view-positions                 List all open positions
-    --place-buy SYMBOL QTY           Place a buy order (with confirmation)
-    --place-sell SYMBOL QTY          Place a sell order (with confirmation)
-    --alpaca-status                  Show Alpaca connection status
+    Broker Selection & Trading:
+    --broker {alpaca|robinhood}      Choose broker for trading (default: alpaca)
+                                     * alpaca   : Alpaca Securities broker
+                                     * robinhood: Robinhood Markets broker
+                                     Both brokers support identical risk management
+                                     and trade journal logging
+    --check-account                  Display account balance and details (broker-specific)
+    --view-positions                 List all open positions (broker-specific)
+    --buy SYMBOL QTY                 Place a buy order with confirmation (broker-specific)
+    --sell SYMBOL QTY                Place a sell order with confirmation (broker-specific)
     
     --help                           Show this help message
 
 Examples:
-    # Basic analysis
+    # Basic analysis (no broker required)
     ./StockSwingTrader_Agent.sh --symbols AAPL,MSFT,GOOGL
     ./StockSwingTrader_Agent.sh --top-10 --debug
     ./StockSwingTrader_Agent.sh --watchlist config/watchlist.txt
 
-    # Alpaca trading integration
-    ./StockSwingTrader_Agent.sh --alpaca --check-account
-    ./StockSwingTrader_Agent.sh --alpaca --symbols AAPL,MSFT --view-positions
-    ./StockSwingTrader_Agent.sh --alpaca --place-buy AAPL 10
-    ./StockSwingTrader_Agent.sh --alpaca --place-sell MSFT 5
-    ./StockSwingTrader_Agent.sh --alpaca --alpaca-status
+    # Alpaca trading (default broker, --broker alpaca not required)
+    ./StockSwingTrader_Agent.sh --check-account
+    ./StockSwingTrader_Agent.sh --buy AAPL 10
+    ./StockSwingTrader_Agent.sh --sell MSFT 5
+    ./StockSwingTrader_Agent.sh --view-positions
+
+    # Robinhood trading (with explicit --broker flag)
+    ./StockSwingTrader_Agent.sh --broker robinhood --check-account
+    ./StockSwingTrader_Agent.sh --broker robinhood --buy AAPL 10
+    ./StockSwingTrader_Agent.sh --broker robinhood --sell MSFT 5
+    ./StockSwingTrader_Agent.sh --broker robinhood --view-positions
+    
+    # Combined analysis and trading
+    ./StockSwingTrader_Agent.sh --broker alpaca --symbols AAPL,MSFT --check-account
+    ./StockSwingTrader_Agent.sh --broker robinhood --top-10 --view-positions
+    ./StockSwingTrader_Agent.sh --symbols AAPL --buy AAPL 5 (uses default alpaca)
 
 Features:
     - 8+ technical indicators (RSI, MACD, BB, Stochastic, Williams %R, OBV, ATR)
     - Multi-source sentiment analysis (Twitter, Reddit, StockTwits, News)
     - Confidence scoring (0-100) with buy/sell/hold signals
     - Professional HTML reports with risk metrics and account information
-    - Alpaca paper trading integration (account management, order placement)
+    - Dual-broker support: Alpaca and Robinhood
     - Rate limiting and retry logic
     - Learning/demo mode (analysis-only)
 
@@ -613,13 +696,19 @@ Requirements:
     - bash 4.0+
     - curl, bc
     - jq (optional, for advanced JSON parsing)
-    - Alpaca API credentials (for trading features)
+    - API credentials for selected broker
 
 Environment Variables:
-    APCA_API_KEY_ID          Alpaca API Key ID
-    APCA_API_SECRET_KEY      Alpaca API Secret Key
-    APCA_API_OAUTH_TOKEN     Alpaca OAuth Token (alternative to key/secret)
-    ALPACA_DEBUG             Enable debug logging for Alpaca API calls
+    For Alpaca:
+        APCA_API_KEY_ID          Alpaca API Key ID
+        APCA_API_SECRET_KEY      Alpaca API Secret Key
+        APCA_API_OAUTH_TOKEN     Alpaca OAuth Token (alternative to key/secret)
+        ALPACA_DEBUG             Enable debug logging for Alpaca API calls
+
+    For Robinhood:
+        ROBINHOOD_CLIENT_ID      Robinhood OAuth Client ID
+        ROBINHOOD_CLIENT_SECRET  Robinhood OAuth Client Secret
+        ROBINHOOD_DEBUG          Enable debug logging for Robinhood API calls
 
 EOF
 }
@@ -630,19 +719,27 @@ main() {
     local use_top_10=false
     local output_dir="output/reports"
     
-    # Alpaca flags
-    local alpaca_mode=false
-    local alpaca_check_account=false
-    local alpaca_view_positions=false
-    local alpaca_place_buy_symbol=""
-    local alpaca_place_buy_qty=""
-    local alpaca_place_sell_symbol=""
-    local alpaca_place_sell_qty=""
-    local alpaca_show_status=false
+    # Trading flags
+    local broker_trading_mode=false
+    local trading_check_account=false
+    local trading_view_positions=false
+    local trading_buy_symbol=""
+    local trading_buy_qty=""
+    local trading_sell_symbol=""
+    local trading_sell_qty=""
     
     # Parse command-line arguments
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            --broker)
+                BROKER_CHOICE="$2"
+                # Validate broker choice
+                if ! [[ "$BROKER_CHOICE" =~ ^(alpaca|robinhood)$ ]]; then
+                    log_error "Invalid broker: $BROKER_CHOICE. Use 'alpaca' or 'robinhood'."
+                    exit 1
+                fi
+                shift 2
+                ;;
             --symbols)
                 symbols="$2"
                 shift 2
@@ -663,30 +760,52 @@ main() {
                 DEBUG_MODE=true
                 shift
                 ;;
-            --alpaca)
-                alpaca_mode=true
-                shift
-                ;;
             --check-account)
-                alpaca_check_account=true
+                trading_check_account=true
+                broker_trading_mode=true
                 shift
                 ;;
             --view-positions)
-                alpaca_view_positions=true
+                trading_view_positions=true
+                broker_trading_mode=true
+                shift
+                ;;
+            --buy)
+                trading_buy_symbol="$2"
+                trading_buy_qty="$3"
+                broker_trading_mode=true
+                shift 3
+                ;;
+            --sell)
+                trading_sell_symbol="$2"
+                trading_sell_qty="$3"
+                broker_trading_mode=true
+                shift 3
+                ;;
+            # Legacy Alpaca compatibility flags (deprecated but still supported)
+            --alpaca)
+                BROKER_CHOICE="alpaca"
+                broker_trading_mode=true
                 shift
                 ;;
             --place-buy)
-                alpaca_place_buy_symbol="$2"
-                alpaca_place_buy_qty="$3"
+                trading_buy_symbol="$2"
+                trading_buy_qty="$3"
+                BROKER_CHOICE="alpaca"
+                broker_trading_mode=true
                 shift 3
                 ;;
             --place-sell)
-                alpaca_place_sell_symbol="$2"
-                alpaca_place_sell_qty="$3"
+                trading_sell_symbol="$2"
+                trading_sell_qty="$3"
+                BROKER_CHOICE="alpaca"
+                broker_trading_mode=true
                 shift 3
                 ;;
             --alpaca-status)
-                alpaca_show_status=true
+                trading_check_account=true
+                BROKER_CHOICE="alpaca"
+                broker_trading_mode=true
                 shift
                 ;;
             --help)
@@ -704,48 +823,50 @@ main() {
     # Initialize logging
     mkdir -p logs
     log_info "StockSwingTrader Agent started"
+    log_info "Broker: $BROKER_CHOICE"
     log_info "Debug mode: $DEBUG_MODE"
     
-    # Handle Alpaca-only commands
-    if [[ "$alpaca_mode" == "true" ]]; then
-        log_info "Alpaca mode enabled"
+    # Handle broker trading commands
+    if [[ "$broker_trading_mode" == "true" ]]; then
+        log_info "$BROKER_CHOICE broker mode enabled"
         
-        # Initialize Alpaca connection
-        if ! alpaca_connect; then
-            log_error "Failed to connect to Alpaca. Check your credentials."
+        # Load and initialize broker
+        if ! load_broker_module; then
+            log_error "Failed to load $BROKER_CHOICE broker module"
             exit 1
         fi
         
-        # Handle individual Alpaca commands
-        if [[ "$alpaca_show_status" == "true" ]]; then
-            show_alpaca_account
+        # Initialize broker connection
+        if ! broker_connect; then
+            log_error "Failed to connect to $BROKER_CHOICE. Check your credentials."
+            exit 1
+        fi
+        
+        # Handle individual trading commands
+        if [[ "$trading_check_account" == "true" ]]; then
+            show_broker_account
             return $?
         fi
         
-        if [[ "$alpaca_check_account" == "true" ]]; then
-            show_alpaca_account
+        if [[ "$trading_view_positions" == "true" ]]; then
+            show_broker_positions
             return $?
         fi
         
-        if [[ "$alpaca_view_positions" == "true" ]]; then
-            show_alpaca_positions
+        if [[ -n "$trading_buy_symbol" ]] && [[ -n "$trading_buy_qty" ]]; then
+            place_buy_order "$trading_buy_symbol" "$trading_buy_qty"
             return $?
         fi
         
-        if [[ -n "$alpaca_place_buy_symbol" ]] && [[ -n "$alpaca_place_buy_qty" ]]; then
-            place_buy_order "$alpaca_place_buy_symbol" "$alpaca_place_buy_qty"
-            return $?
-        fi
-        
-        if [[ -n "$alpaca_place_sell_symbol" ]] && [[ -n "$alpaca_place_sell_qty" ]]; then
-            place_sell_order "$alpaca_place_sell_symbol" "$alpaca_place_sell_qty"
+        if [[ -n "$trading_sell_symbol" ]] && [[ -n "$trading_sell_qty" ]]; then
+            place_sell_order "$trading_sell_symbol" "$trading_sell_qty"
             return $?
         fi
         
         # If no specific command, show account and positions
-        show_alpaca_account
+        show_broker_account
         echo ""
-        show_alpaca_positions
+        show_broker_positions
         return $?
     fi
     

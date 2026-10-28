@@ -12,6 +12,14 @@ source "$(dirname "${BASH_SOURCE[0]}")/alpaca_wrappers.sh" 2>/dev/null
 source "$(dirname "${BASH_SOURCE[0]}")/trade_journal.sh" 2>/dev/null
 
 # ============================================================================
+# Broker Selection Support
+# ============================================================================
+# Global BROKER variable (set from main script)
+# Values: "alpaca" or "robinhood"
+# Both brokers use identical risk management logic
+BROKER="${BROKER:-alpaca}"
+
+# ============================================================================
 # Position Sizing - Kelly Criterion
 # ============================================================================
 

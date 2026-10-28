@@ -11,12 +11,14 @@ A sophisticated shell-based swing trading analysis platform that combines 8+ tec
 - **8+ Technical Indicators**: RSI, MACD, Bollinger Bands, Stochastic, Williams %R, OBV, ATR, SMA/EMA
 - **Multi-Source Sentiment**: Twitter, Reddit, StockTwits, News API analysis
 - **Confidence Scoring**: 0-100 scale with BUY/SELL/HOLD recommendations
-- **Risk Management**: ATR-based stop-loss calculations, risk-reward ratios
+- **Risk Management**: ATR-based stop-loss calculations, risk-reward ratios, position sizing
 - **Professional Reports**: Interactive HTML with real-time charts and metrics
 - **Rate Limit Aware**: Respects API rate limits (Alpha Vantage 5/min, Finnhub 60/min)
 - **Retry Logic**: Exponential backoff for transient failures
 - **Learning Mode**: Analysis-only, no live trading connection
 - **Top 10 Watchlist**: Pre-configured with popular stocks
+- **Alpaca Integration (v6.1)**: Paper trading account management and order placement
+- **Multiple Strategies (v6.1)**: Mean reversion and trend-following strategies included
 
 ## Installation
 
@@ -33,8 +35,9 @@ A sophisticated shell-based swing trading analysis platform that combines 8+ tec
 # Install dependencies if needed
 brew install bash curl bc jq
 
-# Clone and set up
-cd /Users/P3291917/Builds/6/StockSwingTrader
+# Extract and set up
+tar -xzf StockSwingTrader_v6.1_Alpaca_Deployable.tar.gz
+cd StockSwingTrader
 chmod +x StockSwingTrader_Agent.sh
 
 # Copy config template
@@ -47,8 +50,9 @@ cp config.template.sh config.sh
 # Debian/Ubuntu
 sudo apt-get install bash curl bc jq
 
-# Set up
-cd /Users/P3291917/Builds/6/StockSwingTrader
+# Extract and set up
+tar -xzf StockSwingTrader_v6.1_Alpaca_Deployable.tar.gz
+cd StockSwingTrader
 chmod +x StockSwingTrader_Agent.sh
 cp config.template.sh config.sh
 ```
@@ -120,6 +124,29 @@ TSLA
 EOF
 ```
 
+### 5. Configure Alpaca Paper Trading (Optional, v6.1+)
+
+To use Alpaca paper trading features, set environment variables:
+
+```bash
+export APCA_API_KEY_ID="your_alpaca_key_id"
+export APCA_API_SECRET_KEY="your_alpaca_secret_key"
+```
+
+Or set OAuth token:
+
+```bash
+export APCA_API_OAUTH_TOKEN="your_oauth_token"
+```
+
+Get credentials from [Alpaca Dashboard](https://app.alpaca.markets):
+1. Log in to your account
+2. Go to Settings → API Keys
+3. Generate new API key
+4. Copy Key ID and Secret Key
+
+**Paper Trading**: All trades execute in Alpaca's simulated environment with $100,000 starting capital.
+
 ## Usage
 
 ### Basic Analysis - Top 10 Stocks
@@ -153,6 +180,206 @@ Output will show detailed logs including API calls, calculations, and timing.
 ```bash
 ./StockSwingTrader_Agent.sh --symbols AAPL,MSFT --output-dir my_reports/
 ```
+
+### Alpaca Paper Trading Integration (v6.1+)
+
+#### Check Account Status
+
+```bash
+./StockSwingTrader_Agent.sh --alpaca --check-account
+```
+
+Shows account balance, buying power, and equity.
+
+#### View Open Positions
+
+```bash
+./StockSwingTrader_Agent.sh --alpaca --view-positions
+```
+
+Lists all stocks currently held with quantities and values.
+
+#### Place Buy Order
+
+```bash
+./StockSwingTrader_Agent.sh --alpaca --place-buy AAPL 10
+```
+
+Places a buy order for 10 shares of AAPL (with confirmation prompt).
+
+#### Place Sell Order
+
+```bash
+./StockSwingTrader_Agent.sh --alpaca --place-sell MSFT 5
+```
+
+Places a sell order for 5 shares of MSFT (with confirmation prompt).
+
+#### Check Alpaca Connection
+
+```bash
+./StockSwingTrader_Agent.sh --alpaca --alpaca-status
+```
+
+Verifies connection to Alpaca API and shows status.
+
+#### Combined Analysis + Trading
+
+```bash
+./StockSwingTrader_Agent.sh --alpaca --symbols AAPL,MSFT --view-positions
+```
+
+Generates analysis and displays current positions.
+
+## Using Different Brokers
+
+StockSwingTrader supports multiple brokers with identical risk management and trade journal logging. Switch between brokers using the `--broker` flag (default: alpaca for backward compatibility).
+
+### Broker Options
+
+- **alpaca** (default): Alpaca Securities - modern, commission-free, API-first broker
+- **robinhood**: Robinhood Markets - popular retail broker with API support
+
+Both brokers provide:
+- Account information and balance queries
+- Position tracking and management
+- Buy/sell order placement with confirmation
+- Trade journal logging with broker attribution
+- Identical stop-loss and position sizing logic
+- Full P&L tracking and analytics
+
+### Default Broker (Alpaca)
+
+If no `--broker` flag is specified, Alpaca is used (backward compatible):
+
+```bash
+# These are equivalent (both use Alpaca):
+./StockSwingTrader_Agent.sh --check-account
+./StockSwingTrader_Agent.sh --broker alpaca --check-account
+```
+
+### Alpaca Trading Examples
+
+```bash
+# Check account balance and buying power (Alpaca)
+./StockSwingTrader_Agent.sh --check-account
+
+# View all open positions (Alpaca)
+./StockSwingTrader_Agent.sh --view-positions
+
+# Place a buy order for 10 AAPL shares (Alpaca, default broker)
+./StockSwingTrader_Agent.sh --buy AAPL 10
+
+# Place a sell order for 5 MSFT shares (Alpaca, explicit flag)
+./StockSwingTrader_Agent.sh --broker alpaca --sell MSFT 5
+
+# Combined analysis and trading
+./StockSwingTrader_Agent.sh --symbols AAPL,MSFT --check-account
+```
+
+### Robinhood Trading Examples
+
+Use the `--broker robinhood` flag to switch to Robinhood:
+
+```bash
+# Check account balance and buying power (Robinhood)
+./StockSwingTrader_Agent.sh --broker robinhood --check-account
+
+# View all open positions (Robinhood)
+./StockSwingTrader_Agent.sh --broker robinhood --view-positions
+
+# Place a buy order for 10 AAPL shares (Robinhood)
+./StockSwingTrader_Agent.sh --broker robinhood --buy AAPL 10
+
+# Place a sell order for 5 MSFT shares (Robinhood)
+./StockSwingTrader_Agent.sh --broker robinhood --sell MSFT 5
+
+# Combined analysis and trading with Robinhood
+./StockSwingTrader_Agent.sh --broker robinhood --top-10 --view-positions
+```
+
+### Trade Journal with Broker Attribution
+
+All trades are logged to `logs/trades.json` with broker information for audit trail and analytics:
+
+```json
+[
+  {
+    "trade_id": "T20250115_AAPL_001",
+    "symbol": "AAPL",
+    "strategy": "mean-reversion",
+    "broker": "alpaca",
+    "date_open": "2025-01-15T14:30:22Z",
+    "entry_price": 180.50,
+    "quantity": 10,
+    "stop_loss_price": 175.00,
+    "take_profit_price": 195.00,
+    "entry_reason": "RSI < 30, BB lower touch",
+    "status": "closed",
+    "date_close": "2025-01-15T16:45:30Z",
+    "exit_price": 195.25,
+    "gross_pnl": 147.50,
+    "pnl_pct": 8.21,
+    "net_pnl": 143.50,
+    "commission": 4.00
+  }
+]
+```
+
+Each trade includes:
+- `broker`: Which broker executed the trade (alpaca or robinhood)
+- `strategy`: Mean reversion, trend following, or other strategy
+- `entry_price` / `exit_price`: Execution prices
+- `entry_reason` / `exit_reason`: Signal that triggered the trade
+- `gross_pnl` / `net_pnl`: Profit/loss including commissions
+- `pnl_pct`: Return percentage for the trade
+
+### Comparing Brokers
+
+Both Alpaca and Robinhood integrate with StockSwingTrader's identical infrastructure:
+
+| Feature | Alpaca | Robinhood |
+|---------|--------|-----------|
+| Paper Trading | Yes | Yes (simulated mode) |
+| Real Trading | Yes | Yes |
+| Commission | No ($0) | Rebated (free) |
+| Position Sizing | Kelly Criterion | Kelly Criterion |
+| Stop-Loss Logic | ATR-based | ATR-based |
+| Trade Journal | Yes, with broker field | Yes, with broker field |
+| Risk Management | 2% per trade | 2% per trade |
+| Order Confirmation | Required | Required |
+
+### Broker Credentials
+
+#### Alpaca Setup
+
+Set these environment variables:
+
+```bash
+export APCA_API_KEY_ID="your_key_id"
+export APCA_API_SECRET_KEY="your_secret"
+```
+
+Or use OAuth token:
+
+```bash
+export APCA_API_OAUTH_TOKEN="your_token"
+```
+
+[Get Alpaca API Keys →](https://app.alpaca.markets/settings/api-keys)
+
+#### Robinhood Setup
+
+Set these environment variables:
+
+```bash
+export ROBINHOOD_CLIENT_ID="your_client_id"
+export ROBINHOOD_CLIENT_SECRET="your_client_secret"
+```
+
+First login will trigger browser-based OAuth flow for user approval. Token is cached for background trading.
+
+[Get Robinhood OAuth Credentials →](https://developer.robinhood.com)
 
 ### Help
 
@@ -471,9 +698,17 @@ StockSwingTrader/
 ├── config.template.sh             Configuration template
 ├── lib/
 │   ├── indicators.sh              Technical indicator calculations
+│   ├── indicators_new.sh          Additional indicators (v6.1)
 │   ├── sentiment.sh               Social sentiment analysis
 │   ├── scoring.sh                 Confidence scoring engine
-│   └── html_report.sh             HTML report generation
+│   ├── html_report.sh             HTML report generation
+│   ├── alpaca_broker.sh           Alpaca API integration (v6.1)
+│   ├── alpaca_wrappers.sh         Alpaca convenience wrappers (v6.1)
+│   ├── risk_management.sh         Risk calculation module (v6.1)
+│   ├── trade_journal.sh           Trade tracking and logging (v6.1)
+│   ├── strategy_mean_reversion.sh Mean reversion strategy (v6.1)
+│   ├── strategy_trend_follow.sh   Trend-following strategy (v6.1)
+│   └── trading_thresholds.sh      Dynamic threshold management (v6.1)
 ├── config/
 │   ├── watchlist.txt              Stock symbols (one per line)
 │   └── parameters.conf            Indicator parameters
@@ -484,11 +719,13 @@ StockSwingTrader/
 ├── output/
 │   └── reports/                   Generated HTML reports (auto-generated)
 ├── tests/
+│   ├── test_alpaca_broker.sh      Alpaca integration tests (v6.1)
 │   ├── unit_tests.sh              Unit test suite
 │   └── data/                      Sample API responses
 ├── README.md                      This file
 ├── QUICK_START.md                 Quick start guide
 ├── API_SETUP_GUIDE.md             API key setup instructions
+├── PACKAGE_VERSION.txt            Current version (v6.1)
 └── PLAN.md                        Original implementation plan
 ```
 
@@ -503,12 +740,14 @@ StockSwingTrader/
 ## Future Enhancements
 
 - Backtesting engine (validate signals historically)
-- Paper trading integration (Alpaca API)
-- Email/Slack alerts for strong signals
+- Real-time alerts (Email/Slack/SMS)
 - Web dashboard frontend
 - Machine learning signal optimization
-- Portfolio management tools
-- Live trading connections (paper only)
+- Portfolio analytics and diversification
+- Advanced risk analytics (Greeks, Portfolio VaR)
+- Multi-account management
+- Strategy backtesting and optimization
+- Live trading connections (Alpaca, Interactive Brokers, etc.)
 
 ## Contributing
 
@@ -536,6 +775,6 @@ For issues or questions:
 
 ---
 
-**Last Updated**: 2025-01-15  
-**Version**: 1.0  
-**Status**: Production Ready (Learning/Demo Mode)
+**Last Updated**: 2025-10-28  
+**Version**: 6.1 (Alpaca Integration)  
+**Status**: Production Ready (Paper Trading)
