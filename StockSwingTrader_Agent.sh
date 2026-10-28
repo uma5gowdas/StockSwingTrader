@@ -50,6 +50,9 @@ source "$SCRIPT_DIR/lib/sentiment.sh" 2>/dev/null || echo "WARNING: sentiment.sh
 source "$SCRIPT_DIR/lib/scoring.sh" 2>/dev/null || echo "WARNING: scoring.sh not found"
 source "$SCRIPT_DIR/lib/html_report.sh" 2>/dev/null || echo "WARNING: html_report.sh not found"
 
+# Load Alpaca broker module (optional, for trading integration)
+source "$SCRIPT_DIR/lib/alpaca_broker.sh" 2>/dev/null || log_warn "alpaca_broker.sh not found - trading features disabled"
+
 # ============================================================================
 # Logging & Error Handling
 # ============================================================================
@@ -71,6 +74,211 @@ log_debug() {
         local msg="$1"
         local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
         echo "[DEBUG] [$timestamp] $msg" | tee -a "${LOG_FILE}"
+    fi
+}
+
+log_warn() {
+    local msg="$1"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[WARN] [$timestamp] $msg" | tee -a "${LOG_FILE}"
+}
+
+# ============================================================================
+# Alpaca Trading Functions
+# ============================================================================
+
+# Initialize Alpaca connection
+alpaca_connect() {
+    if ! command -v alpaca_init &>/dev/null; then
+        log_error "Alpaca module not loaded"
+        return 1
+    fi
+    
+    log_info "Initializing Alpaca paper trading..."
+    if alpaca_init; then
+        log_info "Alpaca connection successful"
+        return 0
+    else
+        log_error "Failed to initialize Alpaca connection"
+        return 1
+    fi
+}
+
+# Display account status
+show_alpaca_account() {
+    if [[ "$ALPACA_INITIALIZED" != "true" ]]; then
+        log_error "Alpaca not initialized"
+        return 1
+    fi
+    
+    log_info "Fetching Alpaca account information..."
+    
+    local account_data=$(alpaca_get_account)
+    if [[ -z "$account_data" ]]; then
+        log_error "Failed to retrieve account data"
+        return 1
+    fi
+    
+    echo ""
+    echo "============================================"
+    echo "ALPACA ACCOUNT STATUS"
+    echo "============================================"
+    
+    if command -v jq &>/dev/null; then
+        echo "Portfolio Value: $(echo "$account_data" | jq -r '.portfolio_value' | xargs printf '\$%.2f')"
+        echo "Cash Balance:    $(echo "$account_data" | jq -r '.cash' | xargs printf '\$%.2f')"
+        echo "Buying Power:    $(echo "$account_data" | jq -r '.buying_power' | xargs printf '\$%.2f')"
+        echo "Account Status:  $(echo "$account_data" | jq -r '.status')"
+        echo "============================================"
+    else
+        echo "$account_data"
+        echo "============================================"
+    fi
+    
+    return 0
+}
+
+# Display all open positions
+show_alpaca_positions() {
+    if [[ "$ALPACA_INITIALIZED" != "true" ]]; then
+        log_error "Alpaca not initialized"
+        return 1
+    fi
+    
+    log_info "Fetching open positions..."
+    
+    local positions=$(alpaca_get_positions)
+    if [[ -z "$positions" ]]; then
+        log_warn "No open positions"
+        return 0
+    fi
+    
+    echo ""
+    echo "============================================"
+    echo "OPEN POSITIONS"
+    echo "============================================"
+    
+    if command -v jq &>/dev/null; then
+        echo "$positions" | jq -r '.[] | "\(.symbol): \(.quantity) shares @ $\(.entry_price)"'
+    else
+        echo "$positions"
+    fi
+    
+    echo "============================================"
+    return 0
+}
+
+# Place a buy order with confirmation
+place_buy_order() {
+    local symbol="$1"
+    local qty="$2"
+    
+    if [[ -z "$symbol" ]] || [[ -z "$qty" ]]; then
+        log_error "Usage: place_buy_order SYMBOL QTY"
+        return 1
+    fi
+    
+    if [[ "$ALPACA_INITIALIZED" != "true" ]]; then
+        log_error "Alpaca not initialized"
+        return 1
+    fi
+    
+    # Get current price for cost estimate
+    local current_price=$(fetch_current_price "$symbol")
+    if [[ "$current_price" == "0" ]]; then
+        log_error "Failed to get current price for $symbol"
+        return 1
+    fi
+    
+    local estimated_cost=$(echo "$qty * $current_price" | bc)
+    
+    echo ""
+    echo "============================================"
+    echo "BUY ORDER CONFIRMATION"
+    echo "============================================"
+    echo "Symbol:          $symbol"
+    echo "Quantity:        $qty shares"
+    echo "Current Price:   \$$current_price"
+    echo "Estimated Cost:  \$$estimated_cost"
+    echo "============================================"
+    echo ""
+    echo "Proceed with order? (yes/no)"
+    read -r confirmation
+    
+    if [[ "$confirmation" != "yes" ]]; then
+        log_info "Buy order cancelled"
+        echo "Order cancelled"
+        return 0
+    fi
+    
+    log_info "Placing buy order: $qty shares of $symbol"
+    local order=$(alpaca_place_order "$symbol" "$qty" "buy")
+    if [[ -n "$order" ]]; then
+        log_info "Buy order placed successfully"
+        echo ""
+        echo "✓ BUY ORDER PLACED"
+        echo "$order"
+        return 0
+    else
+        log_error "Failed to place buy order"
+        return 1
+    fi
+}
+
+# Place a sell order with confirmation
+place_sell_order() {
+    local symbol="$1"
+    local qty="$2"
+    
+    if [[ -z "$symbol" ]] || [[ -z "$qty" ]]; then
+        log_error "Usage: place_sell_order SYMBOL QTY"
+        return 1
+    fi
+    
+    if [[ "$ALPACA_INITIALIZED" != "true" ]]; then
+        log_error "Alpaca not initialized"
+        return 1
+    fi
+    
+    # Get current price for cost estimate
+    local current_price=$(fetch_current_price "$symbol")
+    if [[ "$current_price" == "0" ]]; then
+        log_error "Failed to get current price for $symbol"
+        return 1
+    fi
+    
+    local estimated_proceeds=$(echo "$qty * $current_price" | bc)
+    
+    echo ""
+    echo "============================================"
+    echo "SELL ORDER CONFIRMATION"
+    echo "============================================"
+    echo "Symbol:             $symbol"
+    echo "Quantity:           $qty shares"
+    echo "Current Price:      \$$current_price"
+    echo "Estimated Proceeds: \$$estimated_proceeds"
+    echo "============================================"
+    echo ""
+    echo "Proceed with order? (yes/no)"
+    read -r confirmation
+    
+    if [[ "$confirmation" != "yes" ]]; then
+        log_info "Sell order cancelled"
+        echo "Order cancelled"
+        return 0
+    fi
+    
+    log_info "Placing sell order: $qty shares of $symbol"
+    local order=$(alpaca_place_order "$symbol" "$qty" "sell")
+    if [[ -n "$order" ]]; then
+        log_info "Sell order placed successfully"
+        echo ""
+        echo "✓ SELL ORDER PLACED"
+        echo "$order"
+        return 0
+    else
+        log_error "Failed to place sell order"
+        return 1
     fi
 }
 
@@ -368,18 +576,36 @@ Options:
     --top-10                         Analyze top 10 stocks by market cap
     --output-dir DIR                 Output directory for reports (default: output/reports)
     --debug                          Enable verbose debug logging
+    
+    Alpaca Integration:
+    --alpaca                         Enable Alpaca paper trading mode
+    --check-account                  Display account balance and details
+    --view-positions                 List all open positions
+    --place-buy SYMBOL QTY           Place a buy order (with confirmation)
+    --place-sell SYMBOL QTY          Place a sell order (with confirmation)
+    --alpaca-status                  Show Alpaca connection status
+    
     --help                           Show this help message
 
 Examples:
+    # Basic analysis
     ./StockSwingTrader_Agent.sh --symbols AAPL,MSFT,GOOGL
     ./StockSwingTrader_Agent.sh --top-10 --debug
     ./StockSwingTrader_Agent.sh --watchlist config/watchlist.txt
+
+    # Alpaca trading integration
+    ./StockSwingTrader_Agent.sh --alpaca --check-account
+    ./StockSwingTrader_Agent.sh --alpaca --symbols AAPL,MSFT --view-positions
+    ./StockSwingTrader_Agent.sh --alpaca --place-buy AAPL 10
+    ./StockSwingTrader_Agent.sh --alpaca --place-sell MSFT 5
+    ./StockSwingTrader_Agent.sh --alpaca --alpaca-status
 
 Features:
     - 8+ technical indicators (RSI, MACD, BB, Stochastic, Williams %R, OBV, ATR)
     - Multi-source sentiment analysis (Twitter, Reddit, StockTwits, News)
     - Confidence scoring (0-100) with buy/sell/hold signals
-    - Professional HTML reports with risk metrics
+    - Professional HTML reports with risk metrics and account information
+    - Alpaca paper trading integration (account management, order placement)
     - Rate limiting and retry logic
     - Learning/demo mode (analysis-only)
 
@@ -387,6 +613,13 @@ Requirements:
     - bash 4.0+
     - curl, bc
     - jq (optional, for advanced JSON parsing)
+    - Alpaca API credentials (for trading features)
+
+Environment Variables:
+    APCA_API_KEY_ID          Alpaca API Key ID
+    APCA_API_SECRET_KEY      Alpaca API Secret Key
+    APCA_API_OAUTH_TOKEN     Alpaca OAuth Token (alternative to key/secret)
+    ALPACA_DEBUG             Enable debug logging for Alpaca API calls
 
 EOF
 }
@@ -396,6 +629,16 @@ main() {
     local watchlist_file=""
     local use_top_10=false
     local output_dir="output/reports"
+    
+    # Alpaca flags
+    local alpaca_mode=false
+    local alpaca_check_account=false
+    local alpaca_view_positions=false
+    local alpaca_place_buy_symbol=""
+    local alpaca_place_buy_qty=""
+    local alpaca_place_sell_symbol=""
+    local alpaca_place_sell_qty=""
+    local alpaca_show_status=false
     
     # Parse command-line arguments
     while [[ $# -gt 0 ]]; do
@@ -420,6 +663,32 @@ main() {
                 DEBUG_MODE=true
                 shift
                 ;;
+            --alpaca)
+                alpaca_mode=true
+                shift
+                ;;
+            --check-account)
+                alpaca_check_account=true
+                shift
+                ;;
+            --view-positions)
+                alpaca_view_positions=true
+                shift
+                ;;
+            --place-buy)
+                alpaca_place_buy_symbol="$2"
+                alpaca_place_buy_qty="$3"
+                shift 3
+                ;;
+            --place-sell)
+                alpaca_place_sell_symbol="$2"
+                alpaca_place_sell_qty="$3"
+                shift 3
+                ;;
+            --alpaca-status)
+                alpaca_show_status=true
+                shift
+                ;;
             --help)
                 usage
                 exit 0
@@ -436,6 +705,49 @@ main() {
     mkdir -p logs
     log_info "StockSwingTrader Agent started"
     log_info "Debug mode: $DEBUG_MODE"
+    
+    # Handle Alpaca-only commands
+    if [[ "$alpaca_mode" == "true" ]]; then
+        log_info "Alpaca mode enabled"
+        
+        # Initialize Alpaca connection
+        if ! alpaca_connect; then
+            log_error "Failed to connect to Alpaca. Check your credentials."
+            exit 1
+        fi
+        
+        # Handle individual Alpaca commands
+        if [[ "$alpaca_show_status" == "true" ]]; then
+            show_alpaca_account
+            return $?
+        fi
+        
+        if [[ "$alpaca_check_account" == "true" ]]; then
+            show_alpaca_account
+            return $?
+        fi
+        
+        if [[ "$alpaca_view_positions" == "true" ]]; then
+            show_alpaca_positions
+            return $?
+        fi
+        
+        if [[ -n "$alpaca_place_buy_symbol" ]] && [[ -n "$alpaca_place_buy_qty" ]]; then
+            place_buy_order "$alpaca_place_buy_symbol" "$alpaca_place_buy_qty"
+            return $?
+        fi
+        
+        if [[ -n "$alpaca_place_sell_symbol" ]] && [[ -n "$alpaca_place_sell_qty" ]]; then
+            place_sell_order "$alpaca_place_sell_symbol" "$alpaca_place_sell_qty"
+            return $?
+        fi
+        
+        # If no specific command, show account and positions
+        show_alpaca_account
+        echo ""
+        show_alpaca_positions
+        return $?
+    fi
     
     # Determine stocks to analyze
     local stocks_to_analyze=()
