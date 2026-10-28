@@ -1,0 +1,19 @@
+# Runtime
+logs/
+cache/data/
+output/reports/*.html
+
+# Config with secrets
+config.sh
+!config.template.sh
+
+# System
+.DS_Store
+*.swp
+*.swo
+*~
+.vscode/
+
+# Test artifacts
+debug_output.txt
+troubleshoot_report.txt
