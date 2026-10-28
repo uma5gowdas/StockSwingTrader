@@ -1,0 +1,119 @@
+#!/bin/bash
+# ============================================================================
+# StockSwingTrader Robinhood CLI
+# ============================================================================
+# Standalone command-line interface for Robinhood MCP trading
+# Works on any system (no Kiro required)
+# ============================================================================
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/robinhood_mcp_direct.sh"
+
+# ============================================================================
+# CLI Functions
+# ============================================================================
+
+show_help() {
+    cat << 'HELP'
+StockSwingTrader Robinhood CLI
+================================
+
+USAGE:
+    ./robinhood-cli [COMMAND] [OPTIONS]
+
+COMMANDS:
+
+    auth                        Authenticate with Robinhood (one-time)
+    account                     Show account balance and details
+    positions                   List all open positions
+    buy SYMBOL QTY              Buy shares (market order)
+    buy SYMBOL QTY PRICE        Buy shares (limit order)
+    sell SYMBOL QTY             Sell shares (market order)
+    sell SYMBOL QTY PRICE       Sell shares (limit order)
+    quote SYMBOL                Get current price for symbol
+    help                        Show this help message
+
+EXAMPLES:
+
+    # First time: authenticate
+    ./robinhood-cli auth
+
+    # Check account
+    ./robinhood-cli account
+
+    # View positions
+    ./robinhood-cli positions
+
+    # Buy 10 AAPL at market
+    ./robinhood-cli buy AAPL 10
+
+    # Buy 5 MSFT at $350 (limit order)
+    ./robinhood-cli buy MSFT 5 350
+
+    # Sell 3 GOOGL
+    ./robinhood-cli sell GOOGL 3
+
+    # Get TSLA price
+    ./robinhood-cli quote TSLA
+
+ENVIRONMENT VARIABLES:
+
+    ROBINHOOD_DEBUG             Enable debug logging (true/false)
+    ROBINHOOD_MCP_CLIENT_ID     OAuth Client ID (default: robinhood-trading-api)
+    ROBINHOOD_MCP_REDIRECT_URI  OAuth Redirect URI (default: http://localhost:8888/callback)
+
+HELP
+}
+
+# ============================================================================
+# Main CLI Router
+# ============================================================================
+
+case "${1:-help}" in
+    auth)
+        echo "Authenticating with Robinhood..."
+        robinhood_mcp_oauth_init
+        ;;
+    account)
+        echo "Fetching account information..."
+        robinhood_mcp_check_account
+        ;;
+    positions)
+        echo "Fetching positions..."
+        robinhood_mcp_get_positions
+        ;;
+    buy)
+        if [[ -z "$2" || -z "$3" ]]; then
+            echo "ERROR: Usage: $0 buy SYMBOL QTY [PRICE]"
+            exit 1
+        fi
+        echo "Placing buy order: $3 $2 $([ -n "$4" ] && echo "at \$$4" || echo "at market")"
+        robinhood_mcp_place_order "$2" "$3" "buy" "$([ -n "$4" ] && echo "limit" || echo "market")" "$4"
+        ;;
+    sell)
+        if [[ -z "$2" || -z "$3" ]]; then
+            echo "ERROR: Usage: $0 sell SYMBOL QTY [PRICE]"
+            exit 1
+        fi
+        echo "Placing sell order: $3 $2 $([ -n "$4" ] && echo "at \$$4" || echo "at market")"
+        robinhood_mcp_place_order "$2" "$3" "sell" "$([ -n "$4" ] && echo "limit" || echo "market")" "$4"
+        ;;
+    quote)
+        if [[ -z "$2" ]]; then
+            echo "ERROR: Usage: $0 quote SYMBOL"
+            exit 1
+        fi
+        echo "Fetching quote for $2..."
+        robinhood_mcp_get_quote "$2"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Run '$0 help' for usage information"
+        exit 1
+        ;;
+esac

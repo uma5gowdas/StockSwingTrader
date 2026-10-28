@@ -149,6 +149,33 @@ Get credentials from [Alpaca Dashboard](https://app.alpaca.markets):
 
 ## Usage
 
+## Dual Broker Support (v6.2)
+
+StockSwingTrader now supports both Alpaca and Robinhood brokers with identical strategies and risk management.
+
+### Alpaca (Default)
+```bash
+./StockSwingTrader_Agent.sh --strategy mean-reversion
+./StockSwingTrader_Agent.sh --strategy trend-follow --broker alpaca
+```
+
+### Robinhood
+```bash
+./StockSwingTrader_Agent.sh --strategy mean-reversion --broker robinhood
+./StockSwingTrader_Agent.sh --strategy trend-follow --broker robinhood
+```
+
+### Feature Parity
+- Both brokers support identical strategies
+- Both brokers use same risk management rules
+- Both brokers log to unified trade journal
+- Token management: Robinhood auto-refreshes, Alpaca uses PAT
+
+### Setup
+- **Alpaca**: Set ALPACA_API_KEY and ALPACA_SECRET_KEY in config.sh
+- **Robinhood**: See ROBINHOOD_SETUP.md for OAuth walkthrough
+
+
 ### Basic Analysis - Top 10 Stocks
 
 ```bash

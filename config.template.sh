@@ -175,3 +175,14 @@ export ALPACA_STRONG_SELL_THRESHOLD=20   # Confluence score to auto-sell
 export ALPACA_LOG_ALL_TRADES=true        # Log every trade attempt
 
 # Note: Source this file from StockSwingTrader_Agent.sh to load all configuration
+
+# Robinhood Broker Configuration (NEW in v6.2)
+# Update with your Robinhood developer credentials
+ROBINHOOD_CLIENT_ID="your_app_id"
+ROBINHOOD_CLIENT_SECRET="your_client_secret"
+ROBINHOOD_REDIRECT_URI="http://localhost:8000"
+
+# Token management is auto-handled via OAuth flow.
+# Tokens stored in ~/.robinhood_tokens.json (created during first setup)
+# Run: ./lib/robinhood_oauth.sh --setup to authenticate
+# Tokens auto-refresh in background before expiration

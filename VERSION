@@ -1,0 +1,9 @@
+v6.2
+Release Date: 2025-01-01
+Features:
+- Dual Broker Support: Alpaca + Robinhood
+- OAuth Token Management: Auto-refresh tokens
+- Strategy Parity: Mean Reversion + Trend Follow on both brokers
+- Risk Management: Identical position sizing and stop-loss logic
+- Trade Journal: Unified logging with broker attribution
+- Test Coverage: 122 tests (65 Alpaca + 57 Robinhood)

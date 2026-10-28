@@ -1,0 +1,142 @@
+
+Loading Alpaca Broker Module...
+✓ Module loaded successfully
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TEST SUITE: Alpaca Broker Module
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+GROUP 1: Module Initialization & Configuration
+───────────────────────────────────────────────
+Testing: Module variables are initialized ... ✓ PASSED
+Testing: Logging initialization creates directory ... ✓ PASSED
+Testing: Log file is created and writable ... ✓ PASSED
+
+GROUP 2: Symbol Validation (alpaca_validate_symbol)
+────────────────────────────────────────────────────
+Testing: Valid symbol: AAPL ... ✓ PASSED
+Testing: Valid symbol: MSFT ... ✓ PASSED
+Testing: Valid symbol: GOOG ... ✓ PASSED
+Testing: Valid symbol: BRK (three letters) ... ✓ PASSED
+Testing: Valid symbol: A (single letter ticker) ... ✓ PASSED
+Testing: Invalid symbol: TOOLONG (too long) ... ✓ PASSED
+Testing: Invalid symbol: 123 (numbers only) ... ✓ PASSED
+Testing: Invalid symbol: !@# (special chars) ... ✓ PASSED
+Testing: Invalid symbol: Empty string ... ✓ PASSED
+Testing: Invalid symbol: abc (lowercase) ... ✓ PASSED
+
+GROUP 3: Quantity Validation (alpaca_validate_quantity)
+─────────────────────────────────────────────────────────
+Testing: Valid quantity: 100 ... ✓ PASSED
+Testing: Valid quantity: 50.5 ... ✓ PASSED
+Testing: Valid quantity: 0.01 ... ✓ PASSED
+Testing: Invalid quantity: 0 (zero) ... ✓ PASSED
+Testing: Invalid quantity: -50 (negative) ... ✓ PASSED
+Testing: Invalid quantity: abc (non-numeric) ... ✓ PASSED
+Testing: Invalid quantity: Empty string ... ✓ PASSED
+
+GROUP 4: Side Validation (alpaca_validate_side)
+────────────────────────────────────────────────
+Testing: Valid side: buy ... ✓ PASSED
+Testing: Valid side: sell ... ✓ PASSED
+Testing: Invalid side: BUY (uppercase) ... ✓ PASSED
+Testing: Invalid side: hold ... ✓ PASSED
+Testing: Invalid side: Empty string ... ✓ PASSED
+
+GROUP 5: Currency Formatting (alpaca_format_currency)
+──────────────────────────────────────────────────────
+Testing: Format positive: 1000 -> contains $1000.00 ... ✓ PASSED
+Testing: Format positive: 1234.56 -> contains $1234.56 ... ✓ PASSED
+Testing: Format negative: -500 -> contains -$500.00 ... ✓ PASSED
+Testing: Format zero: 0 -> contains $0.00 ... ✓ PASSED
+Testing: Format decimal: 0.99 -> contains $0.99 ... ✓ PASSED
+
+GROUP 6: Percentage Formatting (alpaca_format_percent)
+───────────────────────────────────────────────────────
+Testing: Format positive percent: 5.25 ... ✓ PASSED
+Testing: Format negative percent: -3.50 ... ✓ PASSED
+Testing: Format zero percent: 0 ... ✓ PASSED
+
+GROUP 7: Error Handling (alpaca_handle_error)
+─────────────────────────────────────────────
+Testing: Handle 401 Unauthorized ... ✓ PASSED
+Testing: Handle 403 Forbidden ... ✓ PASSED
+Testing: Handle 400 Bad Request ... ✓ PASSED
+Testing: Handle 404 Not Found ... ✓ PASSED
+Testing: Handle 422 Unprocessable Entity ... ✓ PASSED
+Testing: Handle 429 Rate Limited ... ✓ PASSED
+Testing: Handle 500 Server Error ... ✓ PASSED
+
+GROUP 8: Logging Functions
+──────────────────────────
+Testing: Log INFO message ... ✓ PASSED
+Testing: Log ERROR message ... ✓ PASSED
+Testing: Log contains timestamp ... ✓ PASSED
+Testing: No API keys logged (credentials not exposed) ... ✓ PASSED
+
+GROUP 9: Initialization & Connection Handling
+─────────────────────────────────────────────
+Testing: Init function is callable after module loads ... ✓ PASSED
+Testing: Init with test credentials completes ... ✓ PASSED
+
+GROUP 10: JSON Response Handling
+────────────────────────────────
+Testing: Parse valid account JSON response ... ✓ PASSED
+Testing: Extract ID from account JSON ... ✓ PASSED
+Testing: Extract error message from JSON ... ✓ PASSED
+Testing: Handle malformed JSON without crashing ... ✓ PASSED
+
+GROUP 11: Integration Tests (Dry Run)
+─────────────────────────────────────
+Testing: Function alpaca_init is callable ... ✓ PASSED
+Testing: Function alpaca_get_account is callable ... ✓ PASSED
+Testing: Function alpaca_place_order is callable ... ✓ PASSED
+Testing: Function alpaca_validate_symbol is callable ... ✓ PASSED
+Testing: Script has valid bash syntax ... ✓ PASSED
+Testing: No hardcoded secrets in module ... ✓ PASSED
+
+GROUP 12: Environment Variable Handling
+───────────────────────────────────────
+Testing: Supports ALPACA_API_KEY variable ... ✓ PASSED
+Testing: Supports APCA_API_KEY_ID variable (Alpaca standard) ... ✓ PASSED
+Testing: Custom ALPACA_BASE_URL respected ... ✓ PASSED
+
+GROUP 13: Configuration & Constants
+────────────────────────────────────
+Testing: Default timeout is set ... ✓ PASSED
+Testing: Default max retries is set ... ✓ PASSED
+Testing: Backoff multiplier is configured ... ✓ PASSED
+
+GROUP 14: File System Operations
+─────────────────────────────────
+Testing: Log file is readable ... ✓ PASSED
+Testing: Log file contains valid entries ... ✓ PASSED
+Testing: Logs directory exists ... ✓ PASSED
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TEST SUMMARY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✓ Tests Passed:  65
+✗ Tests Failed:  0
+⊘ Tests Skipped: 0
+
+Pass Rate: 100% (65/65)
+
+Test Log: /Users/P3291917/Desktop/StockSwingTrader/logs/test_alpaca.log
+Alpaca Log: /Users/P3291917/Desktop/StockSwingTrader/logs/alpaca_test.log
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+VERIFICATION CHECKS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Check 1: Module loads in isolation ... ✓ PASS
+Check 2: Core functions are exported ... ✓ PASS
+Check 3: No shell syntax errors ... ✓ PASS
+Check 4: Log file is created and readable ... ✓ PASS
+Check 5: Error handling is graceful (no crashes) ... ✓ PASS (handled gracefully)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✓ ALL TESTS PASSED - Module is production-ready
+
