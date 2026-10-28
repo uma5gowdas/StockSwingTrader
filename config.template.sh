@@ -114,4 +114,64 @@ export CURL_CONNECT_TIMEOUT=10
 export DEFAULT_WATCHLIST="AAPL,MSFT,GOOGL,AMZN,TSLA,META,NFLX,CRM,ADBE,NVDA"
 export MAX_STOCKS_TO_ANALYZE=10
 
+# ============================================================================
+# Output & Status Reporting (Extended)
+# ============================================================================
+export INCLUDE_ALPACA_STATUS=true        # Show Alpaca trading status in reports
+
+# ============================================================================
+# Logging (Extended)
+# ============================================================================
+export ALPACA_LOG_FILE="logs/alpaca.log"
+
+# ============================================================================
+# Alpaca Paper Trading Configuration
+# ============================================================================
+# Get API credentials from: https://app.alpaca.markets/paper/settings/api
+# Paper Trading URL: https://paper-api.alpaca.markets/v2
+# Live Trading URL: https://api.alpaca.markets/v2 (use with caution!)
+#
+# SECURITY BEST PRACTICES:
+#   - NEVER commit API keys to version control
+#   - Store credentials in environment variables or external config file
+#   - Use paper trading account for testing and development
+#   - Rotate API keys regularly
+#   - Use API keys with minimal required permissions
+#   - For production use, consider using IAM roles or credential providers
+#
+# SETUP INSTRUCTIONS:
+#   1. Generate Alpaca API key from https://app.alpaca.markets/paper/settings/api
+#   2. Set environment variables in your shell profile or .env file:
+#      export ALPACA_API_KEY="your_key_here"
+#      export ALPACA_SECRET_KEY="your_secret_here"
+#   3. OR create config/api_keys.sh (NOT tracked in git):
+#      source config/api_keys.sh before running start_paper.sh
+#   4. Example config/api_keys.sh:
+#      #!/bin/bash
+#      export ALPACA_API_KEY="PK1234567890ABCDEF"
+#      export ALPACA_SECRET_KEY="your_secret_key_here"
+#      chmod 600 config/api_keys.sh  # Restrict permissions
+#   5. Add config/api_keys.sh to .gitignore (already protected)
+#
+# IMPORTANT: This template file contains NO real credentials. It's safe to commit.
+# Keep config/api_keys.sh private and out of version control.
+
+export ALPACA_ENABLED="${ALPACA_ENABLED:-false}"
+export ALPACA_API_KEY="${ALPACA_API_KEY:-}"
+export ALPACA_SECRET_KEY="${ALPACA_SECRET_KEY:-}"
+export ALPACA_BASE_URL="${ALPACA_BASE_URL:-https://paper-api.alpaca.markets/v2}"
+export ALPACA_MODE="paper"               # paper or live (paper recommended for testing)
+export ALPACA_TIMEOUT_SECONDS=15
+export ALPACA_MAX_RETRIES=3
+
+# ============================================================================
+# Alpaca Trading Rules & Parameters
+# ============================================================================
+export ALPACA_MIN_POSITION_SIZE=100      # Minimum shares to hold
+export ALPACA_MAX_POSITION_SIZE=1000     # Maximum shares per trade
+export ALPACA_AUTO_TRADE=false           # Auto-execute on strong signals?
+export ALPACA_STRONG_BUY_THRESHOLD=80    # Confluence score to auto-buy
+export ALPACA_STRONG_SELL_THRESHOLD=20   # Confluence score to auto-sell
+export ALPACA_LOG_ALL_TRADES=true        # Log every trade attempt
+
 # Note: Source this file from StockSwingTrader_Agent.sh to load all configuration
