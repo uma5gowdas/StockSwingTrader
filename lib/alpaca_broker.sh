@@ -15,10 +15,10 @@ set -o pipefail
 # ============================================================================
 
 # API Configuration
-ALPACA_API_BASE_URL="https://paper-api.alpaca.markets/v2"
-ALPACA_API_KEY="${APCA_API_KEY_ID:-}"
-ALPACA_SECRET_KEY="${APCA_API_SECRET_KEY:-}"
-ALPACA_OAUTH_TOKEN="${APCA_API_OAUTH_TOKEN:-}"
+ALPACA_API_BASE_URL="${ALPACA_BASE_URL:-https://paper-api.alpaca.markets}/v2"
+ALPACA_API_KEY="${ALPACA_API_KEY:-${APCA_API_KEY_ID:-}}"
+ALPACA_SECRET_KEY="${ALPACA_SECRET_KEY:-${APCA_API_SECRET_KEY:-}}"
+ALPACA_OAUTH_TOKEN="${ALPACA_OAUTH_TOKEN:-${APCA_API_OAUTH_TOKEN:-}}"
 
 # Logging & Debug
 ALPACA_LOG_FILE="${ALPACA_LOG_FILE:-logs/alpaca.log}"
@@ -226,17 +226,17 @@ alpaca_format_percent() {
 alpaca_init() {
     alpaca_init_logging
     
-    # Load credentials from environment
-    ALPACA_API_KEY="${APCA_API_KEY_ID:-}"
-    ALPACA_SECRET_KEY="${APCA_API_SECRET_KEY:-}"
-    ALPACA_OAUTH_TOKEN="${APCA_API_OAUTH_TOKEN:-}"
+    # Load credentials from environment (check both naming conventions)
+    ALPACA_API_KEY="${ALPACA_API_KEY:-${APCA_API_KEY_ID:-}}"
+    ALPACA_SECRET_KEY="${ALPACA_SECRET_KEY:-${APCA_API_SECRET_KEY:-}}"
+    ALPACA_OAUTH_TOKEN="${ALPACA_OAUTH_TOKEN:-${APCA_API_OAUTH_TOKEN:-}}"
     
     # Validate we have either key/secret or oauth token
     if [[ -z "$ALPACA_API_KEY" ]] || [[ -z "$ALPACA_SECRET_KEY" ]]; then
         if [[ -z "$ALPACA_OAUTH_TOKEN" ]]; then
             alpaca_log "ERROR" "Alpaca credentials not found in environment variables"
             echo "ERROR: Missing Alpaca API credentials"
-            echo "Set APCA_API_KEY_ID and APCA_API_SECRET_KEY (or APCA_API_OAUTH_TOKEN) environment variables"
+            echo "Set ALPACA_API_KEY and ALPACA_SECRET_KEY (or ALPACA_OAUTH_TOKEN) environment variables"
             return 1
         fi
     fi

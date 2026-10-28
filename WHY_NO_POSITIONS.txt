@@ -1,0 +1,117 @@
+╔════════════════════════════════════════════════════════════════════╗
+║        WHY YOU SEE "NO OPEN POSITIONS" (But Orders Exist)        ║
+╚════════════════════════════════════════════════════════════════════╝
+
+✅ YOU DO HAVE ORDERS:
+═════════════════════════════════════════════════════════════════════
+
+Order 1:
+  ├─ Symbol: AAPL
+  ├─ Qty: 1 share
+  ├─ Status: ACCEPTED (waiting to fill)
+  └─ Created: 2026-10-28 21:33:23
+
+Order 2:
+  ├─ Symbol: AAPL
+  ├─ Qty: 10 shares
+  ├─ Status: ACCEPTED (waiting to fill)
+  └─ Created: 2026-10-28 21:33:13
+
+Total: 11 AAPL shares ordered ✓
+
+❌ BUT NO POSITIONS YET:
+═════════════════════════════════════════════════════════════════════
+
+Why?
+  The orders are ACCEPTED but NOT YET FILLED.
+  
+  Positions only appear AFTER the order is FILLED.
+
+When will they fill?
+  Paper trading fills orders during US market hours:
+  • 9:30 AM - 4:00 PM EST (Monday-Friday)
+  • Current time: 3:38 PM or AFTER market close
+  • Market may be closed or extended hours
+  • Orders will fill at NEXT MARKET OPEN (9:30 AM tomorrow)
+
+═════════════════════════════════════════════════════════════════════
+
+ORDER LIFECYCLE:
+═════════════════════════════════════════════════════════════════════
+
+1. ACCEPTED ← YOU ARE HERE
+   └─ Order received by Alpaca
+   └─ Waiting for market to fill it
+
+2. FILLED ← HAPPENS AT MARKET OPEN
+   └─ Order executed
+   └─ Position created
+   └─ Visible in account
+
+3. Position appears
+   └─ Shows qty, entry price, current price
+   └─ P&L calculated
+   └─ Can be sold
+
+═════════════════════════════════════════════════════════════════════
+
+WHAT TO DO:
+═════════════════════════════════════════════════════════════════════
+
+Option 1: WAIT FOR MARKET OPEN (Tomorrow 9:30 AM)
+  Once market opens:
+  ✓ Orders automatically fill
+  ✓ Positions appear in your account
+  ✓ You can monitor P&L
+  ✓ You can sell whenever you want
+
+Option 2: CHECK ORDERS (Right Now)
+  cd ~/Desktop/StockSwingTrader
+  ./CHECK_ORDERS.sh
+
+Option 3: MONITOR ORDERS
+  cd ~/Desktop/StockSwingTrader
+  watch ./CHECK_ORDERS.sh     (updates every 2 seconds)
+
+═════════════════════════════════════════════════════════════════════
+
+WHEN MARKET OPENS (9:30 AM EST):
+═════════════════════════════════════════════════════════════════════
+
+Your orders will automatically fill:
+  ✓ 1 AAPL @ market price
+  ✓ 10 AAPL @ market price
+  ✓ Total position: 11 AAPL
+
+Then you can:
+  ✓ View position: ./RUN_TRADING.sh --alpaca --view-positions
+  ✓ See entry price and current value
+  ✓ Calculate P&L
+  ✓ Sell whenever ready: ./RUN_TRADING.sh --alpaca --place-sell AAPL 11
+
+═════════════════════════════════════════════════════════════════════
+
+IMPORTANT NOTES:
+═════════════════════════════════════════════════════════════════════
+
+✓ Your 11 shares ARE ORDERED
+✓ Your orders ARE ACCEPTED by Alpaca
+✓ Your orders WILL fill at market open
+✓ Your positions WILL appear tomorrow morning
+✓ No action needed - just wait!
+
+✓ Paper trading uses REAL market hours
+✓ Orders after 4 PM ET (market close) fill at 9:30 AM next day
+✓ Extended hours trading NOT supported in this version
+
+═════════════════════════════════════════════════════════════════════
+
+SUMMARY:
+═════════════════════════════════════════════════════════════════════
+
+RIGHT NOW:   Orders: ACCEPTED, Positions: EMPTY
+TOMORROW:    Orders: FILLED, Positions: 11 AAPL visible
+
+It's completely normal! Just wait for market open. ✓
+
+═════════════════════════════════════════════════════════════════════

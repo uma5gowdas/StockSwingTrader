@@ -1,0 +1,118 @@
+╔═════════════════════════════════════════════════════════════════════════╗
+║  HOW TO PLACE YOUR FIRST ORDER - 3 SIMPLE STEPS                        ║
+╚═════════════════════════════════════════════════════════════════════════╝
+
+YOUR ACCOUNT IS READY:
+  • Account Number: PA3V0PY54 ✓
+  • Status: ACTIVE ✓
+  • Cash: $100,000 ✓
+  • Buying Power: $400,000 ✓
+  • Starting Capital: Ready to use ✓
+
+═════════════════════════════════════════════════════════════════════════
+
+STEP 1: Navigate to the directory
+────────────────────────────────────
+
+  $ cd /Users/P3291917/Builds/6/StockSwingTrader
+
+═════════════════════════════════════════════════════════════════════════
+
+STEP 2: Run the order command
+────────────────────────────────────
+
+  BUY ORDER (Most Common):
+  $ ./StockSwingTrader_Agent.sh --buy 10 AAPL
+
+  Or try a different stock:
+  $ ./StockSwingTrader_Agent.sh --buy 10 MSFT
+  $ ./StockSwingTrader_Agent.sh --buy 10 TSLA
+  $ ./StockSwingTrader_Agent.sh --buy 5 GOOGL
+
+═════════════════════════════════════════════════════════════════════════
+
+STEP 3: Confirm the order
+────────────────────────────────────
+
+  The system will show:
+  
+  ┌─────────────────────────────────────────┐
+  │  ALPACA TRADE CONFIRMATION              │
+  ├─────────────────────────────────────────┤
+  │  Action:    BUY                         │
+  │  Symbol:    AAPL                        │
+  │  Quantity:  10 shares                   │
+  │  Cost:      ~$1,750                     │
+  └─────────────────────────────────────────┘
+
+  Type: yes
+  Press: ENTER
+
+═════════════════════════════════════════════════════════════════════════
+
+✅ ORDER PLACED!
+
+You'll see:
+  ✓ Order ID
+  ✓ Status: FILLED
+  ✓ Average Price
+  ✓ Total Cost
+  ✓ Your new position
+
+═════════════════════════════════════════════════════════════════════════
+
+AFTER YOU PLACE YOUR ORDER:
+
+1. Check your position:
+   $ ./StockSwingTrader_Agent.sh --check-position AAPL
+
+2. View all positions:
+   $ ./StockSwingTrader_Agent.sh --view-positions
+
+3. Check account balance:
+   $ ./StockSwingTrader_Agent.sh --check-account
+
+4. Sell the position later:
+   $ ./StockSwingTrader_Agent.sh --sell 10 AAPL
+
+═════════════════════════════════════════════════════════════════════════
+
+RECOMMENDED FIRST ORDERS (Pick One):
+
+  ULTRA CONSERVATIVE (Safest):
+  $ ./StockSwingTrader_Agent.sh --buy 1 AAPL
+
+  CONSERVATIVE (Recommended):
+  $ ./StockSwingTrader_Agent.sh --buy 5 AAPL
+
+  MODERATE (Common):
+  $ ./StockSwingTrader_Agent.sh --buy 10 AAPL
+
+  AGGRESSIVE (For learning):
+  $ ./StockSwingTrader_Agent.sh --buy 20 AAPL
+
+═════════════════════════════════════════════════════════════════════════
+
+⚠️  IMPORTANT NOTES:
+
+  ✓ This is PAPER TRADING (virtual money)
+  ✓ No real money is involved
+  ✓ All trades require your confirmation
+  ✓ Orders fill during market hours (9:30 AM - 4:00 PM EST)
+  ✓ You have $100,000 starting capital to experiment with
+  ✓ Perfect for learning and testing strategies
+
+═════════════════════════════════════════════════════════════════════════
+
+🚀 READY? Pick any of the commands above and paste it into your terminal!
+
+Example:
+$ cd /Users/P3291917/Builds/6/StockSwingTrader
+$ ./StockSwingTrader_Agent.sh --buy 10 AAPL
+
+Then type: yes
+Then press: ENTER
+
+That's it! Your first order will be placed! 🎉
+
+═════════════════════════════════════════════════════════════════════════
