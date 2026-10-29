@@ -1,19 +1,45 @@
-# Runtime
-logs/
-cache/data/
-output/reports/*.html
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
 
-# Config with secrets
-config.sh
-!config.template.sh
+# Node modules
+node_modules/
+npm-debug.log
+yarn-error.log
 
-# System
-.DS_Store
+# ML Models
+*.pkl
+*.onnx
+*.h5
+*.joblib
+
+# IDE
+.vscode/
+.idea/
 *.swp
 *.swo
 *~
-.vscode/
 
-# Test artifacts
-debug_output.txt
-troubleshoot_report.txt
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Cache
+cache/
+.cache/
+
+# Build
+dist/
+build/
+*.egg-info/
