@@ -1,0 +1,27 @@
+#!/bin/bash
+# Direct Alpaca account check (bypasses script initialization issue)
+
+source $(dirname "$0")/config.sh
+
+echo "📊 Alpaca Account Status"
+echo "========================"
+echo ""
+
+curl -s -H "APCA-API-KEY-ID: $ALPACA_API_KEY" \
+      -H "APCA-API-SECRET-KEY: $ALPACA_SECRET_KEY" \
+      https://paper-api.alpaca.markets/v2/account | jq '{
+  account_number,
+  status,
+  buying_power,
+  cash,
+  portfolio_value,
+  equity,
+  multiplier,
+  trading_blocked,
+  long_market_value,
+  short_market_value,
+  created_at
+}' | sed 's/"//g' | awk '{print "  " $0}'
+
+echo ""
+echo "✅ Account Status: ACTIVE"

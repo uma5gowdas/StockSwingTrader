@@ -386,7 +386,7 @@ alpaca_get_account() {
             buying_power: (.buying_power | tonumber),
             portfolio_value: (.portfolio_value | tonumber),
             cash: (.cash | tonumber),
-            day_trade_buying_power: (.daytrading_buying_power | tonumber),
+            day_trade_buying_power: (.intraday_adjustments | tonumber // 0),
             status: .status,
             currency: .currency
         }'

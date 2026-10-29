@@ -135,14 +135,19 @@ load_broker_module() {
 
 # Initialize broker connection
 broker_connect() {
-    local init_func="${BROKER_PREFIX}init"
-    
-    if ! command -v "$init_func" &>/dev/null; then
-        log_error "Broker initialization function not found: $init_func"
-        return 1
+    # Initialize the broker INITIALIZED flag to false
+    if [[ "$BROKER_CHOICE" == "alpaca" ]]; then
+        ALPACA_INITIALIZED=false
+    elif [[ "$BROKER_CHOICE" == "robinhood" ]]; then
+        ROBINHOOD_INITIALIZED=false
     fi
     
+    local init_func="${BROKER_PREFIX}init"
+    
     log_info "Initializing $BROKER_CHOICE broker..."
+    
+    # Call the init function directly without checking with command -v
+    # This ensures it works with functions sourced from modules
     if $init_func; then
         log_info "$BROKER_CHOICE connection successful"
         return 0
@@ -154,12 +159,17 @@ broker_connect() {
 
 # Display account status (broker-agnostic)
 show_broker_account() {
-    local init_var_name="${BROKER_PREFIX}INITIALIZED"
-    local init_var="${!init_var_name}"
-    
-    if [[ "$init_var" != "true" ]]; then
-        log_error "Broker not initialized"
-        return 1
+    # Check the appropriate INITIALIZED flag based on broker
+    if [[ "$BROKER_CHOICE" == "alpaca" ]]; then
+        if [[ "$ALPACA_INITIALIZED" != "true" ]]; then
+            log_error "Broker not initialized"
+            return 1
+        fi
+    elif [[ "$BROKER_CHOICE" == "robinhood" ]]; then
+        if [[ "$ROBINHOOD_INITIALIZED" != "true" ]]; then
+            log_error "Broker not initialized"
+            return 1
+        fi
     fi
     
     log_info "Fetching $BROKER_CHOICE account information..."
@@ -174,7 +184,7 @@ show_broker_account() {
     
     echo ""
     echo "============================================"
-    echo "${BROKER_CHOICE^^} ACCOUNT STATUS"
+    echo "$(echo "$BROKER_CHOICE" | tr '[:lower:]' '[:upper:]') ACCOUNT STATUS"
     echo "============================================"
     
     if command -v jq &>/dev/null; then
@@ -193,12 +203,17 @@ show_broker_account() {
 
 # Display all open positions (broker-agnostic)
 show_broker_positions() {
-    local init_var_name="${BROKER_PREFIX}INITIALIZED"
-    local init_var="${!init_var_name}"
-    
-    if [[ "$init_var" != "true" ]]; then
-        log_error "Broker not initialized"
-        return 1
+    # Check the appropriate INITIALIZED flag based on broker
+    if [[ "$BROKER_CHOICE" == "alpaca" ]]; then
+        if [[ "$ALPACA_INITIALIZED" != "true" ]]; then
+            log_error "Broker not initialized"
+            return 1
+        fi
+    elif [[ "$BROKER_CHOICE" == "robinhood" ]]; then
+        if [[ "$ROBINHOOD_INITIALIZED" != "true" ]]; then
+            log_error "Broker not initialized"
+            return 1
+        fi
     fi
     
     log_info "Fetching open positions from $BROKER_CHOICE..."
@@ -213,7 +228,7 @@ show_broker_positions() {
     
     echo ""
     echo "============================================"
-    echo "OPEN POSITIONS (${BROKER_CHOICE^^})"
+    echo "OPEN POSITIONS ($(echo "$BROKER_CHOICE" | tr '[:lower:]' '[:upper:]'))"
     echo "============================================"
     
     if command -v jq &>/dev/null; then
@@ -236,12 +251,17 @@ place_buy_order() {
         return 1
     fi
     
-    local init_var_name="${BROKER_PREFIX}INITIALIZED"
-    local init_var="${!init_var_name}"
-    
-    if [[ "$init_var" != "true" ]]; then
-        log_error "Broker not initialized"
-        return 1
+    # Check the appropriate INITIALIZED flag based on broker
+    if [[ "$BROKER_CHOICE" == "alpaca" ]]; then
+        if [[ "$ALPACA_INITIALIZED" != "true" ]]; then
+            log_error "Broker not initialized"
+            return 1
+        fi
+    elif [[ "$BROKER_CHOICE" == "robinhood" ]]; then
+        if [[ "$ROBINHOOD_INITIALIZED" != "true" ]]; then
+            log_error "Broker not initialized"
+            return 1
+        fi
     fi
     
     # Get current price for cost estimate
@@ -255,7 +275,7 @@ place_buy_order() {
     
     echo ""
     echo "============================================"
-    echo "BUY ORDER CONFIRMATION (${BROKER_CHOICE^^})"
+    echo "BUY ORDER CONFIRMATION ($(echo "$BROKER_CHOICE" | tr '[:lower:]' '[:upper:]'))"
     echo "============================================"
     echo "Symbol:          $symbol"
     echo "Quantity:        $qty shares"
@@ -280,7 +300,7 @@ place_buy_order() {
     if [[ -n "$order" ]]; then
         log_info "Buy order placed successfully"
         echo ""
-        echo "✓ BUY ORDER PLACED (${BROKER_CHOICE^^})"
+        echo "✓ BUY ORDER PLACED ($(echo "$BROKER_CHOICE" | tr '[:lower:]' '[:upper:]'))"
         echo "$order"
         return 0
     else
@@ -299,12 +319,17 @@ place_sell_order() {
         return 1
     fi
     
-    local init_var_name="${BROKER_PREFIX}INITIALIZED"
-    local init_var="${!init_var_name}"
-    
-    if [[ "$init_var" != "true" ]]; then
-        log_error "Broker not initialized"
-        return 1
+    # Check the appropriate INITIALIZED flag based on broker
+    if [[ "$BROKER_CHOICE" == "alpaca" ]]; then
+        if [[ "$ALPACA_INITIALIZED" != "true" ]]; then
+            log_error "Broker not initialized"
+            return 1
+        fi
+    elif [[ "$BROKER_CHOICE" == "robinhood" ]]; then
+        if [[ "$ROBINHOOD_INITIALIZED" != "true" ]]; then
+            log_error "Broker not initialized"
+            return 1
+        fi
     fi
     
     # Get current price for cost estimate
@@ -318,7 +343,7 @@ place_sell_order() {
     
     echo ""
     echo "============================================"
-    echo "SELL ORDER CONFIRMATION (${BROKER_CHOICE^^})"
+    echo "SELL ORDER CONFIRMATION ($(echo "$BROKER_CHOICE" | tr '[:lower:]' '[:upper:]'))"
     echo "============================================"
     echo "Symbol:             $symbol"
     echo "Quantity:           $qty shares"
@@ -343,7 +368,7 @@ place_sell_order() {
     if [[ -n "$order" ]]; then
         log_info "Sell order placed successfully"
         echo ""
-        echo "✓ SELL ORDER PLACED (${BROKER_CHOICE^^})"
+        echo "✓ SELL ORDER PLACED ($(echo "$BROKER_CHOICE" | tr '[:lower:]' '[:upper:]'))"
         echo "$order"
         return 0
     else
