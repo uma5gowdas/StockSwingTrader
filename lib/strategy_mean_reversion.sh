@@ -1,12 +1,13 @@
 #!/bin/bash
 # ============================================================================
-# StockSwingTrader v6.1: Mean Reversion Strategy
+# StockSwingTrader v6.1: Mean Reversion Strategy (Regime-Aware)
 # ============================================================================
 # Entry Criteria:
 #   - RSI < 30 (oversold)
 #   - Price within 2% of lower Bollinger Band
 #   - Volume > 20-day average
 #   - MACD > Signal line (positive momentum)
+#   - [REGIME-AWARE] Optimized for sideways regime
 #
 # Exit Criteria:
 #   - RSI > 70 (overbought), or
@@ -14,6 +15,11 @@
 #   - -3% stop-loss hit
 #
 # Position Sizing: Kelly Criterion with 2% risk per trade
+# Regime Adaptation: 70% weighting in sideways markets, reduced during trends
+#
+# Note: When market transitions to trending regime, consider switching
+# to trend_follow strategy for better risk-adjusted returns.
+# See: lib/regime_weighting.sh for dynamic strategy selection.
 # ============================================================================
 
 # Source dependencies

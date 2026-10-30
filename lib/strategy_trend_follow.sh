@@ -1,12 +1,13 @@
 #!/bin/bash
 # ============================================================================
-# StockSwingTrader v6.1: Trend Following Strategy
+# StockSwingTrader v6.1: Trend Following Strategy (Regime-Aware)
 # ============================================================================
 # Entry Criteria:
 #   - EMA(12) > EMA(26) bullish crossover
 #   - Price > SMA(50)
 #   - Price > SMA(200)
 #   - Volume > 30-day average
+#   - [REGIME-AWARE] Optimized for trending_bull/trending_bear regimes
 #
 # Exit Criteria:
 #   - EMA(12) < EMA(26) bearish crossover, or
@@ -14,6 +15,11 @@
 #   - Stop-loss at entry - (1.5 × ATR)
 #
 # Position Sizing: Kelly Criterion with 2% risk per trade
+# Regime Adaptation: 70% weighting in trending markets, reduced in sideways
+#
+# Note: When market transitions to sideways regime, consider switching
+# to mean_reversion strategy for better risk-adjusted returns.
+# See: lib/regime_weighting.sh for dynamic strategy selection.
 # ============================================================================
 
 # Source dependencies
