@@ -1,0 +1,141 @@
+{
+  "symbols": ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA"],
+  "ohlcv_data": {
+    "AAPL": {
+      "date": "2024-10-30",
+      "prices": [
+        {"time": "09:30", "open": 234.10, "high": 236.50, "low": 234.05, "close": 235.45, "volume": 2500000},
+        {"time": "10:00", "open": 235.45, "high": 237.20, "low": 235.10, "close": 236.80, "volume": 2100000},
+        {"time": "10:30", "open": 236.80, "high": 238.00, "low": 236.50, "close": 237.60, "volume": 1900000},
+        {"time": "11:00", "open": 237.60, "high": 238.50, "low": 237.10, "close": 238.20, "volume": 1700000},
+        {"time": "11:30", "open": 238.20, "high": 239.00, "low": 237.80, "close": 238.95, "volume": 2200000},
+        {"time": "12:00", "open": 238.95, "high": 239.50, "low": 238.40, "close": 239.15, "volume": 1900000},
+        {"time": "12:30", "open": 239.15, "high": 239.80, "low": 238.70, "close": 239.45, "volume": 1600000},
+        {"time": "13:00", "open": 239.45, "high": 240.20, "low": 239.10, "close": 239.85, "volume": 1800000},
+        {"time": "13:30", "open": 239.85, "high": 240.50, "low": 239.40, "close": 240.10, "volume": 2000000},
+        {"time": "14:00", "open": 240.10, "high": 240.70, "low": 239.80, "close": 240.30, "volume": 2100000}
+      ]
+    },
+    "MSFT": {
+      "date": "2024-10-30",
+      "prices": [
+        {"time": "09:30", "open": 440.20, "high": 442.80, "low": 440.10, "close": 441.50, "volume": 2200000},
+        {"time": "10:00", "open": 441.50, "high": 443.10, "low": 441.20, "close": 442.30, "volume": 2000000},
+        {"time": "10:30", "open": 442.30, "high": 443.50, "low": 442.00, "close": 443.10, "volume": 1800000},
+        {"time": "11:00", "open": 443.10, "high": 444.00, "low": 442.70, "close": 443.80, "volume": 1600000},
+        {"time": "11:30", "open": 443.80, "high": 444.50, "low": 443.40, "close": 444.20, "volume": 1900000},
+        {"time": "12:00", "open": 444.20, "high": 445.00, "low": 443.90, "close": 444.60, "volume": 1700000},
+        {"time": "12:30", "open": 444.60, "high": 445.20, "low": 444.20, "close": 444.90, "volume": 1500000},
+        {"time": "13:00", "open": 444.90, "high": 445.50, "low": 444.50, "close": 445.20, "volume": 1600000},
+        {"time": "13:30", "open": 445.20, "high": 445.80, "low": 444.90, "close": 445.50, "volume": 1800000},
+        {"time": "14:00", "open": 445.50, "high": 446.00, "low": 445.20, "close": 445.70, "volume": 2000000}
+      ]
+    }
+  },
+  "indicators": {
+    "AAPL": {
+      "rsi_14": 55.23,
+      "macd_line": 0.85,
+      "macd_signal": 0.62,
+      "macd_histogram": 0.23,
+      "bb_upper": 240.20,
+      "bb_middle": 237.15,
+      "bb_lower": 234.10,
+      "atr_14": 2.35,
+      "obv": 15200000,
+      "stochastic_k": 62.50,
+      "stochastic_d": 58.30,
+      "williams_r": -35.5,
+      "ema_20": 236.40,
+      "ema_50": 234.80,
+      "volume_sma": 2050000
+    },
+    "MSFT": {
+      "rsi_14": 58.90,
+      "macd_line": 1.20,
+      "macd_signal": 0.95,
+      "macd_histogram": 0.25,
+      "bb_upper": 445.80,
+      "bb_middle": 443.50,
+      "bb_lower": 441.20,
+      "atr_14": 2.10,
+      "obv": 14800000,
+      "stochastic_k": 65.20,
+      "stochastic_d": 61.80,
+      "williams_r": -32.1,
+      "ema_20": 442.90,
+      "ema_50": 440.50,
+      "volume_sma": 1820000
+    }
+  },
+  "expected_scoring": {
+    "AAPL": {
+      "signal": "BUY",
+      "confidence": "HIGH",
+      "score": 71,
+      "technical_score": 68,
+      "ml_score": 78,
+      "regime_weighted_score": 71,
+      "volume_trend_score": 72
+    },
+    "MSFT": {
+      "signal": "BUY",
+      "confidence": "HIGH",
+      "score": 73,
+      "technical_score": 70,
+      "ml_score": 80,
+      "regime_weighted_score": 73,
+      "volume_trend_score": 74
+    }
+  },
+  "regime_test_cases": {
+    "trending_bull": {
+      "adx": 32.5,
+      "di_plus": 28.3,
+      "di_minus": 15.2,
+      "volatility": 1.85,
+      "trend_strength": "strong",
+      "expected_mr_weight": 0.30,
+      "expected_tf_weight": 0.70
+    },
+    "sideways": {
+      "adx": 18.5,
+      "di_plus": 22.1,
+      "di_minus": 20.8,
+      "volatility": 0.95,
+      "trend_strength": "weak",
+      "expected_mr_weight": 0.70,
+      "expected_tf_weight": 0.30
+    },
+    "volatile": {
+      "adx": 25.0,
+      "di_plus": 24.5,
+      "di_minus": 23.8,
+      "volatility": 3.5,
+      "trend_strength": "normal",
+      "score_adjustment": -20,
+      "stop_loss_adjustment": 0.02
+    }
+  },
+  "kalman_test_prices": [
+    100.0, 100.5, 100.2, 100.8, 100.3, 101.2, 101.0, 101.5, 101.2, 101.8,
+    102.0, 101.7, 102.3, 102.1, 102.6, 102.4, 103.0, 102.8, 103.2, 103.5
+  ],
+  "backtest_config": {
+    "symbol": "AAPL",
+    "start_date": "2024-01-01",
+    "end_date": "2024-10-30",
+    "parameters": {
+      "rsi_oversold": 30,
+      "rsi_overbought": 70,
+      "bb_period": 20,
+      "stop_loss_pct": 0.02,
+      "profit_target_mult": 2.0
+    },
+    "expected_metrics": {
+      "min_trades": 10,
+      "min_win_rate": 0.40,
+      "max_drawdown": -0.30
+    }
+  }
+}
