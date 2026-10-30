@@ -1,16 +1,20 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+// Backend (backend/server.js) listens on PORT (default 3000) and serves all
+// routes under /api, so the proxy forwards /api unchanged.
+const BACKEND_URL = 'http://localhost:3000'
+
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 3000,
+    port: 5173,
+    strictPort: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:5000',
+        target: BACKEND_URL,
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, '')
-      }
-    }
-  }
+      },
+    },
+  },
 })
