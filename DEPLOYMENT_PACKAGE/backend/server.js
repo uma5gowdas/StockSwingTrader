@@ -221,6 +221,23 @@ app.get('/api/stats', async (req, res) => {
   }
 });
 
+// Setting names whose values are credentials and must be masked in responses.
+const SECRET_SETTING_PATTERN = /KEY|SECRET|TOKEN|PASSWORD|PASS|AUTH|CREDENTIAL/i;
+
+// Editable settings and their value validators (return an error string or null).
+const isNonNegativeNumber = (v) => /^\d+(\.\d+)?$/.test(v) && Number.isFinite(Number(v));
+const SETTING_VALIDATORS = {
+  RISK_PER_TRADE: (v) => (isNonNegativeNumber(v) ? null : 'must be a non-negative number'),
+  MAX_POSITION_SIZE: (v) => (isNonNegativeNumber(v) ? null : 'must be a non-negative number'),
+  MIN_CONFLUENCE_SCORE: (v) =>
+    isNonNegativeNumber(v) && Number(v) <= 100 ? null : 'must be a number from 0 to 100',
+  TRADING_ENABLED: (v) => (v === 'true' || v === 'false' ? null : 'must be true or false'),
+};
+
+// Whole-line match for one setting: groups = (prefix incl. "NAME="), (value), (trailing comment).
+const settingLineRegex = (name) =>
+  new RegExp(`^([ \\t]*(?:export[ \\t]+)?${name}=)("[^"\\n]*"|'[^'\\n]*'|[^\\s#]*)([ \\t]*(?:#.*)?)$`, 'm');
+
 // POST /api/settings - Update configuration
 app.post('/api/settings', async (req, res) => {
   try {
@@ -234,22 +251,39 @@ app.post('/api/settings', async (req, res) => {
       return res.status(500).json({ error: 'Config file not found' });
     }
 
-    // For safety, only allow specific settings
-    const allowedSettings = ['RISK_PER_TRADE', 'MAX_POSITION_SIZE', 'MIN_CONFLUENCE_SCORE', 'TRADING_ENABLED'];
-    
-    if (!allowedSettings.includes(setting)) {
+    // For safety, only allow specific settings, each with a strict value format.
+    // Values are written unquoted into a file the agent sources, so anything
+    // outside these patterns (quotes, $(), backticks, spaces) is rejected.
+    const validator = SETTING_VALIDATORS[setting];
+    if (!validator) {
       logRequest('WARN', 'Attempt to modify disallowed setting', { setting });
       return res.status(400).json({ error: 'Setting not allowed to be modified' });
     }
+    const valueStr = typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
+      ? String(value).trim()
+      : '';
+    const validationError = validator(valueStr);
+    if (validationError) {
+      logRequest('WARN', 'Invalid setting value', { setting, value });
+      return res.status(400).json({ error: `Invalid value for ${setting}: ${validationError}` });
+    }
 
     // Read current config
-    let configContent = fs.readFileSync(configPath, 'utf-8');
-    
-    // Update the setting (basic regex replacement)
-    const regex = new RegExp(`${setting}=.*`, 'g');
-    configContent = configContent.replace(regex, `${setting}="${value}"`);
-    
-    fs.writeFileSync(configPath, configContent);
+    const configContent = fs.readFileSync(configPath, 'utf-8');
+
+    // Match the whole line for exactly this name (optional "export" prefix),
+    // keeping any trailing comment. Names like ALPACA_TRADING_ENABLED never match TRADING_ENABLED.
+    const regex = settingLineRegex(setting);
+    if (!regex.test(configContent)) {
+      logRequest('WARN', 'Setting not defined in config', { setting });
+      return res.status(404).json({ error: `Setting ${setting} is not defined in config.sh` });
+    }
+    const updated = configContent.replace(
+      settingLineRegex(setting),
+      (_m, prefix, _val, comment) => `${prefix}${valueStr}${comment || ''}`,
+    );
+    fs.writeFileSync(configPath, updated);
+
     logRequest('INFO', 'Settings updated successfully', { setting, value });
     
     res.json({ success: true, message: `Setting ${setting} updated to ${value}` });
@@ -275,11 +309,14 @@ app.get('/api/settings', (req, res) => {
     const settings = {};
     
     // Parse shell variables
+    // Handles NAME=value and export NAME=value, with quoted values and trailing comments.
     const lines = configContent.split('\n');
     lines.forEach(line => {
-      const match = line.match(/^([A-Z_]+)=["']?([^"']*?)["']?$/);
+      const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=("[^"]*"|'[^']*'|[^\s#]*)/);
       if (match) {
-        settings[match[1]] = match[2];
+        const val = match[2].replace(/^(["'])(.*)\1$/, '$2');
+        // Never send credentials to the browser.
+        settings[match[1]] = SECRET_SETTING_PATTERN.test(match[1]) && val ? '********' : val;
       }
     });
 

@@ -66,6 +66,32 @@ export const EDITABLE_SETTINGS = [
 ] as const;
 export type EditableSetting = (typeof EDITABLE_SETTINGS)[number];
 
+const NON_NEGATIVE_NUMBER = /^\d+(\.\d+)?$/;
+
+/**
+ * Validate a setting value before it is sent. Mirrors the backend whitelist:
+ * values are written unquoted into config.sh, which the agent sources.
+ * Returns an error message, or null when the value is valid.
+ */
+export function validateSetting(key: EditableSetting, raw: string): string | null {
+  const value = raw.trim();
+  switch (key) {
+    case 'TRADING_ENABLED':
+      return value === 'true' || value === 'false' ? null : 'Must be true or false.';
+    case 'MIN_CONFLUENCE_SCORE':
+      return NON_NEGATIVE_NUMBER.test(value) && Number(value) <= 100
+        ? null
+        : 'Must be a number from 0 to 100.';
+    case 'RISK_PER_TRADE':
+    case 'MAX_POSITION_SIZE':
+      return NON_NEGATIVE_NUMBER.test(value) && Number.isFinite(Number(value))
+        ? null
+        : 'Must be a non-negative number (digits and an optional decimal point).';
+    default:
+      return 'Setting cannot be edited.';
+  }
+}
+
 /** Ticker symbols: letters, digits, dot or dash, max 10 chars. */
 const SYMBOL_PATTERN = /^[A-Z][A-Z0-9.-]{0,9}$/;
 

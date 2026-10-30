@@ -1,7 +1,14 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { usePolling } from '../hooks/usePolling';
 import { usePollingInterval } from '../hooks/usePreferences';
-import { EDITABLE_SETTINGS, errorMessage, getSettings, updateSetting, type EditableSetting } from '../utils/api';
+import {
+  EDITABLE_SETTINGS,
+  errorMessage,
+  getSettings,
+  updateSetting,
+  validateSetting,
+  type EditableSetting,
+} from '../utils/api';
 import { humanizeKey, isSecretKey } from '../utils/format';
 import { MIN_POLLING_INTERVAL_MS, setPollingInterval } from '../utils/preferences';
 import { ErrorMessage, KeyValueList, Loading, PageHeader, Section } from '../components/ui';
@@ -18,6 +25,7 @@ export default function Settings() {
   const [status, setStatus] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState<EditableSetting | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<EditableSetting, string>>>({});
 
   useEffect(() => setIntervalInput(String(intervalMs / 1000)), [intervalMs]);
 
@@ -35,20 +43,33 @@ export default function Settings() {
 
   const saveSetting = async (e: FormEvent, key: EditableSetting) => {
     e.preventDefault();
-    const value = drafts[key] ?? settings.data?.[key] ?? '';
+    const value = (drafts[key] ?? settings.data?.[key] ?? '').trim();
+    const invalid = validateSetting(key, value);
+    setFieldErrors((f) => ({ ...f, [key]: invalid ?? undefined }));
+    if (invalid) {
+      setStatus(null);
+      return;
+    }
     setSaving(key);
     setSaveError(null);
     try {
       const result = await updateSetting(key, value);
       setStatus(result.message);
+      setFieldErrors((f) => ({ ...f, [key]: undefined }));
       setDrafts((d) => ({ ...d, [key]: undefined }));
       settings.refresh();
     } catch (err) {
+      setStatus(null);
       setSaveError(errorMessage(err));
     } finally {
       setSaving(null);
     }
   };
+
+  // Only offer edit controls for settings that actually exist in config.sh;
+  // the backend refuses to add new keys.
+  const editable = EDITABLE_SETTINGS.filter((key) => settings.data != null && key in settings.data);
+  const missing = EDITABLE_SETTINGS.filter((key) => settings.data != null && !(key in settings.data));
 
   const readOnly = Object.entries(settings.data ?? {})
     .filter(([key]) => !(EDITABLE_SETTINGS as readonly string[]).includes(key))
@@ -88,22 +109,47 @@ export default function Settings() {
             <Loading />
           ) : (
             <div className="space-y-4">
-              {EDITABLE_SETTINGS.map((key) => {
+              {editable.length === 0 && (
+                <p className="text-sm text-gray-300">None of the editable settings are defined in config.sh.</p>
+              )}
+              {editable.map((key) => {
                 const id = `setting-${key}`;
+                const errorId = `${id}-error`;
                 const current = settings.data?.[key] ?? '';
                 const value = drafts[key] ?? current;
+                const fieldError = fieldErrors[key];
                 return (
                   <form key={key} onSubmit={(e) => void saveSetting(e, key)} className="flex items-end gap-2">
                     <div className="flex-1">
                       <label htmlFor={id} className="block text-sm text-gray-300">{humanizeKey(key)}</label>
                       {key === 'TRADING_ENABLED' ? (
-                        <select id={id} value={value} onChange={(e) => setDrafts((d) => ({ ...d, [key]: e.target.value }))} className={fieldClass}>
+                        <select
+                          id={id}
+                          value={value}
+                          onChange={(e) => setDrafts((d) => ({ ...d, [key]: e.target.value }))}
+                          aria-invalid={fieldError ? true : undefined}
+                          aria-describedby={fieldError ? errorId : undefined}
+                          className={fieldClass}
+                        >
                           {value !== 'true' && value !== 'false' && <option value={value}>{value || '(unset)'}</option>}
                           <option value="true">true</option>
                           <option value="false">false</option>
                         </select>
                       ) : (
-                        <input id={id} value={value} inputMode="decimal" onChange={(e) => setDrafts((d) => ({ ...d, [key]: e.target.value }))} className={fieldClass} />
+                        <input
+                          id={id}
+                          value={value}
+                          inputMode="decimal"
+                          onChange={(e) => setDrafts((d) => ({ ...d, [key]: e.target.value }))}
+                          aria-invalid={fieldError ? true : undefined}
+                          aria-describedby={fieldError ? errorId : undefined}
+                          className={fieldClass}
+                        />
+                      )}
+                      {fieldError && (
+                        <p id={errorId} role="alert" className="mt-1 text-sm text-red-300">
+                          {fieldError}
+                        </p>
                       )}
                     </div>
                     <button type="submit" className="btn-primary" disabled={saving === key || value === current} aria-label={`Save ${humanizeKey(key)}`}>
@@ -112,6 +158,11 @@ export default function Settings() {
                   </form>
                 );
               })}
+              {missing.length > 0 && (
+                <p className="text-xs text-gray-400">
+                  Not defined in config.sh (add them there to edit here): {missing.map(humanizeKey).join(', ')}.
+                </p>
+              )}
             </div>
           )}
         </Section>

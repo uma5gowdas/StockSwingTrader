@@ -25,6 +25,19 @@ export function usePolling<T>(
   const [loading, setLoading] = useState<boolean>(enabled);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [tick, setTick] = useState(0);
+
+  // When deps change (e.g. a new symbol), drop the previous result during
+  // render so stale data is never shown under the new key. Tick refreshes
+  // keep the current data on screen.
+  const depsKey = JSON.stringify(deps);
+  const [prevDepsKey, setPrevDepsKey] = useState(depsKey);
+  if (prevDepsKey !== depsKey) {
+    setPrevDepsKey(depsKey);
+    setData(null);
+    setError(null);
+    setLastUpdated(null);
+    setLoading(enabled);
+  }
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
 
