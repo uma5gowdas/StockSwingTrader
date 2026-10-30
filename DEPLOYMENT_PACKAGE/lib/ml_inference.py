@@ -28,21 +28,20 @@ Output JSON Format:
   }
 """
 
+import os
 import sys
 import json
+import zlib
 import argparse
 from pathlib import Path
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
 
-# Try importing yfinance for data fetching
-try:
-    import yfinance as yf
-except ImportError:
-    pass
+# yfinance is imported lazily in fetch_current_data() (it is slow to import
+# and not needed in offline mode or when data is supplied).
 
 # Try importing joblib
 try:
@@ -162,11 +161,24 @@ def calculate_ema(prices, period):
 
 
 def fetch_current_data(symbol, periods=50):
-    """Fetch current OHLCV data from yfinance."""
+    """Fetch current OHLCV data from yfinance.
+
+    Returns None when offline (SST_OFFLINE=1), when yfinance is missing,
+    or when no data is available.
+    """
+    if os.environ.get('SST_OFFLINE') == '1':
+        return None
+    try:
+        import yfinance as yf
+    except ImportError:
+        return None
     try:
         data = yf.download(symbol, period='3mo', progress=False)
         if data.empty:
             return None
+        # Recent yfinance returns (field, ticker) MultiIndex columns
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = data.columns.get_level_values(0)
         return data.tail(periods).reset_index()
     except Exception as e:
         logger.error(f"Error fetching data: {e}")
@@ -175,7 +187,8 @@ def fetch_current_data(symbol, periods=50):
 
 def generate_synthetic_features_for_symbol(symbol):
     """Generate synthetic features for a symbol when real data unavailable."""
-    np.random.seed(hash(symbol) % 2**32)
+    # Stable per-symbol seed (built-in hash() is randomised per process)
+    np.random.seed(zlib.crc32(symbol.encode('utf-8')))
     
     features = {}
     features['rsi_14'] = float(np.random.normal(50, 15))
@@ -305,7 +318,7 @@ def predict(symbol, period, model, historical_data=None):
             "confidence": confidence,
             "probability": round(prob_value, 4),
             "period": period,
-            "timestamp": datetime.utcnow().isoformat() + "Z"
+            "timestamp": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         }
         
         return result
@@ -320,7 +333,8 @@ def main():
     parser = argparse.ArgumentParser(description='XGBoost Stock Direction Predictor')
     parser.add_argument('--symbol', type=str, required=True, help='Stock symbol (e.g., AAPL)')
     parser.add_argument('--period', type=int, default=5, help='Forecast period in days')
-    parser.add_argument('--data-file', type=str, default=None, help='Optional CSV data file')
+    parser.add_argument('--data-file', type=str, default=None,
+                        help='Optional CSV file with Open/High/Low/Close/Volume columns')
     
     args = parser.parse_args()
     
@@ -334,9 +348,22 @@ def main():
         # Load model
         model = load(MODEL_PATH)
         
-        # Try to read input data from stdin
         historical_data = None
-        if not sys.stdin.isatty():
+        if args.data_file:
+            # Historical OHLCV from CSV (column names are case-insensitive)
+            try:
+                df = pd.read_csv(args.data_file)
+            except Exception as e:
+                print(json.dumps({"error": f"Cannot read data file {args.data_file}: {e}"}))
+                return 1
+            df.columns = [str(c).strip().capitalize() for c in df.columns]
+            missing = [c for c in ('High', 'Low', 'Close', 'Volume') if c not in df.columns]
+            if missing:
+                print(json.dumps({"error": f"Data file missing columns: {', '.join(missing)}"}))
+                return 1
+            historical_data = df
+        # Otherwise try to read input data from stdin
+        elif not sys.stdin.isatty():
             try:
                 stdin_data = sys.stdin.read()
                 if stdin_data.strip():

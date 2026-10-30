@@ -15,7 +15,9 @@ Requirements:
 """
 
 import json
+import os
 import sys
+import zlib
 import logging
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -64,6 +66,9 @@ class DataFetcher:
         Returns:
             DataFrame with OHLCV data
         """
+        if os.environ.get('SST_OFFLINE') == '1':
+            logger.info("SST_OFFLINE=1, generating synthetic data")
+            return DataFetcher._generate_synthetic_data(symbol, start_date, end_date)
         if not HAS_YFINANCE:
             logger.warning("yfinance not installed, generating synthetic data")
             return DataFetcher._generate_synthetic_data(symbol, start_date, end_date)
@@ -76,8 +81,11 @@ class DataFetcher:
                 logger.warning(f"No data fetched for {symbol}, generating synthetic")
                 return DataFetcher._generate_synthetic_data(symbol, start_date, end_date)
             
-            # Ensure required columns
-            data.columns = [col.lower() for col in data.columns]
+            # Ensure required columns. Recent yfinance returns (field, ticker)
+            # MultiIndex columns even for a single symbol.
+            if isinstance(data.columns, pd.MultiIndex):
+                data.columns = data.columns.get_level_values(0)
+            data.columns = [str(col).lower() for col in data.columns]
             required_cols = ['open', 'high', 'low', 'close', 'volume']
             
             for col in required_cols:
@@ -95,14 +103,15 @@ class DataFetcher:
     @staticmethod
     def _generate_synthetic_data(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
         """Generate realistic synthetic data for testing."""
-        np.random.seed(hash(symbol) % 2**32)
+        # Stable per-symbol seed (built-in hash() is randomised per process)
+        np.random.seed(zlib.crc32(symbol.encode('utf-8')))
         
         start = pd.to_datetime(start_date)
         end = pd.to_datetime(end_date)
         dates = pd.date_range(start, end, freq='D')
         
         # Remove weekends
-        dates = dates[dates.dayofweek < 5]
+        dates = dates[dates.day_of_week < 5]
         
         n = len(dates)
         
@@ -406,9 +415,8 @@ class BacktestEngine:
         return best_results
     
     def _execute_strategy(self, data: pd.DataFrame, signals: pd.Series) -> Tuple:
-        """Execute strategy and track equity."""
-        equity = 100000
-        initial_equity = equity
+        """Execute strategy and track mark-to-market equity (cash + open position)."""
+        cash = 100000.0
         equity_curve = np.zeros(len(data))
         returns = np.zeros(len(data))
         trades = []
@@ -418,8 +426,6 @@ class BacktestEngine:
         entry_date = None
         
         for i in range(len(data)):
-            equity_curve[i] = equity
-            
             signal = signals.iloc[i]
             close_price = data['close'].iloc[i]
             
@@ -430,7 +436,8 @@ class BacktestEngine:
                 pnl -= abs(position * entry_price) * self.commission_pct
                 pnl -= abs(position * exit_price) * self.commission_pct
                 
-                equity += pnl
+                # Sell proceeds net of exit commission return to cash
+                cash += position * exit_price - abs(position * exit_price) * self.commission_pct
                 return_pct = (pnl / (abs(position * entry_price))) * 100
                 
                 trades.append({
@@ -448,10 +455,13 @@ class BacktestEngine:
             # Enter position
             if position == 0 and signal == 1:
                 entry_price = close_price * (1 + self.slippage_pct)
-                position = int(equity / entry_price * 0.95)  # Use 95% of equity
-                equity -= position * entry_price
-                equity -= position * entry_price * self.commission_pct
+                position = int(cash / entry_price * 0.95)  # Use 95% of equity
+                cash -= position * entry_price
+                cash -= position * entry_price * self.commission_pct
                 entry_date = data.index[i]
+            
+            # Mark-to-market equity at this bar's close
+            equity_curve[i] = cash + position * close_price
             
             # Calculate returns
             if i > 0:

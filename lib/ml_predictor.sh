@@ -73,14 +73,22 @@ EOF
         ohlcv_data=$(cat)
     fi
     
-    # Call Python inference script with symbol and period
+    # Call Python inference script with symbol and period. stderr (warnings)
+    # is kept separate so stdout stays pure JSON.
     local result
-    result=$(python3 "${PYTHON_SCRIPT}" --symbol "${symbol}" --period "${period}" 2>&1 <<< "${ohlcv_data}")
+    local err_file
+    err_file=$(mktemp "${TMPDIR:-/tmp}/ml_predict_err.XXXXXX")
+    result=$(python3 "${PYTHON_SCRIPT}" --symbol "${symbol}" --period "${period}" 2>"$err_file" <<< "${ohlcv_data}")
     
     local exit_code=$?
+    local err_text
+    err_text=$(tail -1 "$err_file" | tr -d '"\\')
+    rm -f "$err_file"
     
     if [[ $exit_code -ne 0 ]]; then
-        echo "{\"error\": \"Python inference failed: ${result}\"}" >&2
+        local reason
+        reason=$(echo "$result" | jq -r '.error // empty' 2>/dev/null)
+        echo "{\"error\": \"Python inference failed: ${reason:-$err_text}\"}" >&2
         return 1
     fi
     

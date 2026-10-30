@@ -50,7 +50,7 @@ get_regime_weights() {
 apply_confidence_multiplier() {
     local score=$1
     local regime=$2
-    local volatility=${3:-50}
+    local volatility=${3:-}  # empty = not measured
     
     local multiplier=1.0
     
@@ -69,8 +69,8 @@ apply_confidence_multiplier() {
             ;;
         "volatile")
             # Reduce confidence significantly in volatile markets
-            # Further reduce if volatility is very high (>25)
-            if (( $(echo "$volatility > 25" | bc -l) )); then
+            # Further reduce if measured volatility is very high (>25)
+            if [[ -n "$volatility" ]] && (( $(echo "$volatility > 25" | bc -l) )); then
                 multiplier="0.7"
             else
                 multiplier="0.8"
@@ -124,17 +124,19 @@ EOF
     # Get market regime
     local regime="$force_regime"
     local regime_data=""
-    local volatility=50
+    # Volatility is only known when the regime is detected; a forced regime
+    # leaves it empty so the base volatile multiplier (0.8, i.e. -20%) applies.
+    local volatility=""
     
     if [[ -z "$regime" ]]; then
         regime_data=$(detect_market_regime "$symbol")
-        regime=$(echo "$regime_data" | grep -o '"regime":"[^"]*' | cut -d'"' -f4)
-        volatility=$(echo "$regime_data" | grep -o '"volatility":[0-9.]*' | cut -d: -f2)
+        # detect_market_regime emits pretty-printed JSON ("key": value), so use jq
+        regime=$(echo "$regime_data" | jq -r '.regime // empty' 2>/dev/null)
+        volatility=$(echo "$regime_data" | jq -r '.volatility // empty' 2>/dev/null)
     fi
     
     if [[ -z "$regime" ]]; then
         regime="sideways"
-        volatility=50
     fi
     
     # Get regime-specific weights
@@ -205,7 +207,7 @@ EOF
     printf '{\n  "symbol": "%s",\n  "regime": "%s",\n  "combined_score": %.2f,\n  "original_mr_score": %.2f,\n  "original_tf_score": %.2f,\n  "weights": {\n    "mr_weight_pct": %d,\n    "tf_weight_pct": %d,\n    "weighted_mr_contribution": %.2f,\n    "weighted_tf_contribution": %.2f\n  },\n  "volatility_pct": %.2f,\n  "confidence_adjustment": %.2f,\n  "stop_loss_adjustment_pct": %d,\n  "recommendation": "%s",\n  "regime_analysis": {\n    "favors_strategy": "%s",\n    "risk_level": "%s"\n  },\n  "timestamp": "%s"\n}\n' \
         "$symbol" "$regime" "$adjusted_combined" "$mr_score" "$tf_score" \
         "$mr_weight" "$tf_weight" "$weighted_mr" "$weighted_tf" \
-        "$volatility" "$confidence_mult" "$sl_adjustment" \
+        "${volatility:-0}" "$confidence_mult" "$sl_adjustment" \
         "$recommendation" "$favors" "$risk_level" "$timestamp"
 }
 
@@ -245,18 +247,16 @@ select_best_strategy() {
     local tf_score=$3
     
     local weighted=$(apply_regime_weights "$symbol" "$mr_score" "$tf_score")
-    local recommendation=$(echo "$weighted" | grep -o '"recommendation":"[^"]*' | cut -d'"' -f4)
-    local combined=$(echo "$weighted" | grep -o '"combined_score":[0-9.]*' | cut -d: -f2 | cut -d. -f1)  # Extract integer part
-    
-    if [[ -z "$combined" ]]; then
-        combined="60"
-    fi
+    local recommendation=$(echo "$weighted" | jq -r '.recommendation // empty' 2>/dev/null)
+    local combined_score=$(echo "$weighted" | jq -r '.combined_score // empty' 2>/dev/null)
+    [[ -z "$combined_score" ]] && combined_score=60
+    local combined=${combined_score%%.*}  # Integer part for comparison
     
     cat <<EOF
 {
   "symbol": "$symbol",
   "best_strategy": "$recommendation",
-  "confidence_score": $(echo "$weighted" | grep -o '"combined_score":[0-9.]*' | cut -d: -f2),
+  "confidence_score": ${combined_score},
   "should_trade": $([ $combined -gt 50 ] && echo "true" || echo "false")
 }
 EOF
@@ -307,7 +307,7 @@ detect_regime_change() {
     local previous_regime=${2:-"unknown"}
     
     local current_regime_json=$(detect_market_regime "$symbol")
-    local current_regime=$(echo "$current_regime_json" | grep -o '"regime":"[^"]*' | cut -d'"' -f4)
+    local current_regime=$(echo "$current_regime_json" | jq -r '.regime // empty' 2>/dev/null)
     
     local changed=false
     local action="none"

@@ -1,166 +1,54 @@
-# StockSwingTrader v6.3 - Comprehensive Test Report
+# StockSwingTrader v6.3 - Test Report
 
-**Generated:** 2026-10-30 14:40:24  
-**Project:** StockSwingTrader - AI-Enhanced Swing Trading Platform  
-**Version:** 6.3
+**Generated:** 2026-10-30 16:58:46  
+**Command:** `bash tests/test_runner.sh`  
+**Result:** ✅ All suites passed
 
-## Executive Summary
+## Summary
 
 | Metric | Value |
 |--------|-------|
-| Total Tests | 4 |
-| Tests Passed | **0** |
-| Tests Failed | **4** |
-| Success Rate | 0% |
+| Suites | 9 (9 passed, 0 failed) |
+| Total Tests | 229 |
+| Tests Passed | **229** |
+| Tests Failed | **0** |
+| Success Rate | 100% |
 
-## Test Results by Module
+## Results by Suite
 
-| Module | Status | Details |
-|--------|--------|---------|
-| ML Predictor | ✅ PASS | [0;32m5[0m passed, [0;31m6[0m failed |
-| Regime Weighting | ❌ FAIL | Could not parse results |
-| Kalman Filter | ❌ FAIL | Could not parse results |
-| Backtest | ✅ PASS | [0;32m20[0m passed, [0;31m0[0m failed |
-| ML Scoring Integration | ❌ FAIL | Could not parse results |
-| Regime Detector | ❌ FAIL | Could not parse results |
-| Scoring Integration (Python) | ✅ PASS | [0;32m32[0m passed, [0;31m0[0m failed |
-| Dashboard Components | ✅ PASS | [0;32m13[0m passed, [0;31m8[0m failed |
-| Backend API | ✅ PASS | [0;32m2[0m passed, [0;31m8[0m failed |
+| Suite | Status | Time | Details |
+|-------|--------|------|---------|
+| ML Predictor | ✅ PASS | 27262ms | 29 passed, 0 failed |
+| Regime Weighting | ✅ PASS | 33966ms | 30 passed, 0 failed |
+| Kalman Filter | ✅ PASS | 3409ms | 18 passed, 0 failed |
+| Backtest | ✅ PASS | 8629ms | 34 passed, 0 failed |
+| ML Scoring Integration | ✅ PASS | 35609ms | 29 passed, 0 failed |
+| Regime Detector | ✅ PASS | 33708ms | 20 passed, 0 failed |
+| Scoring Integration (Python) | ✅ PASS | 117ms | 32 passed, 0 failed |
+| Dashboard Components | ✅ PASS | 1861ms | 21 passed, 0 failed |
+| Backend API | ✅ PASS | 755ms | 16 passed, 0 failed |
 
+Counts are taken from each suite's own summary output. A suite passes only
+when it exits 0 with at least one passed test and zero failures.
 
-## Enhancement Modules Tested
+## Suites
 
-### Enhancement 1: XGBoost ML Predictor
-- **Status:** ✅ Tested
-- **File:** `tests/test_ml_predictor.sh`
-- **Tests:**
-  - JSON output format validation
-  - Inference latency < 1s
-  - Error handling
-  - Confidence threshold validation
-  - Multiple prediction consistency
+| Suite | File | Runner | Exercises |
+|-------|------|--------|-----------|
+| ML Predictor | tests/test_ml_predictor.sh | bash | lib/ml_inference.py with the trained XGBoost model, lib/ml_predictor.sh |
+| Regime Weighting | tests/test_regime_weighting.sh | bash | lib/regime_weighting.sh (weights, multipliers, recommendations) |
+| Kalman Filter | tests/test_kalman_filter.sh | bash | lib/kalman_filter.sh + lib/kalman_inference.py |
+| Backtest | tests/test_backtest.sh | bash | lib/backtest.sh + lib/backtest_engine.py end to end (JSON/CSV/HTML) |
+| ML Scoring Integration | tests/test_ml_scoring_integration.sh | bash | lib/scoring.sh calculate_confluence_score_v2 with the real ML predictor |
+| Regime Detector | tests/test_regime_detector.sh | bash | lib/regime_detector.sh (trend, ADX, BB width, cache, batch) |
+| Scoring Integration (Python) | tests/test_scoring_integration.py | python3 | Confluence weighting formula and signal thresholds |
+| Dashboard Components | tests/test_dashboard.js | node --test | frontend/src utils, usePolling hook, all App routes, tsc --noEmit |
+| Backend API | tests/test_backend.js | node --test | backend/server.js routes on an ephemeral port |
 
-### Enhancement 2: Regime-Adaptive Weighting
-- **Status:** ✅ Tested
-- **File:** `tests/test_regime_weighting.sh`
-- **Tests:**
-  - Regime detection (sideways, trending_bull, trending_bear, volatile)
-  - Weight application validation
-  - Output JSON format validation
-  - Regime transitions
+## Environment
 
-### Enhancement 3: React Dashboard
-- **Status:** ✅ Tested
-- **Files:** 
-  - `tests/test_dashboard.js` (Component structure)
-  - `tests/test_backend.js` (API endpoints)
-- **Tests:**
-  - Project structure validation
-  - Component mounting and rendering
-  - API endpoint connectivity
-  - 5-second refresh mechanism
-  - CORS configuration
-  - Response format validation
-
-### Enhancement 4: Kalman Filter
-- **Status:** ✅ Tested
-- **File:** `tests/test_kalman_filter.sh`
-- **Tests:**
-  - Basic filtering with synthetic data
-  - Smoothness improvement measurement
-  - Performance validation (<500ms)
-  - False signal reduction
-  - Edge cases handling
-
-### Enhancement 5: Complete Backtesting
-- **Status:** ✅ Tested
-- **File:** `tests/test_backtest.sh`
-- **Tests:**
-  - Backtest output generation
-  - Trade log CSV format
-  - HTML report generation
-  - Performance metrics validation
-  - Parameter consistency
-
-### Scoring Integration
-- **Status:** ✅ Tested
-- **File:** `tests/test_scoring_integration.py`
-- **Tests:**
-  - Component weighting: ML (15%), Regime (35%), Technical (30%), Volume (20%)
-  - Score range validation (0-100)
-  - Signal generation logic
-  - Confidence level determination
-  - Mock data integration
-
-## Detailed Test Coverage
-
-### ML Predictor (Enhancement 1)
-✅ Direction prediction (up/down)  
-✅ Confidence scoring (0-100)  
-✅ Probability estimation (0-1)  
-✅ Latency monitoring  
-
-### Regime Detection (Enhancement 2)
-✅ Sideways market detection  
-✅ Bullish trend identification  
-✅ Bearish trend identification  
-✅ Volatile market detection  
-✅ Adaptive weight calculation  
-
-### Dashboard (Enhancement 3)
-✅ React component structure  
-✅ Dashboard page (portfolio overview)  
-✅ Analysis page (symbol deep-dive)  
-✅ Trade history page  
-✅ Watchlist management  
-✅ Settings page  
-✅ 5-second polling mechanism  
-✅ REST API connectivity  
-✅ CORS headers  
-✅ JSON response validation  
-
-### Kalman Filter (Enhancement 5)
-✅ Price smoothing  
-✅ Noise reduction (60%+)  
-✅ Volatility estimation  
-✅ Whipsaw prevention  
-✅ Multi-timeframe support  
-
-### Backtesting (Enhancement 4)
-✅ Trade log generation  
-✅ Win rate calculation  
-✅ Sharpe ratio computation  
-✅ Max drawdown tracking  
-✅ Profit factor analysis  
-✅ CSV export  
-✅ HTML report generation  
-
-## Performance Benchmarks
-
-| Module | Target | Measured | Status |
-|--------|--------|----------|--------|
-| ML Inference | <1s | ~500ms | ✅ Pass |
-| Regime Detection | <500ms | ~300ms | ✅ Pass |
-| Kalman Filter | <500ms | ~400ms | ✅ Pass |
-| Scoring Calculation | <100ms | ~50ms | ✅ Pass |
-| Full Pipeline | <5s | ~2.5s | ✅ Pass |
-
-## Test Execution Environment
-
-**Operating System:** $(uname -s)  
-**Architecture:** $(uname -m)  
-**Bash Version:** $(bash --version | head -1)  
-**Python Version:** $(python3 --version 2>&1)  
-**Node Version:** $(node --version 2>&1)  
-
-## Recommendations
-
-1. **All Tests Passing:** ✅ Production-ready deployment
-2. **Monitor Performance:** Consider running performance tests monthly
-3. **Regression Testing:** Run full suite after each enhancement
-4. **CI/CD Integration:** Add test runner to automated build pipeline
-
----
-
-**Test Suite Version:** 1.0  
-**Last Updated:** $timestamp
+- **OS:** Darwin 25.6.0 (arm64)
+- **Bash:** GNU bash, version 3.2.57(1)-release (arm64-apple-darwin25)
+- **Python:** Python 3.13.12
+- **Node:** v25.6.1
+- **Offline mode:** SST_OFFLINE=1 (synthetic/seeded data, no network)

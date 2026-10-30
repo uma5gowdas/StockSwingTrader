@@ -2,21 +2,25 @@
 # ============================================================================
 # StockSwingTrader: ML Predictor Test Suite
 # ============================================================================
-# Tests Enhancement 1: XGBoost ML Predictor
+# Tests Enhancement 1: XGBoost ML Predictor against the real trained model
+# (lib/models/xgboost_predictor.pkl) and the real inference code.
 # Tests:
-#   1. Basic ML prediction with mock data
-#   2. JSON output format validation
-#   3. Error handling
-#   4. Inference latency < 1s
+#   1. Prediction JSON format from historical OHLCV (--data-file)
+#   2. Deterministic predictions (same input -> same output)
+#   3. Inference latency
+#   4. Error handling (missing file, bad columns, missing args)
+#   5. Bash wrapper (lib/ml_predictor.sh)
+#
+# Runs offline: SST_OFFLINE=1 stops ml_inference.py from calling yfinance.
 # ============================================================================
 
 set -o pipefail
 
-# Source the ML predictor module
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 source "${PROJECT_DIR}/lib/ml_predictor.sh"
-source "${PROJECT_DIR}/lib/indicators.sh"
+
+export SST_OFFLINE=1
 
 # Color codes for output
 RED='\033[0;31m'
@@ -30,308 +34,169 @@ TESTS_RUN=0
 TESTS_PASSED=0
 TESTS_FAILED=0
 
-# Test configuration
-TIMEOUT=2
 ML_MODEL_PATH="${PROJECT_DIR}/lib/models/xgboost_predictor.pkl"
+ML_INFERENCE="${PROJECT_DIR}/lib/ml_inference.py"
+# Cold python start + xgboost import is ~3s on a laptop; 10s bounds a hang.
+LATENCY_LIMIT_MS=10000
+
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sst_ml_test.XXXXXX")"
+trap 'rm -rf "$TMP_DIR"' EXIT
+OHLCV_CSV="${TMP_DIR}/ohlcv.csv"
+BAD_CSV="${TMP_DIR}/bad.csv"
 
 # ============================================================================
 # Test Utilities
 # ============================================================================
 
-test_assert_equal() {
-    local actual=$1
-    local expected=$2
-    local test_name=$3
-    
-    ((TESTS_RUN++))
-    
-    if [[ "$actual" == "$expected" ]]; then
-        echo -e "${GREEN}✓${NC} $test_name"
-        ((TESTS_PASSED++))
-        return 0
-    else
-        echo -e "${RED}✗${NC} $test_name"
-        echo "  Expected: $expected"
-        echo "  Got:      $actual"
-        ((TESTS_FAILED++))
-        return 1
-    fi
-}
+pass() { ((TESTS_RUN++)); ((TESTS_PASSED++)); echo -e "${GREEN}✓${NC} $1"; }
+fail() { ((TESTS_RUN++)); ((TESTS_FAILED++)); echo -e "${RED}✗${NC} $1"; [[ -n "$2" ]] && echo "  $2"; }
 
-test_assert_match() {
-    local actual=$1
-    local pattern=$2
-    local test_name=$3
-    
-    ((TESTS_RUN++))
-    
-    if [[ "$actual" =~ $pattern ]]; then
-        echo -e "${GREEN}✓${NC} $test_name"
-        ((TESTS_PASSED++))
-        return 0
-    else
-        echo -e "${RED}✗${NC} $test_name"
-        echo "  Expected pattern: $pattern"
-        echo "  Got: $actual"
-        ((TESTS_FAILED++))
-        return 1
-    fi
+test_assert_equal() {
+    local actual=$1 expected=$2 test_name=$3
+    if [[ "$actual" == "$expected" ]]; then pass "$test_name"
+    else fail "$test_name" "Expected: $expected, Got: $actual"; fi
 }
 
 test_assert_json_valid() {
-    local json_str=$1
-    local test_name=$2
-    
-    ((TESTS_RUN++))
-    
-    if echo "$json_str" | jq . > /dev/null 2>&1; then
-        echo -e "${GREEN}✓${NC} $test_name"
-        ((TESTS_PASSED++))
-        return 0
-    else
-        echo -e "${RED}✗${NC} $test_name"
-        echo "  Invalid JSON: $json_str"
-        ((TESTS_FAILED++))
-        return 1
-    fi
+    local json_str=$1 test_name=$2
+    if [[ -n "$json_str" ]] && echo "$json_str" | jq -e . > /dev/null 2>&1; then pass "$test_name"
+    else fail "$test_name" "Invalid JSON: $json_str"; fi
 }
 
 test_assert_has_key() {
-    local json_str=$1
-    local key=$2
-    local test_name=$3
-    
-    ((TESTS_RUN++))
-    
-    if echo "$json_str" | jq -e ".$key" > /dev/null 2>&1; then
-        echo -e "${GREEN}✓${NC} $test_name"
-        ((TESTS_PASSED++))
-        return 0
-    else
-        echo -e "${RED}✗${NC} $test_name (missing key: $key)"
-        ((TESTS_FAILED++))
-        return 1
-    fi
+    local json_str=$1 key=$2 test_name=$3
+    if echo "$json_str" | jq -e "has(\"$key\")" > /dev/null 2>&1; then pass "$test_name"
+    else fail "$test_name" "Missing key: $key"; fi
 }
 
-test_assert_range() {
-    local value=$1
-    local min=$2
-    local max=$3
-    local test_name=$4
-    
-    ((TESTS_RUN++))
-    
-    if (( $(echo "$value >= $min && $value <= $max" | bc -l) )); then
-        echo -e "${GREEN}✓${NC} $test_name"
-        ((TESTS_PASSED++))
-        return 0
-    else
-        echo -e "${RED}✗${NC} $test_name"
-        echo "  Expected: [$min, $max], Got: $value"
-        ((TESTS_FAILED++))
-        return 1
-    fi
+# Passes when the jq expression evaluates to true for the JSON
+test_assert_jq() {
+    local json_str=$1 expr=$2 test_name=$3
+    if echo "$json_str" | jq -e "$expr" > /dev/null 2>&1; then pass "$test_name"
+    else fail "$test_name" "jq '$expr' was not true for: $json_str"; fi
+}
+
+now_ms() { perl -MTime::HiRes=time -e 'printf "%d\n", time * 1000'; }
+
+# 60 daily bars of a deterministic upward random walk
+write_fixture_csv() {
+    awk 'BEGIN {
+        srand(42); p = 100
+        print "Open,High,Low,Close,Volume"
+        for (i = 0; i < 60; i++) {
+            p = p * (1 + (rand() - 0.45) * 0.02)
+            printf "%.2f,%.2f,%.2f,%.2f,%d\n", p * 0.999, p * 1.01, p * 0.99, p, 1000000 + i * 1000
+        }
+    }' > "$OHLCV_CSV"
+    printf 'Date,Price\n2024-01-01,100\n' > "$BAD_CSV"
+}
+
+infer() {
+    python3 "$ML_INFERENCE" "$@" </dev/null 2>/dev/null
 }
 
 # ============================================================================
 # Test Cases
 # ============================================================================
 
+test_model_present() {
+    echo -e "\n${BLUE}=== Test 0: Trained Model ===${NC}"
+    if [[ -f "$ML_MODEL_PATH" ]]; then
+        pass "Model file present ($ML_MODEL_PATH)"
+        return 0
+    fi
+    fail "Model file present" "Train it first: python3 lib/train_ml_model.py"
+    return 1
+}
+
 test_ml_json_format() {
     echo -e "\n${BLUE}=== Test 1: ML Prediction JSON Format ===${NC}"
-    
-    # Create mock feature data
-    local features_json='{
-        "rsi_14": 55.23,
-        "macd_diff": 0.23,
-        "bb_position": 0.68,
-        "atr_14": 2.35,
-        "stochastic_k": 62.50,
-        "ema_20": 236.40,
-        "ema_50": 234.80,
-        "volume_sma_ratio": 1.15
-    }'
-    
-    # Try to get ML prediction (if model exists)
+
     local result
-    if [[ -f "$ML_MODEL_PATH" ]]; then
-        result=$(timeout $TIMEOUT python3 "${PROJECT_DIR}/lib/ml_inference.py" \
-            --symbol "TEST" --features "$features_json" 2>/dev/null)
-    else
-        # Use fallback mock response
-        result='{
-            "direction": "up",
-            "confidence": 78,
-            "probability": 0.78,
-            "model_version": "xgboost_v2.0"
-        }'
-    fi
-    
-    # Validate JSON format
+    result=$(infer --symbol TEST --period 5 --data-file "$OHLCV_CSV")
+    test_assert_equal "$?" "0" "Inference exits 0"
+
     test_assert_json_valid "$result" "Valid JSON output"
     test_assert_has_key "$result" "direction" "Contains 'direction' key"
     test_assert_has_key "$result" "confidence" "Contains 'confidence' key"
     test_assert_has_key "$result" "probability" "Contains 'probability' key"
-    
-    # Validate direction values
-    local direction=$(echo "$result" | jq -r '.direction' 2>/dev/null || echo "unknown")
-    test_assert_match "$direction" "^(up|down)$" "Direction is 'up' or 'down'"
-    
-    # Validate confidence range
-    local confidence=$(echo "$result" | jq '.confidence' 2>/dev/null || echo "0")
-    test_assert_range "$confidence" "0" "100" "Confidence in range [0, 100]"
-    
-    # Validate probability range
-    local probability=$(echo "$result" | jq '.probability' 2>/dev/null || echo "0")
-    test_assert_range "$probability" "0" "1" "Probability in range [0, 1]"
+    test_assert_has_key "$result" "timestamp" "Contains 'timestamp' key"
+    test_assert_jq "$result" '.symbol == "TEST" and .period == 5' "Echoes symbol and period"
+    test_assert_jq "$result" '.direction == "up" or .direction == "down"' "Direction is 'up' or 'down'"
+    test_assert_jq "$result" '.confidence >= 0 and .confidence <= 100' "Confidence in range [0, 100]"
+    # Probability is that of the predicted class, so it is at least 0.5
+    test_assert_jq "$result" '.probability >= 0.5 and .probability <= 1' "Probability of predicted class in [0.5, 1]"
+    test_assert_jq "$result" '.confidence == ((.probability * 100) | floor)' "Confidence equals floor(probability * 100)"
+    test_assert_jq "$result" '.timestamp | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$")' "Timestamp is ISO 8601 UTC"
+}
+
+test_ml_consistency() {
+    echo -e "\n${BLUE}=== Test 2: Deterministic Predictions ===${NC}"
+
+    local r1 r2
+    r1=$(infer --symbol TEST --data-file "$OHLCV_CSV" | jq -c '{direction, probability}')
+    r2=$(infer --symbol TEST --data-file "$OHLCV_CSV" | jq -c '{direction, probability}')
+    test_assert_equal "$r2" "$r1" "Same OHLCV data gives the same prediction"
+
+    # No data: synthetic features are seeded per symbol, stable across processes
+    r1=$(infer --symbol MSFT | jq -c '{direction, probability}')
+    r2=$(infer --symbol MSFT | jq -c '{direction, probability}')
+    test_assert_jq "$r1" 'has("direction")' "Synthetic-feature fallback returns a prediction"
+    test_assert_equal "$r2" "$r1" "Synthetic-feature fallback is deterministic per symbol"
 }
 
 test_ml_inference_latency() {
-    echo -e "\n${BLUE}=== Test 2: ML Inference Latency ===${NC}"
-    
-    if [[ ! -f "$ML_MODEL_PATH" ]]; then
-        echo -e "${YELLOW}⚠${NC} ML model not found, skipping latency test"
-        ((TESTS_RUN++))
-        return 0
-    fi
-    
-    local features_json='{
-        "rsi_14": 55.23,
-        "macd_diff": 0.23,
-        "bb_position": 0.68,
-        "atr_14": 2.35,
-        "stochastic_k": 62.50,
-        "ema_20": 236.40,
-        "ema_50": 234.80,
-        "volume_sma_ratio": 1.15
-    }'
-    
-    # Measure inference time
-    local start_time=$(date +%s%3N)
-    timeout $TIMEOUT python3 "${PROJECT_DIR}/lib/ml_inference.py" \
-        --symbol "TEST" --features "$features_json" > /dev/null 2>&1
-    local end_time=$(date +%s%3N)
-    local latency=$((end_time - start_time))
-    
-    ((TESTS_RUN++))
-    if (( latency < 1000 )); then
-        echo -e "${GREEN}✓${NC} Inference latency < 1s"
-        echo "  Measured: ${latency}ms"
-        ((TESTS_PASSED++))
+    echo -e "\n${BLUE}=== Test 3: ML Inference Latency ===${NC}"
+
+    local start_time end_time latency
+    start_time=$(now_ms)
+    infer --symbol TEST --data-file "$OHLCV_CSV" > /dev/null
+    end_time=$(now_ms)
+    latency=$((end_time - start_time))
+    echo "  Measured: ${latency}ms (includes python3 start-up and model load)"
+
+    if (( latency < LATENCY_LIMIT_MS )); then
+        pass "Inference latency < ${LATENCY_LIMIT_MS}ms"
     else
-        echo -e "${YELLOW}⚠${NC} Inference latency >= 1s"
-        echo "  Measured: ${latency}ms (acceptable for Python)"
-        ((TESTS_PASSED++))
+        fail "Inference latency < ${LATENCY_LIMIT_MS}ms" "Measured ${latency}ms"
     fi
 }
 
 test_ml_error_handling() {
-    echo -e "\n${BLUE}=== Test 3: Error Handling ===${NC}"
-    
-    # Test with invalid features JSON
-    ((TESTS_RUN++))
-    local result=$(timeout $TIMEOUT python3 "${PROJECT_DIR}/lib/ml_inference.py" \
-        --symbol "TEST" --features "invalid json" 2>&1 || echo "error")
-    
-    if [[ "$result" == *"error"* ]] || [[ "$result" == *"Error"* ]]; then
-        echo -e "${GREEN}✓${NC} Error handling for invalid JSON"
-        ((TESTS_PASSED++))
-    else
-        echo -e "${YELLOW}⚠${NC} Invalid JSON should produce error"
-        ((TESTS_PASSED++))
-    fi
-    
-    # Test with missing symbol
-    ((TESTS_RUN++))
-    result=$(timeout $TIMEOUT python3 "${PROJECT_DIR}/lib/ml_inference.py" 2>&1 || echo "error")
-    if [[ "$result" == *"error"* ]] || [[ "$result" == *"Error"* ]] || [[ "$result" == "" ]]; then
-        echo -e "${GREEN}✓${NC} Error handling for missing required args"
-        ((TESTS_PASSED++))
-    else
-        echo -e "${YELLOW}⚠${NC} Missing args should produce error (got: $result)"
-        ((TESTS_PASSED++))
-    fi
+    echo -e "\n${BLUE}=== Test 4: Error Handling ===${NC}"
+
+    local result rc
+    result=$(infer --symbol TEST --data-file "${TMP_DIR}/missing.csv"); rc=$?
+    test_assert_equal "$rc" "1" "Missing data file exits 1"
+    test_assert_jq "$result" '.error | test("Cannot read data file")' "Missing data file returns JSON error"
+
+    result=$(infer --symbol TEST --data-file "$BAD_CSV"); rc=$?
+    test_assert_equal "$rc" "1" "CSV without OHLCV columns exits 1"
+    test_assert_jq "$result" '.error | test("missing columns")' "CSV without OHLCV columns returns JSON error"
+
+    python3 "$ML_INFERENCE" </dev/null > /dev/null 2>&1; rc=$?
+    test_assert_equal "$rc" "2" "Missing --symbol is rejected (argparse exit 2)"
 }
 
-test_ml_confidence_threshold() {
-    echo -e "\n${BLUE}=== Test 4: Confidence Threshold ===${NC}"
-    
-    local features_json='{
-        "rsi_14": 55.23,
-        "macd_diff": 0.23,
-        "bb_position": 0.68,
-        "atr_14": 2.35,
-        "stochastic_k": 62.50,
-        "ema_20": 236.40,
-        "ema_50": 234.80,
-        "volume_sma_ratio": 1.15
-    }'
-    
-    # Get prediction
-    local result
-    if [[ -f "$ML_MODEL_PATH" ]]; then
-        result=$(timeout $TIMEOUT python3 "${PROJECT_DIR}/lib/ml_inference.py" \
-            --symbol "TEST" --features "$features_json" 2>/dev/null)
-    else
-        result='{
-            "direction": "up",
-            "confidence": 45,
-            "probability": 0.45,
-            "model_version": "xgboost_v2.0"
-        }'
-    fi
-    
-    local confidence=$(echo "$result" | jq '.confidence' 2>/dev/null || echo "0")
-    
-    ((TESTS_RUN++))
-    # Confidence can be any value from 0-100
-    if (( confidence >= 0 && confidence <= 100 )); then
-        echo -e "${GREEN}✓${NC} Confidence within valid range"
-        ((TESTS_PASSED++))
-    else
-        echo -e "${RED}✗${NC} Confidence out of range: $confidence"
-        ((TESTS_FAILED++))
-    fi
-}
+test_ml_wrapper() {
+    echo -e "\n${BLUE}=== Test 5: Bash Wrapper (ml_predictor.sh) ===${NC}"
 
-test_ml_multiple_predictions() {
-    echo -e "\n${BLUE}=== Test 5: Multiple Predictions Consistency ===${NC}"
-    
-    local features_json='{
-        "rsi_14": 55.23,
-        "macd_diff": 0.23,
-        "bb_position": 0.68,
-        "atr_14": 2.35,
-        "stochastic_k": 62.50,
-        "ema_20": 236.40,
-        "ema_50": 234.80,
-        "volume_sma_ratio": 1.15
-    }'
-    
-    if [[ ! -f "$ML_MODEL_PATH" ]]; then
-        echo -e "${YELLOW}⚠${NC} ML model not found, skipping consistency test"
-        ((TESTS_RUN++))
-        return 0
-    fi
-    
-    # Get multiple predictions with same features
-    local result1=$(timeout $TIMEOUT python3 "${PROJECT_DIR}/lib/ml_inference.py" \
-        --symbol "TEST" --features "$features_json" 2>/dev/null)
-    local result2=$(timeout $TIMEOUT python3 "${PROJECT_DIR}/lib/ml_inference.py" \
-        --symbol "TEST" --features "$features_json" 2>/dev/null)
-    
-    local dir1=$(echo "$result1" | jq -r '.direction' 2>/dev/null)
-    local dir2=$(echo "$result2" | jq -r '.direction' 2>/dev/null)
-    
-    ((TESTS_RUN++))
-    if [[ "$dir1" == "$dir2" ]]; then
-        echo -e "${GREEN}✓${NC} Predictions are consistent"
-        ((TESTS_PASSED++))
-    else
-        echo -e "${RED}✗${NC} Predictions inconsistent: $dir1 vs $dir2"
-        ((TESTS_FAILED++))
-    fi
+    local result rc
+    result=$(ml_predict_direction "AAPL" 5 < "$TMP_DIR/empty_stdin" 2>/dev/null); rc=$?
+    test_assert_equal "$rc" "0" "ml_predict_direction exits 0"
+    test_assert_json_valid "$result" "ml_predict_direction stdout is pure JSON (warnings on stderr)"
+    test_assert_jq "$result" '.symbol == "AAPL" and (.direction == "up" or .direction == "down")' "ml_predict_direction returns a direction for AAPL"
+
+    local err
+    err=$(ml_predict_direction "" 2>&1 >/dev/null); rc=$?
+    test_assert_equal "$rc" "1" "Empty symbol exits 1"
+    test_assert_jq "$err" '.error == "Symbol is required"' "Empty symbol returns JSON error"
+
+    result=$(bash "${PROJECT_DIR}/lib/ml_predictor.sh" predict AAPL 5 </dev/null 2>/dev/null)
+    test_assert_jq "$result" '.symbol == "AAPL"' "CLI 'predict' command works"
+
+    result=$(ml_get_model_status)
+    test_assert_jq "$result" '.status == "ready" and .size_bytes > 0' "Model status reports ready"
 }
 
 # ============================================================================
@@ -345,7 +210,7 @@ print_summary() {
     echo -e "Tests Run:     ${TESTS_RUN}"
     echo -e "Tests Passed:  ${GREEN}${TESTS_PASSED}${NC}"
     echo -e "Tests Failed:  ${RED}${TESTS_FAILED}${NC}"
-    
+
     if [[ $TESTS_FAILED -eq 0 ]]; then
         echo -e "\n${GREEN}✓ All tests passed!${NC}"
         return 0
@@ -364,11 +229,16 @@ echo -e "${BLUE}║${NC}    StockSwingTrader: ML Predictor Test Suite${NC}"
 echo -e "${BLUE}║${NC}    Enhancement 1: XGBoost ML Predictions${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
 
-test_ml_json_format
-test_ml_inference_latency
-test_ml_error_handling
-test_ml_confidence_threshold
-test_ml_multiple_predictions
+write_fixture_csv
+: > "$TMP_DIR/empty_stdin"
+
+if test_model_present; then
+    test_ml_json_format
+    test_ml_consistency
+    test_ml_inference_latency
+    test_ml_error_handling
+    test_ml_wrapper
+fi
 
 print_summary
 exit $?

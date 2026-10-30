@@ -2,19 +2,41 @@ const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const axios = require('axios');
-const { exec } = require('child_process');
+const { execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const util = require('util');
 
-const execPromise = util.promisify(exec);
+const execFilePromise = util.promisify(execFile);
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const BASE_PATH = path.resolve(__dirname, '..');
-const LOG_FILE = path.resolve('/Users/P3291917/Builds/6/.agents/tasks/backend.log');
+// Paths can be overridden via env (used by tests/test_backend.js).
+const BASE_PATH = path.resolve(process.env.SST_BASE_PATH || path.join(__dirname, '..'));
+const LOG_FILE = path.resolve(process.env.SST_LOG_FILE || '/Users/P3291917/Builds/6/.agents/tasks/backend.log');
+const BACKTEST_DIR = path.resolve(process.env.BACKTEST_OUTPUT_DIR || '/Users/P3291917/Builds/6/.agents/tasks/backtest_results');
+
+// Ticker symbols: letters, digits, dot or dash, max 10 chars (same rule as the
+// frontend). Symbols are passed to bash scripts, so anything else is rejected.
+const SYMBOL_PATTERN = /^[A-Z][A-Z0-9.-]{0,9}$/;
+
+// Run a lib/ script with arguments passed directly (no shell interpolation).
+function runScript(scriptPath, args, timeout) {
+  return execFilePromise('bash', [scriptPath, ...args], { cwd: BASE_PATH, timeout });
+}
+
+// Validate :symbol; sends a 400 and returns null when invalid.
+function validSymbol(req, res) {
+  const symbol = String(req.params.symbol || '').toUpperCase();
+  if (!SYMBOL_PATTERN.test(symbol)) {
+    logRequest('WARN', 'Invalid symbol rejected', { symbol: req.params.symbol });
+    res.status(400).json({ error: 'Invalid symbol' });
+    return null;
+  }
+  return symbol;
+}
 
 // Ensure log directory exists
 const logDir = path.dirname(LOG_FILE);
@@ -54,10 +76,7 @@ app.get('/api/portfolio', async (req, res) => {
       return res.status(500).json({ error: 'Portfolio script not found' });
     }
 
-    const { stdout } = await execPromise(`bash ${scriptPath} get-portfolio`, {
-      cwd: BASE_PATH,
-      timeout: 15000
-    });
+    const { stdout } = await runScript(scriptPath, ['get-portfolio'], 15000);
 
     try {
       const data = JSON.parse(stdout);
@@ -76,7 +95,8 @@ app.get('/api/portfolio', async (req, res) => {
 // GET /api/quotes/:symbol - Get real-time quote data
 app.get('/api/quotes/:symbol', async (req, res) => {
   try {
-    const { symbol } = req.params;
+    const symbol = validSymbol(req, res);
+    if (!symbol) return;
     logRequest('INFO', `Quote requested for symbol: ${symbol}`);
     
     const scriptPath = path.join(BASE_PATH, 'lib', 'alpaca_broker.sh');
@@ -86,10 +106,7 @@ app.get('/api/quotes/:symbol', async (req, res) => {
       return res.status(500).json({ error: 'Quote script not found' });
     }
 
-    const { stdout } = await execPromise(`bash ${scriptPath} get-quote ${symbol}`, {
-      cwd: BASE_PATH,
-      timeout: 10000
-    });
+    const { stdout } = await runScript(scriptPath, ['get-quote', symbol], 10000);
 
     try {
       const data = JSON.parse(stdout);
@@ -108,7 +125,8 @@ app.get('/api/quotes/:symbol', async (req, res) => {
 // GET /api/signals/:symbol - Execute scoring pipeline, return confluence score
 app.get('/api/signals/:symbol', async (req, res) => {
   try {
-    const { symbol } = req.params;
+    const symbol = validSymbol(req, res);
+    if (!symbol) return;
     logRequest('INFO', `Signals requested for symbol: ${symbol}`);
     
     const scriptPath = path.join(BASE_PATH, 'lib', 'scoring.sh');
@@ -118,10 +136,7 @@ app.get('/api/signals/:symbol', async (req, res) => {
       return res.status(500).json({ error: 'Scoring script not found' });
     }
 
-    const { stdout } = await execPromise(`bash ${scriptPath} ${symbol}`, {
-      cwd: BASE_PATH,
-      timeout: 20000
-    });
+    const { stdout } = await runScript(scriptPath, [symbol], 20000);
 
     try {
       const data = JSON.parse(stdout);
@@ -140,7 +155,8 @@ app.get('/api/signals/:symbol', async (req, res) => {
 // GET /api/indicators/:symbol - Get technical indicators
 app.get('/api/indicators/:symbol', async (req, res) => {
   try {
-    const { symbol } = req.params;
+    const symbol = validSymbol(req, res);
+    if (!symbol) return;
     logRequest('INFO', `Indicators requested for symbol: ${symbol}`);
     
     const scriptPath = path.join(BASE_PATH, 'lib', 'indicators_new.sh');
@@ -150,10 +166,7 @@ app.get('/api/indicators/:symbol', async (req, res) => {
       return res.status(500).json({ error: 'Indicators script not found' });
     }
 
-    const { stdout } = await execPromise(`bash ${scriptPath} ${symbol}`, {
-      cwd: BASE_PATH,
-      timeout: 15000
-    });
+    const { stdout } = await runScript(scriptPath, [symbol], 15000);
 
     try {
       const data = JSON.parse(stdout);
@@ -202,10 +215,7 @@ app.get('/api/stats', async (req, res) => {
       return res.status(500).json({ error: 'Stats script not found' });
     }
 
-    const { stdout } = await execPromise(`bash ${scriptPath} calculate-stats`, {
-      cwd: BASE_PATH,
-      timeout: 10000
-    });
+    const { stdout } = await runScript(scriptPath, ['calculate-stats'], 10000);
 
     try {
       const data = JSON.parse(stdout);
@@ -333,7 +343,7 @@ app.get('/api/backtest', (req, res) => {
   try {
     logRequest('INFO', 'Backtest results requested');
     
-    const backtestDir = path.join('/Users/P3291917/Builds/6/.agents/tasks/backtest_results');
+    const backtestDir = BACKTEST_DIR;
     
     if (!fs.existsSync(backtestDir)) {
       logRequest('WARN', 'Backtest results directory not found', { path: backtestDir });
@@ -367,8 +377,8 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error', message: err.message });
 });
 
-// Start server
-app.listen(PORT, () => {
+// Start server when run directly (node server.js); tests require() the app.
+if (require.main === module) app.listen(PORT, () => {
   logRequest('INFO', `Backend server started on port ${PORT}`);
   console.log(`🚀 StockSwingTrader Backend API running on http://localhost:${PORT}`);
   console.log(`📊 API Documentation:`);

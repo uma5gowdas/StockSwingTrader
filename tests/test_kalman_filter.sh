@@ -83,6 +83,23 @@ test_assert_lt() {
     fi
 }
 
+# Milliseconds since epoch (macOS date has no %N)
+now_ms() {
+    perl -MTime::HiRes=time -e 'printf "%d\n", time * 1000'
+}
+
+# Count direction reversals in a price series
+count_reversals() {
+    awk -v data="$*" 'BEGIN {
+        n = split(data, p, " "); c = 0
+        for (i = 3; i <= n; i++) {
+            a = p[i-1] - p[i-2]; b = p[i] - p[i-1]
+            if ((a > 0 && b < 0) || (a < 0 && b > 0)) c++
+        }
+        print c
+    }'
+}
+
 # ============================================================================
 # Test 1: Basic Kalman Filter
 # ============================================================================
@@ -111,7 +128,7 @@ test_basic_kalman_filter() {
     test_assert_equal "$has_residuals" "1" "JSON contains residuals"
     
     # Extract count
-    local count=$(echo "$result" | grep -oP '"count":\s*\K\d+')
+    local count=$(echo "$result" | jq -r '.count')
     test_assert_equal "$count" "10" "Output count matches input count"
 }
 
@@ -129,12 +146,10 @@ test_smoothness_improvement() {
     
     local result=$(apply_kalman_filter "${raw_prices[@]}" -q 0.01 -r 0.1)
     
-    # Extract filtered prices
-    local filtered_json=$(echo "$result" | grep -oP '"filtered_prices":\s*\K\[[^\]]*\]')
+    # Extract filtered prices (output is multi-line JSON; grep -P is not on macOS)
+    local -a filtered_prices=($(echo "$result" | jq -r '.filtered_prices[]'))
     
-    # Convert JSON array to space-separated
-    local -a filtered_prices=($(echo "$filtered_json" | grep -oE '[0-9]+(\.[0-9]+)?' | tr '\n' ' '))
-    
+    test_assert_gt "${#filtered_prices[@]}" "0" "Filtered prices returned"
     if [[ ${#filtered_prices[@]} -gt 0 ]]; then
         # Both arrays should have same length
         test_assert_equal "${#filtered_prices[@]}" "${#raw_prices[@]}" "Filtered output length matches input"
@@ -160,14 +175,7 @@ test_smoothness_improvement() {
         echo "  Raw variation: $raw_var"
         echo "  Filtered variation: $filtered_var"
         
-        # Check if improvement exists
-        if (( $(echo "$raw_var > $filtered_var" | bc -l) )); then
-            echo -e "${GREEN}✓${NC} Filtered prices have lower variation"
-            ((TESTS_PASSED++))
-        else
-            echo -e "${YELLOW}⚠${NC} Smoothness not verified (may be expected with small noise)"
-        fi
-        ((TESTS_RUN++))
+        test_assert_lt "$filtered_var" "$raw_var" "Filtered prices have lower variation"
     fi
 }
 
@@ -189,25 +197,18 @@ test_performance() {
     done
     
     # Time the filter
-    local start_time=$(date +%s%N)
+    local start_time=$(now_ms)
     local result=$(apply_kalman_filter "${prices[@]}" -q 0.01 -r 0.1)
-    local end_time=$(date +%s%N)
+    local end_time=$(now_ms)
     
     # Calculate elapsed time in milliseconds
-    local elapsed_ms=$(( (end_time - start_time) / 1000000 ))
+    local elapsed_ms=$(( end_time - start_time ))
     
     echo "  Processed 100 prices in ${elapsed_ms}ms"
     
-    # Target: <100ms for 100 prices
-    if (( elapsed_ms < 100 )); then
-        echo -e "${GREEN}✓${NC} Performance target met (<100ms)"
-        ((TESTS_PASSED++))
-    else
-        echo -e "${YELLOW}⚠${NC} Performance exceeded target (${elapsed_ms}ms vs 100ms target)"
-        # Still count as passed for bash version which can be slower
-        ((TESTS_PASSED++))
-    fi
-    ((TESTS_RUN++))
+    test_assert_equal "$(echo "$result" | jq -r '.count')" "100" "All 100 prices filtered"
+    # Target: <500ms for 100 prices (v6.3 Kalman budget; includes python3 start-up)
+    test_assert_lt "$elapsed_ms" "500" "Performance target met (<500ms for 100 prices)"
 }
 
 # ============================================================================
@@ -225,42 +226,16 @@ test_false_signal_reduction() {
     
     local result=$(apply_kalman_filter "${whipsaw_prices[@]}" -q 0.01 -r 0.1)
     
-    # Count direction changes in raw data
-    local raw_changes=0
-    for ((i = 2; i < ${#whipsaw_prices[@]}; i++)); do
-        local prev_change=$(echo "${whipsaw_prices[$((i-1))]} - ${whipsaw_prices[$((i-2))]}" | bc -l)
-        local curr_change=$(echo "${whipsaw_prices[$i]} - ${whipsaw_prices[$((i-1))]}" | bc -l)
-        
-        # Check for sign change
-        if (( $(echo "($prev_change > 0 && $curr_change < 0) || ($prev_change < 0 && $curr_change > 0)" | bc -l) )); then
-            ((raw_changes++))
-        fi
-    done
-    
-    # Extract residuals and count changes
-    local residuals_json=$(echo "$result" | grep -oP '"residuals":\s*\K\[[^\]]*\]')
-    local -a residuals=($(echo "$residuals_json" | grep -oE '-?[0-9]+(\.[0-9]+)?' | tr '\n' ' '))
-    
-    local filtered_changes=0
-    for ((i = 1; i < ${#residuals[@]}; i++)); do
-        # Residuals represent measurement noise, smaller changes = fewer false signals
-        if (( $(echo "sqrt(${residuals[$i]} * ${residuals[$i]}) > 0.01" | bc -l) )); then
-            ((filtered_changes++))
-        fi
-    done
+    # Direction reversals (whipsaws) in raw vs Kalman-filtered prices
+    local raw_changes=$(count_reversals "${whipsaw_prices[@]}")
+    local -a filtered=($(echo "$result" | jq -r '.filtered_prices[]'))
+    local filtered_changes=$(count_reversals "${filtered[@]}")
     
     echo "  Raw direction changes: $raw_changes"
-    echo "  Filtered signal noise events: $filtered_changes"
+    echo "  Filtered direction changes: $filtered_changes"
     
-    # Should show reduction
-    if (( raw_changes > filtered_changes )); then
-        echo -e "${GREEN}✓${NC} False signal reduction detected"
-        ((TESTS_PASSED++))
-    else
-        echo -e "${YELLOW}⚠${NC} Signal change analysis inconclusive"
-        ((TESTS_PASSED++))
-    fi
-    ((TESTS_RUN++))
+    test_assert_equal "${#filtered[@]}" "${#whipsaw_prices[@]}" "Filtered whipsaw series has same length"
+    test_assert_lt "$filtered_changes" "$raw_changes" "False signal (whipsaw) reduction"
 }
 
 # ============================================================================
@@ -299,8 +274,9 @@ test_edge_cases() {
     # Constant prices (no noise)
     local -a constant=(100.0 100.0 100.0 100.0 100.0)
     local result=$(apply_kalman_filter "${constant[@]}" -q 0.01 -r 0.1)
-    local count=$(echo "$result" | grep -oP '"count":\s*\K\d+')
+    local count=$(echo "$result" | jq -r '.count')
     test_assert_equal "$count" "5" "Constant prices handled"
+    test_assert_equal "$(echo "$result" | jq -r '.state')" "100.0" "Constant prices filter to the constant"
 }
 
 # ============================================================================
@@ -318,18 +294,13 @@ test_python_backend() {
         
         local result=$(apply_kalman_filter_fast "$price_json" 0.01 0.1)
         
-        local has_filtered=$(echo "$result" | grep -c "filtered_prices" || true)
-        if [[ $has_filtered -gt 0 ]]; then
-            echo -e "${GREEN}✓${NC} Python backend works"
-            ((TESTS_PASSED++))
-        else
-            echo -e "${YELLOW}⚠${NC} Python backend fallback"
-            ((TESTS_PASSED++))
-        fi
+        test_assert_equal "$(echo "$result" | jq -r '.filtered_prices | length')" "5" "Python backend returns 5 filtered prices"
+        test_assert_equal "$(echo "$result" | jq -r '.count')" "5" "Python backend reports count"
     else
-        echo -e "${YELLOW}⚠${NC} Python3 not available, skipping"
+        echo -e "${RED}✗${NC} Python3 not available"
+        ((TESTS_RUN++))
+        ((TESTS_FAILED++))
     fi
-    ((TESTS_RUN++))
 }
 
 # ============================================================================
@@ -358,9 +329,7 @@ main() {
     echo "Total tests: $TESTS_RUN"
     echo -e "Passed:      ${GREEN}$TESTS_PASSED${NC}"
     
-    if [[ $TESTS_FAILED -gt 0 ]]; then
-        echo -e "Failed:      ${RED}$TESTS_FAILED${NC}"
-    fi
+    echo -e "Failed:      ${RED}$TESTS_FAILED${NC}"
     
     echo ""
     

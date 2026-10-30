@@ -19,6 +19,11 @@ TESTS_RUN=0
 TESTS_PASSED=0
 TESTS_FAILED=0
 
+# Isolate the regime cache so results from earlier runs (15 min TTL) or
+# other processes never leak into these tests.
+export REGIME_CACHE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sst_regime_test.XXXXXX")"
+trap 'rm -rf "$REGIME_CACHE_DIR"' EXIT
+
 # Source modules under test
 source "$(dirname "$0")/../lib/regime_detector.sh"
 source "$(dirname "$0")/../lib/indicators.sh"
@@ -166,7 +171,7 @@ test_regime_detection_has_volatility() {
 
 test_regime_is_valid_type() {
     local result=$(detect_market_regime "GOOG")
-    local regime=$(echo "$result" | grep -o '"regime":"[^"]*' | cut -d'"' -f4)
+    local regime=$(echo "$result" | jq -r '.regime')
     
     # Check if regime is one of valid types
     case "$regime" in
@@ -258,15 +263,15 @@ test_batch_regimes_returns_array() {
 
 test_batch_regimes_multiple_symbols() {
     local result=$(detect_regimes_batch "TEST1,TEST2,TEST3")
-    local count=$(echo "$result" | grep -o '"regime"' | wc -l)
+    local count=$(echo "$result" | jq 'length' 2>/dev/null)
     
     TESTS_RUN=$((TESTS_RUN + 1))
-    if [[ $count -ge 2 ]]; then
+    if [[ "$count" == "3" ]]; then
         echo -e "${GREEN}✓ PASS${NC}: Batch regime detection processes multiple symbols"
         TESTS_PASSED=$((TESTS_PASSED + 1))
     else
         echo -e "${RED}✗ FAIL${NC}: Batch regime detection processes multiple symbols"
-        echo "  Expected at least 2 regimes, got: $count"
+        echo "  Expected a JSON array of 3 regimes, got: $count"
         TESTS_FAILED=$((TESTS_FAILED + 1))
     fi
 }
@@ -292,9 +297,9 @@ test_regime_with_invalid_lookback() {
 
 test_integration_regime_signals_for_trading() {
     local regime_json=$(detect_market_regime "INTEGRATION_TEST")
-    local regime=$(echo "$regime_json" | grep -o '"regime":"[^"]*' | cut -d'"' -f4)
-    local adx=$(echo "$regime_json" | grep -o '"adx":[0-9.]*' | cut -d: -f2)
-    local trend=$(echo "$regime_json" | grep -o '"trend":"[^"]*' | cut -d'"' -f4)
+    local regime=$(echo "$regime_json" | jq -r '.regime')
+    local adx=$(echo "$regime_json" | jq -r '.adx')
+    local trend=$(echo "$regime_json" | jq -r '.trend')
     
     TESTS_RUN=$((TESTS_RUN + 1))
     

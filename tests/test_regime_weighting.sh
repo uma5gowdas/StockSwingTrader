@@ -19,6 +19,11 @@ TESTS_RUN=0
 TESTS_PASSED=0
 TESTS_FAILED=0
 
+# Isolate the regime cache so results from earlier runs (15 min TTL) or
+# other processes never leak into these tests.
+export REGIME_CACHE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sst_regime_test.XXXXXX")"
+trap 'rm -rf "$REGIME_CACHE_DIR"' EXIT
+
 # Source modules under test
 source "$(dirname "$0")/../lib/regime_weighting.sh"
 source "$(dirname "$0")/../lib/regime_detector.sh"
@@ -89,8 +94,8 @@ assert_numeric_between() {
 
 test_sideways_weights() {
     local weights=$(get_regime_weights "sideways")
-    local mr_weight=$(echo "$weights" | grep -o '"mr_weight":[0-9]*' | cut -d: -f2)
-    local tf_weight=$(echo "$weights" | grep -o '"tf_weight":[0-9]*' | cut -d: -f2)
+    local mr_weight=$(echo "$weights" | jq -r '.mr_weight')
+    local tf_weight=$(echo "$weights" | jq -r '.tf_weight')
     
     TESTS_RUN=$((TESTS_RUN + 1))
     
@@ -107,8 +112,8 @@ test_sideways_weights() {
 
 test_trending_bull_weights() {
     local weights=$(get_regime_weights "trending_bull")
-    local mr_weight=$(echo "$weights" | grep -o '"mr_weight":[0-9]*' | cut -d: -f2)
-    local tf_weight=$(echo "$weights" | grep -o '"tf_weight":[0-9]*' | cut -d: -f2)
+    local mr_weight=$(echo "$weights" | jq -r '.mr_weight')
+    local tf_weight=$(echo "$weights" | jq -r '.tf_weight')
     
     TESTS_RUN=$((TESTS_RUN + 1))
     
@@ -125,8 +130,8 @@ test_trending_bull_weights() {
 
 test_trending_bear_weights() {
     local weights=$(get_regime_weights "trending_bear")
-    local mr_weight=$(echo "$weights" | grep -o '"mr_weight":[0-9]*' | cut -d: -f2)
-    local tf_weight=$(echo "$weights" | grep -o '"tf_weight":[0-9]*' | cut -d: -f2)
+    local mr_weight=$(echo "$weights" | jq -r '.mr_weight')
+    local tf_weight=$(echo "$weights" | jq -r '.tf_weight')
     
     TESTS_RUN=$((TESTS_RUN + 1))
     
@@ -141,9 +146,9 @@ test_trending_bear_weights() {
 
 test_volatile_weights() {
     local weights=$(get_regime_weights "volatile")
-    local mr_weight=$(echo "$weights" | grep -o '"mr_weight":[0-9]*' | cut -d: -f2)
-    local tf_weight=$(echo "$weights" | grep -o '"tf_weight":[0-9]*' | cut -d: -f2)
-    local sl_adj=$(echo "$weights" | grep -o '"stop_loss_adjustment":[0-9]*' | cut -d: -f2)
+    local mr_weight=$(echo "$weights" | jq -r '.mr_weight')
+    local tf_weight=$(echo "$weights" | jq -r '.tf_weight')
+    local sl_adj=$(echo "$weights" | jq -r '.stop_loss_adjustment')
     
     TESTS_RUN=$((TESTS_RUN + 1))
     
@@ -187,7 +192,7 @@ test_confidence_multiplier_volatile_high() {
 test_combined_score_sideways_mean_reversion() {
     # In sideways market, mean reversion gets higher weight
     local result=$(apply_regime_weights "TEST_SIDEWAYS" 80 40 "sideways")
-    local combined=$(echo "$result" | grep -o '"combined_score":[0-9.]*' | cut -d: -f2)
+    local combined=$(echo "$result" | jq -r '.combined_score')
     
     # Expected: (80 * 0.7) + (40 * 0.3) = 56 + 12 = 68
     assert_numeric_between "$combined" "67" "69" "Sideways: MR-favored combined score calculation"
@@ -196,7 +201,7 @@ test_combined_score_sideways_mean_reversion() {
 test_combined_score_trending_trend_follow() {
     # In trending market, trend follow gets higher weight
     local result=$(apply_regime_weights "TEST_TREND" 40 85 "trending_bull")
-    local combined=$(echo "$result" | grep -o '"combined_score":[0-9.]*' | cut -d: -f2)
+    local combined=$(echo "$result" | jq -r '.combined_score')
     
     # Expected: (40 * 0.3) + (85 * 0.7) = 12 + 59.5 = 71.5 * 1.1 (confidence) = 78.65
     assert_numeric_between "$combined" "77" "80" "Trending: TF-favored combined score with confidence boost"
@@ -205,7 +210,7 @@ test_combined_score_trending_trend_follow() {
 test_combined_score_volatile_reduction() {
     # In volatile market, score gets reduced 20%
     local result=$(apply_regime_weights "TEST_VOL" 60 60 "volatile")
-    local combined=$(echo "$result" | grep -o '"combined_score":[0-9.]*' | cut -d: -f2)
+    local combined=$(echo "$result" | jq -r '.combined_score')
     
     # Expected: (60 * 0.5) + (60 * 0.5) = 60, then * 0.8 = 48
     assert_numeric_between "$combined" "47" "49" "Volatile: Score reduced 20% for risk management"
@@ -222,7 +227,7 @@ test_regime_weights_returns_json() {
 
 test_regime_weights_has_symbol() {
     local result=$(apply_regime_weights "SYMBOL_TEST" 50 50)
-    assert_contains "$result" '"symbol":"SYMBOL_TEST"' "Output includes symbol"
+    assert_equals "SYMBOL_TEST" "$(echo "$result" | jq -r '.symbol')" "Output includes symbol"
 }
 
 test_regime_weights_has_recommendation() {
@@ -246,7 +251,7 @@ test_regime_weights_has_timestamp() {
 
 test_select_best_strategy_sideways_high_mr() {
     local result=$(select_best_strategy "SELECT_SIDEWAYS" 85 30)
-    local strategy=$(echo "$result" | grep -o '"best_strategy":"[^"]*' | cut -d'"' -f4)
+    local strategy=$(echo "$result" | jq -r '.best_strategy')
     
     TESTS_RUN=$((TESTS_RUN + 1))
     
@@ -266,7 +271,7 @@ test_select_best_strategy_trending_high_tf() {
     
     # Create a mock regime scenario by setting test data
     local result=$(apply_regime_weights "SELECT_TREND" 30 85 "trending_bull")
-    local recommendation=$(echo "$result" | grep -o '"recommendation":"[^"]*' | cut -d'"' -f4)
+    local recommendation=$(echo "$result" | jq -r '.recommendation')
     
     TESTS_RUN=$((TESTS_RUN + 1))
     
@@ -315,15 +320,24 @@ test_adjusted_stop_loss_volatile() {
 
 test_regime_change_detection_no_change() {
     local result=$(detect_regime_change "NO_CHANGE" "sideways")
-    local changed=$(echo "$result" | grep -o '"changed":[a-z]*' | cut -d: -f2)
+    local changed=$(echo "$result" | jq -r '.changed')
+    local current=$(detect_market_regime "NO_CHANGE" | jq -r '.regime')
     
-    # Depends on what regime detector returns, but structure should be valid
-    assert_contains "$result" '"changed"' "Regime change detection returns changed field"
+    # Previous regime equals the detected one -> no change, no action
+    if [[ "$current" == "sideways" ]]; then
+        assert_equals "false" "$changed" "Regime change detection: same regime reports changed=false"
+    else
+        assert_equals "true" "$changed" "Regime change detection: different regime reports changed=true"
+    fi
 }
 
 test_regime_change_action_triggered() {
-    local result=$(detect_regime_change "CHANGE_TEST" "sideways")
-    assert_contains "$result" '"action"' "Regime change detection returns action field"
+    # Mock data is classified sideways, so coming from volatile is a change
+    local current=$(detect_market_regime "CHANGE_TEST" | jq -r '.regime')
+    assert_equals "sideways" "$current" "Mock price series is classified as sideways"
+    local result=$(detect_regime_change "CHANGE_TEST" "volatile")
+    assert_equals "true" "$(echo "$result" | jq -r '.changed')" "Regime change volatile -> sideways detected"
+    assert_equals "switch_to_mean_reversion" "$(echo "$result" | jq -r '.action')" "Regime change to sideways triggers mean reversion switch"
 }
 
 # ============================================================================
@@ -368,7 +382,7 @@ test_win_rate_improvement_trending() {
 
 test_score_clamping_high() {
     local result=$(apply_regime_weights "CLAMP_HIGH" 150 150)
-    local combined=$(echo "$result" | grep -o '"combined_score":[0-9.]*' | cut -d: -f2)
+    local combined=$(echo "$result" | jq -r '.combined_score')
     
     TESTS_RUN=$((TESTS_RUN + 1))
     
@@ -384,7 +398,7 @@ test_score_clamping_high() {
 
 test_score_clamping_low() {
     local result=$(apply_regime_weights "CLAMP_LOW" -50 -50)
-    local combined=$(echo "$result" | grep -o '"combined_score":[0-9.]*' | cut -d: -f2)
+    local combined=$(echo "$result" | jq -r '.combined_score')
     
     TESTS_RUN=$((TESTS_RUN + 1))
     

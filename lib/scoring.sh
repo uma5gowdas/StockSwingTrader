@@ -280,7 +280,19 @@ calculate_confluence_score_v2() {
     
     if command -v ml_predict_direction &>/dev/null; then
         local ml_result
-        ml_result=$(timeout 5 ml_predict_direction "$symbol" 5 2>/dev/null || echo "{\"error\": \"timeout\"}")
+        # macOS has no coreutils `timeout`; this perl helper runs the predictor
+        # CLI in its own process group and kills the whole group (bash + python)
+        # when ML_TIMEOUT_SECONDS (default 5) elapses.
+        ml_result=$(perl -e '
+            my $t = shift;
+            my $pid = fork() // exit 125;
+            if ($pid == 0) { setpgrp(0, 0); exec @ARGV or exit 127; }
+            $SIG{ALRM} = sub { kill "TERM", -$pid; kill "TERM", $pid; exit 124; };
+            alarm $t;
+            waitpid($pid, 0);
+            exit($? >> 8);' "${ML_TIMEOUT_SECONDS:-5}" \
+            bash "${SCRIPT_DIR}/ml_predictor.sh" predict "$symbol" 5 </dev/null 2>/dev/null \
+            || echo "{\"error\": \"timeout_or_failure\"}")
         
         if [[ ! "$ml_result" =~ "error" ]]; then
             ml_confidence=$(echo "$ml_result" | jq -r '.confidence // 50' 2>/dev/null || echo "50")

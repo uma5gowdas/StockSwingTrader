@@ -65,6 +65,11 @@ log_error() {
     echo "[ERROR] $msg" >&2
 }
 
+log_warn() {
+    local msg="$1"
+    echo "[WARN] $msg" >&2
+}
+
 log_debug() {
     if [[ "$DEBUG_BACKTEST" == "true" ]]; then
         local msg="$1"
@@ -555,4 +560,5 @@ export -f backtest_multi_symbol
 export -f generate_backtest_reports
 export -f log_info
 export -f log_error
+export -f log_warn
 export -f log_debug

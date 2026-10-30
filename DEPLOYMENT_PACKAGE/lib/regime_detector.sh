@@ -21,11 +21,47 @@ source "$(dirname "${BASH_SOURCE[0]}")/indicators.sh" 2>/dev/null
 source "$(dirname "${BASH_SOURCE[0]}")/trading_thresholds.sh" 2>/dev/null
 source "$(dirname "${BASH_SOURCE[0]}")/kalman_filter.sh" 2>/dev/null
 
-# Cache directory setup
-REGIME_CACHE_DIR="${HOME}/.stockswingtrader/regime_cache"
+# Cache directory setup (override REGIME_CACHE_DIR to isolate, e.g. in tests)
+REGIME_CACHE_DIR="${REGIME_CACHE_DIR:-${HOME}/.stockswingtrader/regime_cache}"
 REGIME_CACHE_TTL=900  # 15 minutes in seconds
 
 mkdir -p "$REGIME_CACHE_DIR"
+
+# ============================================================================
+# Helper: Floating-point math (bash arithmetic is integer-only)
+# ============================================================================
+
+# Last value of a JSON number array such as "[0,101.25,102.5]"
+_regime_last_value() {
+    echo "$1" | tr -d '[] ' | tr ',' '\n' | tail -1
+}
+
+# Last EMA(period) value, or the mean of all prices when there are fewer
+# prices than the period (calc_ema emits zeros until it has enough data).
+# Args: period, prices...
+_regime_ema_or_mean() {
+    local period=$1
+    shift
+    if [[ $# -eq 0 ]]; then
+        echo ""
+        return
+    fi
+    if [[ $# -lt $period ]]; then
+        printf "%.2f" "$(calc_mean "$@")"
+        return
+    fi
+    _regime_last_value "$(calc_ema "$period" "$@")"
+}
+
+# ADX approximation from EMA separation: min(100, |ema_20 - ema_50| * 10)
+_regime_adx_from_emas() {
+    awk -v a="$1" -v b="$2" 'BEGIN { d = a - b; if (d < 0) d = -d; d = d * 10; if (d > 100) d = 100; printf "%.2f", d }'
+}
+
+# Floating-point comparison: _regime_gt a b  -> exit 0 when a > b
+_regime_gt() {
+    awk -v a="$1" -v b="$2" 'BEGIN { exit !(a > b) }'
+}
 
 # ============================================================================
 # Helper: Cache Management
@@ -121,23 +157,9 @@ calc_adx_approx() {
         return
     fi
     
-    # Calculate simple trend strength based on EMA separation
-    local diff=$((ema_20 - ema_50))
-    
-    # Avoid negative, use absolute value
-    if [[ $diff -lt 0 ]]; then
-        diff=$((-diff))
-    fi
-    
-    # Scale to 0-100: higher EMA separation = stronger trend
-    # Basic scaling: multiply by a factor and cap at 100
-    local trend_strength=$((diff * 10))
-    
-    if [[ $trend_strength -gt 100 ]]; then
-        echo "100"
-    else
-        echo "$trend_strength"
-    fi
+    # Trend strength from EMA separation, scaled x10 and capped at 100.
+    # Computed with awk because EMAs are decimals (e.g. 100.2).
+    awk -v a="$ema_20" -v b="$ema_50" 'BEGIN { d = a - b; if (d < 0) d = -d; d = d * 10; if (d > 100) d = 100; printf "%.0f", d }'
 }
 
 # ============================================================================
@@ -222,13 +244,9 @@ EOF
                           104.0 103.2 103.8 104.5 105.0 104.8 105.5 106.0 105.8 106.5
                           107.0 106.8 107.5 108.0 107.8 108.5 109.0 108.8 109.5 110.0)
     
-    # Calculate indicators
-    local ema_20_str=$(calc_ema 20 "${mock_closes[@]}")
-    local ema_50_str=$(calc_ema 50 "${mock_closes[@]}" 2>/dev/null || echo "[$(printf ',0%.0s' {1..49})0]")
-    
-    # Extract last EMA values
-    local ema_20=$(echo "$ema_20_str" | grep -o '[0-9.]*' | tail -1)
-    local ema_50=$(echo "$ema_50_str" | grep -o '[0-9.]*' | tail -1)
+    # Calculate indicators (EMA50 falls back to the mean when < 50 prices)
+    local ema_20=$(_regime_ema_or_mean 20 "${mock_closes[@]}")
+    local ema_50=$(_regime_ema_or_mean 50 "${mock_closes[@]}")
     
     if [[ -z "$ema_20" ]] || [[ -z "$ema_50" ]]; then
         ema_20=100
@@ -247,25 +265,14 @@ EOF
         bb_lower=90
     fi
     
-    # Calculate ADX approximation (simplified)
-    local adx=50  # Default middle value
-    local diff=$((ema_20 - ema_50))
-    if [[ $diff -lt 0 ]]; then
-        diff=$((-diff))
-    fi
-    adx=$((diff * 10))
-    if [[ $adx -gt 100 ]]; then
-        adx=100
-    fi
+    # Calculate ADX approximation (simplified, float-safe)
+    local adx=$(_regime_adx_from_emas "$ema_20" "$ema_50")
     
-    # Calculate BB width percentage (simplified)
+    # Calculate BB width percentage (simplified, float-safe, capped at 100)
     local volatility=50  # Default middle value
-    if [[ -n "$bb_middle" && "$bb_middle" != "0" ]]; then
-        local bb_width=$((bb_upper - bb_lower))
-        volatility=$((bb_width * 100 / bb_middle))
-        if [[ $volatility -gt 100 ]]; then
-            volatility=100
-        fi
+    if [[ -n "$bb_middle" ]] && _regime_gt "$bb_middle" 0; then
+        volatility=$(awk -v u="$bb_upper" -v l="$bb_lower" -v m="$bb_middle" \
+            'BEGIN { v = (u - l) * 100 / m; if (v > 100) v = 100; printf "%.2f", v }')
     fi
     
     # Detect trend direction
@@ -275,10 +282,10 @@ EOF
     local regime="sideways"
     
     # Check for high volatility first (overrides other regimes)
-    if [[ $volatility -gt 20 ]]; then
+    if _regime_gt "$volatility" 20; then
         regime="volatile"
     # Check for trending conditions
-    elif [[ $adx -gt 25 ]]; then
+    elif _regime_gt "$adx" 25; then
         if [[ "$trend" == "up" ]]; then
             regime="trending_bull"
         elif [[ "$trend" == "down" ]]; then
@@ -351,13 +358,10 @@ EOF
     # Apply Kalman filter to prices
     local kalman_result=$(apply_kalman_filter "${prices[@]}" -q 0.01 -r 0.1)
     
-    # Extract filtered prices
-    local filtered_json=$(echo "$kalman_result" | grep -oP '"filtered_prices":\s*\K\[[^\]]*\]')
-    local -a filtered_prices=($(echo "$filtered_json" | grep -oE '[0-9]+(\.[0-9]+)?' | tr '\n' ' '))
-    
-    # Extract residuals for noise level
-    local residuals_json=$(echo "$kalman_result" | grep -oP '"residuals":\s*\K\[[^\]]*\]')
-    local -a residuals=($(echo "$residuals_json" | grep -oE '-?[0-9]+(\.[0-9]+)?' | tr '\n' ' '))
+    # Extract filtered prices and residuals. The Python backend emits
+    # multi-line JSON, so parse with jq (grep -P is unavailable on macOS).
+    local -a filtered_prices=($(echo "$kalman_result" | jq -r '(.filtered_prices // [])[]' 2>/dev/null))
+    local -a residuals=($(echo "$kalman_result" | jq -r '(.residuals // [])[]' 2>/dev/null))
     
     # Calculate noise level (volatility of residuals)
     local noise_level=0
@@ -365,21 +369,11 @@ EOF
         noise_level=$(calc_residual_volatility "${residuals[@]}")
     fi
     
-    # Calculate EMAs on raw prices
-    local ema_20_raw_str=$(calc_ema 20 "${prices[@]}")
-    local ema_50_raw_str=$(calc_ema 50 "${prices[@]}" 2>/dev/null || echo "[0]")
-    
-    # Extract EMA values
-    local ema_20_raw=$(echo "$ema_20_raw_str" | grep -o '[0-9.]*' | tail -1)
-    local ema_50_raw=$(echo "$ema_50_raw_str" | grep -o '[0-9.]*' | tail -1)
-    
-    # Calculate EMAs on filtered prices
-    local ema_20_filtered_str=$(calc_ema 20 "${filtered_prices[@]}")
-    local ema_50_filtered_str=$(calc_ema 50 "${filtered_prices[@]}" 2>/dev/null || echo "[0]")
-    
-    # Extract filtered EMA values
-    local ema_20_filtered=$(echo "$ema_20_filtered_str" | grep -o '[0-9.]*' | tail -1)
-    local ema_50_filtered=$(echo "$ema_50_filtered_str" | grep -o '[0-9.]*' | tail -1)
+    # EMAs on raw and filtered prices (mean fallback when data is short)
+    local ema_20_raw=$(_regime_ema_or_mean 20 "${prices[@]}")
+    local ema_50_raw=$(_regime_ema_or_mean 50 "${prices[@]}")
+    local ema_20_filtered=$(_regime_ema_or_mean 20 "${filtered_prices[@]}")
+    local ema_50_filtered=$(_regime_ema_or_mean 50 "${filtered_prices[@]}")
     
     # Set defaults if empty
     if [[ -z "$ema_20_raw" ]] || [[ -z "$ema_50_raw" ]]; then
@@ -396,22 +390,15 @@ EOF
     local raw_trend=$(detect_trend_direction "$ema_20_raw" "$ema_50_raw")
     local filtered_trend=$(detect_trend_direction "$ema_20_filtered" "$ema_50_filtered")
     
-    # Calculate ADX from EMAs
-    local adx=$((10 * ((ema_20_raw - ema_50_raw) / 10)))
-    if [[ $adx -lt 0 ]]; then
-        adx=$((-adx))
-    fi
-    if [[ $adx -gt 100 ]]; then
-        adx=100
-    fi
+    # Calculate ADX from EMAs (same approximation as detect_market_regime)
+    local adx=$(_regime_adx_from_emas "$ema_20_raw" "$ema_50_raw")
     
     # Determine regime using Kalman-filtered trend (more reliable)
     local regime="sideways"
-    local volatility=50
     
-    if [[ $(echo "$noise_level > 2" | bc -l) -eq 1 ]]; then
+    if _regime_gt "$noise_level" 2; then
         regime="volatile"
-    elif [[ $adx -gt 25 ]]; then
+    elif _regime_gt "$adx" 25; then
         if [[ "$filtered_trend" == "up" ]]; then
             regime="trending_bull"
         elif [[ "$filtered_trend" == "down" ]]; then

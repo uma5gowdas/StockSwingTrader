@@ -2,21 +2,30 @@
 # ============================================================================
 # StockSwingTrader: Backtesting Test Suite
 # ============================================================================
-# Tests Enhancement 4: Complete Backtesting Module
+# Tests Enhancement 4: Complete Backtesting Module by running the real
+# pipeline (lib/backtest.sh -> lib/backtest_engine.py -> report generator)
+# and checking its outputs against values recomputed from the trade journal.
 # Tests:
-#   1. Backtest engine execution
-#   2. Trade log output format
-#   3. Performance metric calculations
-#   4. Multiple output formats (JSON, HTML, CSV)
+#   1. Metric helper functions with known inputs
+#   2. Backtest engine execution and results JSON
+#   3. Metrics consistent with trade journal / equity curve
+#   4. CSV trade log and HTML report generation
+#   5. Determinism and error handling
+#
+# Runs offline: SST_OFFLINE=1 makes the engine use seeded synthetic prices.
 # ============================================================================
 
 set -o pipefail
 
-# Source modules
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+export SST_OFFLINE=1
+OUTPUT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sst_backtest_test.XXXXXX")"
+trap 'rm -rf "$OUTPUT_DIR"' EXIT
+export BACKTEST_OUTPUT_DIR="$OUTPUT_DIR"
+
 source "${PROJECT_DIR}/lib/backtest.sh"
-source "${PROJECT_DIR}/lib/indicators.sh"
 
 # Color codes for output
 RED='\033[0;31m'
@@ -30,105 +39,42 @@ TESTS_RUN=0
 TESTS_PASSED=0
 TESTS_FAILED=0
 
-# Configuration
-OUTPUT_DIR="${PROJECT_DIR}/.agents/tasks/backtest_test_results"
-MOCK_DATA_FILE="${SCRIPT_DIR}/mock_data.json"
+SYMBOL="AAPL"
+START_DATE="2020-01-01"
+END_DATE="2024-01-01"
+RESULT_FILE=""
 
 # ============================================================================
 # Test Utilities
 # ============================================================================
 
+pass() { ((TESTS_RUN++)); ((TESTS_PASSED++)); echo -e "${GREEN}✓${NC} $1"; }
+fail() { ((TESTS_RUN++)); ((TESTS_FAILED++)); echo -e "${RED}✗${NC} $1"; [[ -n "$2" ]] && echo "  $2"; }
+
+test_assert_equal() {
+    local actual=$1 expected=$2 test_name=$3
+    if [[ "$actual" == "$expected" ]]; then pass "$test_name"
+    else fail "$test_name" "Expected: $expected, Got: $actual"; fi
+}
+
 test_assert_file_exists() {
-    local filepath=$1
-    local test_name=$2
-    
-    ((TESTS_RUN++))
-    
-    if [[ -f "$filepath" ]]; then
-        echo -e "${GREEN}✓${NC} $test_name"
-        ((TESTS_PASSED++))
-        return 0
-    else
-        echo -e "${RED}✗${NC} $test_name"
-        echo "  File not found: $filepath"
-        ((TESTS_FAILED++))
-        return 1
-    fi
+    if [[ -s "$1" ]]; then pass "$2"; else fail "$2" "Missing or empty: $1"; fi
 }
 
-test_assert_json_valid() {
-    local filepath=$1
-    local test_name=$2
-    
-    ((TESTS_RUN++))
-    
-    if jq empty "$filepath" 2>/dev/null; then
-        echo -e "${GREEN}✓${NC} $test_name"
-        ((TESTS_PASSED++))
-        return 0
-    else
-        echo -e "${RED}✗${NC} $test_name"
-        echo "  Invalid JSON: $filepath"
-        ((TESTS_FAILED++))
-        return 1
-    fi
+# Passes when the jq expression is true for the file
+test_assert_jq_file() {
+    local file=$1 expr=$2 test_name=$3
+    if jq -e "$expr" "$file" > /dev/null 2>&1; then pass "$test_name"
+    else fail "$test_name" "jq '$expr' was not true (got: $(jq -c "$expr" "$file" 2>&1 | head -c 200))"; fi
 }
 
-test_assert_has_key() {
-    local filepath=$1
-    local key=$2
-    local test_name=$3
-    
-    ((TESTS_RUN++))
-    
-    if jq -e ".$key" "$filepath" > /dev/null 2>&1; then
-        echo -e "${GREEN}✓${NC} $test_name"
-        ((TESTS_PASSED++))
-        return 0
+# |a - b| <= tol
+test_assert_close() {
+    local a=$1 b=$2 tol=$3 test_name=$4
+    if awk -v a="$a" -v b="$b" -v t="$tol" 'BEGIN { d = a - b; if (d < 0) d = -d; exit !(d <= t) }'; then
+        pass "$test_name"
     else
-        echo -e "${RED}✗${NC} $test_name"
-        echo "  Missing key: $key"
-        ((TESTS_FAILED++))
-        return 1
-    fi
-}
-
-test_assert_range() {
-    local value=$1
-    local min=$2
-    local max=$3
-    local test_name=$4
-    
-    ((TESTS_RUN++))
-    
-    if (( $(echo "$value >= $min && $value <= $max" | bc -l) )); then
-        echo -e "${GREEN}✓${NC} $test_name"
-        ((TESTS_PASSED++))
-        return 0
-    else
-        echo -e "${RED}✗${NC} $test_name"
-        echo "  Expected: [$min, $max], Got: $value"
-        ((TESTS_FAILED++))
-        return 1
-    fi
-}
-
-test_assert_gt() {
-    local value=$1
-    local threshold=$2
-    local test_name=$3
-    
-    ((TESTS_RUN++))
-    
-    if (( $(echo "$value > $threshold" | bc -l) )); then
-        echo -e "${GREEN}✓${NC} $test_name"
-        ((TESTS_PASSED++))
-        return 0
-    else
-        echo -e "${RED}✗${NC} $test_name"
-        echo "  Expected > $threshold, Got: $value"
-        ((TESTS_FAILED++))
-        return 1
+        fail "$test_name" "Expected $b ± $tol, Got: $a"
     fi
 }
 
@@ -136,236 +82,114 @@ test_assert_gt() {
 # Test Cases
 # ============================================================================
 
-test_backtest_output_generation() {
-    echo -e "\n${BLUE}=== Test 1: Backtest Output Generation ===${NC}"
-    
-    # Prepare output directory
-    mkdir -p "$OUTPUT_DIR"
-    
-    # Create a simple mock backtest result
-    local result_file="${OUTPUT_DIR}/AAPL_backtest_results.json"
-    
-    # Generate mock backtest results
-    cat > "$result_file" << 'EOF'
-{
-  "symbol": "AAPL",
-  "period": {
-    "start": "2024-01-01",
-    "end": "2024-10-30",
-    "days": 273
-  },
-  "parameters": {
-    "rsi_oversold": 30,
-    "rsi_overbought": 70,
-    "bb_period": 20,
-    "stop_loss_pct": 0.02,
-    "profit_target_mult": 2.0
-  },
-  "performance": {
-    "total_trades": 42,
-    "winning_trades": 26,
-    "losing_trades": 16,
-    "win_rate": 0.619,
-    "avg_win": 258.45,
-    "avg_loss": -142.30,
-    "profit_factor": 1.87,
-    "payoff_ratio": 1.82,
-    "sharpe_ratio": 1.45,
-    "max_drawdown": -0.156,
-    "total_return_pct": 23.8,
-    "annual_return_pct": 10.9
-  },
-  "trades": [
-    {
-      "entry_date": "2024-01-15",
-      "entry_price": 185.50,
-      "exit_date": "2024-01-18",
-      "exit_price": 188.75,
-      "profit": 3.25,
-      "profit_pct": 1.75,
-      "status": "win"
-    }
-  ]
-}
-EOF
+test_metric_helpers() {
+    echo -e "\n${BLUE}=== Test 1: Metric Helper Functions ===${NC}"
 
-    test_assert_file_exists "$result_file" "Backtest results file created"
-    test_assert_json_valid "$result_file" "Results JSON is valid"
-    test_assert_has_key "$result_file" "performance" "Contains 'performance' key"
-    test_assert_has_key "$result_file" "trades" "Contains 'trades' key"
-    
-    # Verify performance metrics
-    local win_rate=$(jq '.performance.win_rate' "$result_file")
-    test_assert_range "$win_rate" "0" "1" "Win rate in valid range"
-    
-    local sharpe=$(jq '.performance.sharpe_ratio' "$result_file")
-    test_assert_gt "$sharpe" "1" "Sharpe ratio > 1 (good)"
-    
-    local max_dd=$(jq '.performance.max_drawdown' "$result_file")
-    test_assert_range "$max_dd" "-1" "0" "Max drawdown is negative"
+    local trades='[{"pnl": 100}, {"pnl": -50}, {"pnl": 50}, {"pnl": -25}]'
+    # gross profit 150 / gross loss 75
+    test_assert_close "$(calculate_profit_factor "$trades")" "2.0" "0.0001" "Profit factor = gross profit / gross loss"
+    # avg win 75 / avg loss 37.5
+    test_assert_close "$(calculate_payoff_ratio "$trades")" "2.0" "0.0001" "Payoff ratio = avg win / avg loss"
+    test_assert_equal "$(calculate_profit_factor '[]')" "0" "Profit factor of no trades is 0"
+    # Peak 120 -> trough 90 = -25%
+    test_assert_close "$(calculate_max_drawdown '[100, 120, 90, 130]')" "-25" "0.0001" "Max drawdown from equity curve"
+    test_assert_close "$(calculate_sharpe_ratio '[0.01, 0.01, 0.01]')" "0" "0" "Sharpe ratio is 0 for zero-variance returns"
+    local sharpe
+    sharpe=$(calculate_sharpe_ratio '[0.01, -0.005, 0.02, 0.0]')
+    if awk -v s="$sharpe" 'BEGIN { exit !(s > 0) }'; then pass "Sharpe ratio positive for positive mean returns ($sharpe)"
+    else fail "Sharpe ratio positive for positive mean returns" "Got: $sharpe"; fi
 }
 
-test_backtest_csv_output() {
-    echo -e "\n${BLUE}=== Test 2: CSV Trade Log Output ===${NC}"
-    
-    # Create mock CSV output
-    local csv_file="${OUTPUT_DIR}/AAPL_trades.csv"
-    cat > "$csv_file" << 'EOF'
-entry_date,entry_price,exit_date,exit_price,profit,profit_pct,status
-2024-01-15,185.50,2024-01-18,188.75,3.25,1.75,win
-2024-01-22,190.10,2024-01-25,187.50,-2.60,-1.37,loss
-2024-02-05,192.30,2024-02-08,198.45,6.15,3.20,win
-2024-02-15,195.80,2024-02-18,193.20,-2.60,-1.33,loss
-2024-03-01,200.50,2024-03-05,205.30,4.80,2.39,win
-EOF
+test_backtest_execution() {
+    echo -e "\n${BLUE}=== Test 2: Backtest Engine Execution ===${NC}"
 
-    test_assert_file_exists "$csv_file" "CSV trades file created"
-    
-    # Verify CSV format
-    local line_count=$(wc -l < "$csv_file")
-    ((TESTS_RUN++))
-    if [[ $line_count -gt 1 ]]; then
-        echo -e "${GREEN}✓${NC} CSV contains data rows"
-        ((TESTS_PASSED++))
-    else
-        echo -e "${RED}✗${NC} CSV is empty"
-        ((TESTS_FAILED++))
-    fi
-    
-    # Verify header
-    ((TESTS_RUN++))
-    if head -1 "$csv_file" | grep -q "entry_date"; then
-        echo -e "${GREEN}✓${NC} CSV has proper header"
-        ((TESTS_PASSED++))
-    else
-        echo -e "${RED}✗${NC} CSV header missing"
-        ((TESTS_FAILED++))
-    fi
+    local output rc
+    output=$(backtest_strategy "$SYMBOL" "$START_DATE" "$END_DATE" 80 2>/dev/null); rc=$?
+    test_assert_equal "$rc" "0" "backtest_strategy exits 0"
+
+    RESULT_FILE=$(echo "$output" | tail -1)
+    test_assert_file_exists "$RESULT_FILE" "Results JSON written to BACKTEST_OUTPUT_DIR"
+    [[ -s "$RESULT_FILE" ]] || return 1
+
+    test_assert_jq_file "$RESULT_FILE" '.' "Results JSON is valid"
+    test_assert_jq_file "$RESULT_FILE" '.symbol == "AAPL"' "Results record the symbol"
+    test_assert_jq_file "$RESULT_FILE" '.period == "2020-01-01 to 2024-01-01"' "Results record the period"
+    test_assert_jq_file "$RESULT_FILE" '.strategy == "mean_reversion" or .strategy == "trend_follow"' "Best strategy is a known strategy"
+    test_assert_jq_file "$RESULT_FILE" \
+        'all(.total_pnl, .win_rate, .sharpe_ratio, .max_drawdown, .profit_factor, .payoff_ratio, .num_trades; type == "number")' \
+        "All performance metrics are numbers"
+    test_assert_jq_file "$RESULT_FILE" '.num_trades >= 1' "Backtest executed at least 1 trade"
 }
 
-test_backtest_html_report() {
-    echo -e "\n${BLUE}=== Test 3: HTML Report Generation ===${NC}"
-    
-    # Create mock HTML report
-    local html_file="${OUTPUT_DIR}/AAPL_backtest_report.html"
-    cat > "$html_file" << 'EOF'
-<!DOCTYPE html>
-<html>
-<head>
-  <title>Backtest Report - AAPL</title>
-  <style>
-    body { font-family: Arial; margin: 20px; }
-    table { border-collapse: collapse; width: 100%; }
-    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-    th { background-color: #4CAF50; color: white; }
-    .metric { font-weight: bold; }
-  </style>
-</head>
-<body>
-  <h1>Backtest Report: AAPL</h1>
-  <h2>Performance Metrics</h2>
-  <table>
-    <tr><th>Metric</th><th>Value</th></tr>
-    <tr><td>Win Rate</td><td>61.9%</td></tr>
-    <tr><td>Total Trades</td><td>42</td></tr>
-    <tr><td>Sharpe Ratio</td><td>1.45</td></tr>
-    <tr><td>Max Drawdown</td><td>-15.6%</td></tr>
-    <tr><td>Total Return</td><td>23.8%</td></tr>
-  </table>
-</body>
-</html>
-EOF
+test_metrics_consistency() {
+    echo -e "\n${BLUE}=== Test 3: Metrics Match Trade Journal & Equity Curve ===${NC}"
+    [[ -s "$RESULT_FILE" ]] || { fail "Results file available"; return 1; }
 
-    test_assert_file_exists "$html_file" "HTML report file created"
-    
-    ((TESTS_RUN++))
-    if grep -q "Backtest Report" "$html_file"; then
-        echo -e "${GREEN}✓${NC} HTML contains report title"
-        ((TESTS_PASSED++))
-    else
-        echo -e "${RED}✗${NC} HTML missing report title"
-        ((TESTS_FAILED++))
-    fi
-    
-    ((TESTS_RUN++))
-    if grep -q "Performance Metrics" "$html_file"; then
-        echo -e "${GREEN}✓${NC} HTML contains performance section"
-        ((TESTS_PASSED++))
-    else
-        echo -e "${RED}✗${NC} HTML missing performance section"
-        ((TESTS_FAILED++))
-    fi
+    # 80/20 split of the weekday bars in the period
+    local bars
+    bars=$(python3 -c "import pandas as pd; d = pd.date_range('$START_DATE', '$END_DATE', freq='D'); n = int((d.day_of_week < 5).sum()); print(n - int(n * 0.8))")
+    test_assert_jq_file "$RESULT_FILE" ".data_points == $bars" "Test split has 20% of bars ($bars)"
+    test_assert_jq_file "$RESULT_FILE" '(.equity_curve | length) == .data_points' "Equity curve has one point per bar"
+    test_assert_jq_file "$RESULT_FILE" '.num_trades == (.trade_journal | length)' "num_trades matches trade journal"
+    test_assert_jq_file "$RESULT_FILE" \
+        '((.total_pnl - ([.trade_journal[].pnl] | add)) | fabs) < 0.01' "total_pnl = sum of trade P&L"
+    test_assert_jq_file "$RESULT_FILE" \
+        '((.win_rate - (([.trade_journal[] | select(.pnl > 0)] | length) * 100 / .num_trades)) | fabs) < 0.0001' \
+        "win_rate (%) = winning trades / trades"
+    test_assert_jq_file "$RESULT_FILE" '.win_rate >= 0 and .win_rate <= 100' "Win rate in [0, 100]%"
+    test_assert_jq_file "$RESULT_FILE" '((.final_capital - .initial_capital - .total_pnl) | fabs) < 0.01' \
+        "final_capital = initial_capital + total_pnl"
+    test_assert_jq_file "$RESULT_FILE" '.max_drawdown <= 0 and .max_drawdown > -100' "Max drawdown in (-100, 0]%"
+
+    # Drawdown must come from the mark-to-market equity curve
+    local recomputed
+    recomputed=$(calculate_max_drawdown "$(jq -c '.equity_curve' "$RESULT_FILE")")
+    test_assert_close "$(jq '.max_drawdown' "$RESULT_FILE")" "$recomputed" "0.001" "max_drawdown matches equity curve"
+    # Equity is cash + open position, so it never collapses to the cash left after buying
+    test_assert_jq_file "$RESULT_FILE" '(.equity_curve | min) > (.initial_capital * 0.5)' \
+        "Equity curve is marked to market (min > 50% of capital)"
+    test_assert_jq_file "$RESULT_FILE" \
+        'all(.trade_journal[]; .exit_time >= .entry_time and .entry_price > 0 and .exit_price > 0)' \
+        "Every trade exits on/after entry with positive prices"
 }
 
-test_backtest_metrics_validation() {
-    echo -e "\n${BLUE}=== Test 4: Performance Metrics Validation ===${NC}"
-    
-    local result_file="${OUTPUT_DIR}/AAPL_backtest_results.json"
-    
-    if [[ ! -f "$result_file" ]]; then
-        echo -e "${YELLOW}⚠${NC} Skipping metrics validation (no results file)"
-        ((TESTS_RUN++))
-        ((TESTS_PASSED++))
-        return 0
-    fi
-    
-    # Validate win rate is between 0 and 1
-    local win_rate=$(jq '.performance.win_rate' "$result_file")
-    test_assert_range "$win_rate" "0" "1" "Win rate in [0, 1]"
-    
-    # Validate profit factor is positive
-    local pf=$(jq '.performance.profit_factor' "$result_file")
-    test_assert_gt "$pf" "0" "Profit factor > 0"
-    
-    # Validate max drawdown is negative (should be <= 0)
-    local max_dd=$(jq '.performance.max_drawdown' "$result_file")
-    ((TESTS_RUN++))
-    if (( $(echo "$max_dd <= 0" | bc -l) )); then
-        echo -e "${GREEN}✓${NC} Max drawdown <= 0"
-        ((TESTS_PASSED++))
-    else
-        echo -e "${RED}✗${NC} Max drawdown should be <= 0 (got: $max_dd)"
-        ((TESTS_FAILED++))
-    fi
-    
-    # Validate trade count
-    local total_trades=$(jq '.performance.total_trades' "$result_file")
-    ((TESTS_RUN++))
-    if [[ $total_trades -gt 0 ]]; then
-        echo -e "${GREEN}✓${NC} Backtest executed at least 1 trade"
-        ((TESTS_PASSED++))
-    else
-        echo -e "${RED}✗${NC} No trades executed"
-        ((TESTS_FAILED++))
-    fi
+test_reports() {
+    echo -e "\n${BLUE}=== Test 4: CSV Trade Log & HTML Report ===${NC}"
+    [[ -s "$RESULT_FILE" ]] || { fail "Results file available"; return 1; }
+
+    local csv_file="${RESULT_FILE%.json}.csv"
+    local html_file="${RESULT_FILE%.json}.html"
+
+    test_assert_file_exists "$csv_file" "CSV trade log generated"
+    test_assert_equal "$(head -1 "$csv_file" | tr -d '\r')" \
+        "entry_time,exit_time,entry_price,exit_price,pnl,return_pct,reason" "CSV has trade journal header"
+    test_assert_equal "$(( $(wc -l < "$csv_file") - 1 ))" "$(jq '.num_trades' "$RESULT_FILE")" "CSV has one row per trade"
+
+    test_assert_file_exists "$html_file" "HTML report generated"
+    if grep -q "Backtest Report: AAPL" "$html_file"; then pass "HTML report title names the symbol"
+    else fail "HTML report title names the symbol"; fi
+    local trades
+    trades=$(jq '.num_trades' "$RESULT_FILE")
+    if grep -A1 'metric-label">Trades' "$html_file" | grep -q ">${trades}<"; then pass "HTML report shows trade count ($trades)"
+    else fail "HTML report shows trade count ($trades)"; fi
 }
 
-test_backtest_parameter_consistency() {
-    echo -e "\n${BLUE}=== Test 5: Parameter Consistency ===${NC}"
-    
-    local result_file="${OUTPUT_DIR}/AAPL_backtest_results.json"
-    
-    if [[ ! -f "$result_file" ]]; then
-        echo -e "${YELLOW}⚠${NC} Skipping parameter test (no results file)"
-        ((TESTS_RUN++))
-        ((TESTS_PASSED++))
-        return 0
-    fi
-    
-    # Verify parameters are stored
-    test_assert_has_key "$result_file" "parameters" "Parameters stored in results"
-    test_assert_has_key "$result_file" "period" "Period information stored"
-    
-    # Verify trades array
-    ((TESTS_RUN++))
-    local trade_count=$(jq '.trades | length' "$result_file")
-    if [[ $trade_count -ge 0 ]]; then
-        echo -e "${GREEN}✓${NC} Trades array is valid"
-        ((TESTS_PASSED++))
-    else
-        echo -e "${RED}✗${NC} Trades array invalid"
-        ((TESTS_FAILED++))
-    fi
+test_determinism_and_errors() {
+    echo -e "\n${BLUE}=== Test 5: Determinism & Error Handling ===${NC}"
+    [[ -s "$RESULT_FILE" ]] || { fail "Results file available"; return 1; }
+
+    sleep 1  # results files are timestamped to the second
+    local second
+    second=$(backtest_strategy "$SYMBOL" "$START_DATE" "$END_DATE" 80 2>/dev/null | tail -1)
+    test_assert_equal "$(jq -c '[.total_pnl, .num_trades]' "$second" 2>/dev/null)" \
+        "$(jq -c '[.total_pnl, .num_trades]' "$RESULT_FILE")" "Same inputs give the same backtest result"
+
+    local rc
+    backtest_strategy "$SYMBOL" "" "" > /dev/null 2>&1; rc=$?
+    test_assert_equal "$rc" "1" "Missing dates are rejected"
+
+    python3 "${PROJECT_DIR}/lib/backtest_engine.py" "${OUTPUT_DIR}/missing.json" > /dev/null 2>&1; rc=$?
+    test_assert_equal "$rc" "1" "Engine rejects a missing config file"
 }
 
 # ============================================================================
@@ -379,8 +203,7 @@ print_summary() {
     echo -e "Tests Run:     ${TESTS_RUN}"
     echo -e "Tests Passed:  ${GREEN}${TESTS_PASSED}${NC}"
     echo -e "Tests Failed:  ${RED}${TESTS_FAILED}${NC}"
-    echo -e "Output Dir:    ${OUTPUT_DIR}"
-    
+
     if [[ $TESTS_FAILED -eq 0 ]]; then
         echo -e "\n${GREEN}✓ All tests passed!${NC}"
         return 0
@@ -399,11 +222,11 @@ echo -e "${BLUE}║${NC}    StockSwingTrader: Backtesting Test Suite${NC}"
 echo -e "${BLUE}║${NC}    Enhancement 4: Complete Backtesting Module${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
 
-test_backtest_output_generation
-test_backtest_csv_output
-test_backtest_html_report
-test_backtest_metrics_validation
-test_backtest_parameter_consistency
+test_metric_helpers
+test_backtest_execution
+test_metrics_consistency
+test_reports
+test_determinism_and_errors
 
 print_summary
 exit $?

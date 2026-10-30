@@ -130,7 +130,7 @@ calc_ema() {
             fi
         else
             # EMA = (Price - EMA_prev) * multiplier + EMA_prev
-            ema=$(echo "($prices[$i] - $ema) * $multiplier + $ema" | bc -l)
+            ema=$(echo "(${prices[$i]} - $ema) * $multiplier + $ema" | bc -l)
         fi
         ema=$(printf "%.2f" "$ema")
         ema_output="${ema_output}${ema}"

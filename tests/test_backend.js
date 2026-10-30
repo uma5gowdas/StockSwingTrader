@@ -2,295 +2,226 @@
 // ============================================================================
 // StockSwingTrader: Backend API Test Suite
 // ============================================================================
-// Tests Enhancement 3: React Dashboard Backend
-// Tests:
-//   1. All API endpoints
-//   2. JSON response format
-//   3. Error handling
-//   4. CORS configuration
+// Tests Enhancement 3: React Dashboard Backend (backend/server.js).
+// Run: node --test tests/test_backend.js   (or: npm test --prefix backend)
+//
+// The real Express app is started on an ephemeral port. SST_BASE_PATH points
+// it at a temporary project directory with a fixture config.sh, trade log and
+// small stand-in lib/*.sh scripts, so the bash-backed routes are exercised
+// end to end (spawn, argument passing, JSON parsing) without hitting broker
+// APIs or modifying the repo's real config.sh.
 // ============================================================================
 
-const http = require('http');
+'use strict';
 
-// Color codes for output
-const RED = '\x1b[0;31m';
-const GREEN = '\x1b[0;32m';
-const YELLOW = '\x1b[0;33m';
-const BLUE = '\x1b[0;34m';
-const NC = '\x1b[0m';
+const { test, before, after } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
-// Test counters
-let testsRun = 0;
-let testsPassed = 0;
-let testsFailed = 0;
+const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'sst_backend_test.'));
+const BACKTEST_DIR = path.join(ROOT, 'backtest_results');
 
-// Configuration
-const BACKEND_HOST = 'localhost';
-const BACKEND_PORT = 3001;
+const CONFIG_SH = [
+  '#!/bin/bash',
+  'export ALPACA_API_KEY="pk_live_secret_value"',
+  "ALPACA_SECRET_KEY='another-secret'",
+  'RISK_PER_TRADE=0.02 # percent of equity',
+  'MAX_POSITION_SIZE=1000',
+  'MIN_CONFLUENCE_SCORE=60',
+  'TRADING_ENABLED=false',
+  'ALPACA_TRADING_ENABLED=true',
+  '',
+].join('\n');
 
-// ============================================================================
-// Test Utilities
-// ============================================================================
-
-function printSection(title) {
-    console.log(`\n${BLUE}=== ${title} ===${NC}`);
+function writeFixture(rel, content, mode) {
+  const file = path.join(ROOT, rel);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, content);
+  if (mode) fs.chmodSync(file, mode);
 }
 
-function testAssert(condition, testName) {
-    testsRun++;
-    if (condition) {
-        console.log(`${GREEN}✓${NC} ${testName}`);
-        testsPassed++;
-        return true;
-    } else {
-        console.log(`${RED}✗${NC} ${testName}`);
-        testsFailed++;
-        return false;
-    }
+function setupFixtures() {
+  writeFixture('config.sh', CONFIG_SH);
+  writeFixture('.trades/trade_log.json', JSON.stringify([
+    { symbol: 'AAPL', side: 'buy', qty: 10, price: 190.5 },
+    { symbol: 'MSFT', side: 'sell', qty: 5, price: 410.25 },
+  ]));
+  // Stand-ins echo their arguments so the test can see exactly what was passed.
+  writeFixture('lib/alpaca_broker.sh',
+    '#!/bin/bash\nif [[ "$1" == "get-quote" ]]; then printf \'{"symbol":"%s","price":123.45,"argc":%d}\\n\' "$2" "$#";\n' +
+    'else printf \'{"cash":1000,"cmd":"%s"}\\n\' "$1"; fi\n');
+  writeFixture('lib/scoring.sh',
+    '#!/bin/bash\nprintf \'{"symbol":"%s","confluence_score":71,"argc":%d}\\n\' "$1" "$#"\n');
+  writeFixture('lib/indicators_new.sh', '#!/bin/bash\necho "not json for $1"\n');
+  writeFixture('lib/risk_management.sh', '#!/bin/bash\necho "boom" >&2\nexit 3\n');
+  fs.mkdirSync(BACKTEST_DIR, { recursive: true });
+  fs.writeFileSync(path.join(BACKTEST_DIR, 'backtest_AAPL_1.json'), JSON.stringify({ symbol: 'AAPL', total_pnl: 42 }));
+  fs.writeFileSync(path.join(BACKTEST_DIR, 'backtest_AAPL_1.html'), '<html></html>');
 }
 
-function testAssertEqual(actual, expected, testName) {
-    return testAssert(actual === expected, testName);
+setupFixtures();
+process.env.SST_BASE_PATH = ROOT;
+process.env.SST_LOG_FILE = path.join(ROOT, 'backend.log');
+process.env.BACKTEST_OUTPUT_DIR = BACKTEST_DIR;
+
+const app = require('../backend/server.js');
+
+let server;
+let baseUrl;
+
+before(async () => {
+  server = await new Promise((resolve) => {
+    const s = app.listen(0, '127.0.0.1', () => resolve(s));
+  });
+  baseUrl = `http://127.0.0.1:${server.address().port}`;
+});
+
+after(async () => {
+  await new Promise((resolve) => server.close(resolve));
+  fs.rmSync(ROOT, { recursive: true, force: true });
+});
+
+async function request(method, urlPath, { body, headers } = {}) {
+  const res = await fetch(baseUrl + urlPath, {
+    method,
+    headers: { 'Content-Type': 'application/json', ...headers },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await res.text();
+  let json = null;
+  try { json = JSON.parse(text); } catch { /* not JSON */ }
+  return { status: res.status, headers: res.headers, text, json };
 }
 
-function testAssertIncludes(str, substr, testName) {
-    return testAssert(str.includes(substr), testName);
-}
+const configText = () => fs.readFileSync(path.join(ROOT, 'config.sh'), 'utf8');
 
-function makeRequest(method, path, data = null) {
-    return new Promise((resolve, reject) => {
-        const options = {
-            hostname: BACKEND_HOST,
-            port: BACKEND_PORT,
-            path: path,
-            method: method,
-            headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            }
-        };
+// ----------------------------------------------------------------------------
 
-        const req = http.request(options, (res) => {
-            let body = '';
-            res.on('data', chunk => body += chunk);
-            res.on('end', () => {
-                resolve({
-                    status: res.statusCode,
-                    headers: res.headers,
-                    body: body,
-                    data: tryParseJSON(body)
-                });
-            });
-        });
+test('GET /api/health returns healthy status with ISO timestamp', async () => {
+  const res = await request('GET', '/api/health');
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /application\/json/);
+  assert.equal(res.json.status, 'healthy');
+  assert.ok(!Number.isNaN(Date.parse(res.json.timestamp)));
+});
 
-        req.on('error', reject);
+test('CORS allows the Vite dev origin and rejects unknown origins', async () => {
+  const ok = await request('GET', '/api/health', { headers: { Origin: 'http://localhost:5173' } });
+  assert.equal(ok.headers.get('access-control-allow-origin'), 'http://localhost:5173');
+  assert.equal(ok.headers.get('access-control-allow-credentials'), 'true');
+  const bad = await request('GET', '/api/health', { headers: { Origin: 'http://evil.example' } });
+  assert.equal(bad.headers.get('access-control-allow-origin'), null);
+});
 
-        if (data) {
-            req.write(JSON.stringify(data));
-        }
-        req.end();
-    });
-}
+test('GET /api/portfolio runs alpaca_broker.sh get-portfolio and returns its JSON', async () => {
+  const res = await request('GET', '/api/portfolio');
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.json, { cash: 1000, cmd: 'get-portfolio' });
+});
 
-function tryParseJSON(str) {
-    try {
-        return JSON.parse(str);
-    } catch (e) {
-        return null;
-    }
-}
+test('GET /api/quotes/:symbol passes the symbol as a single argument', async () => {
+  const res = await request('GET', '/api/quotes/aapl');
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.json, { symbol: 'AAPL', price: 123.45, argc: 2 });
+});
 
-// ============================================================================
-// Test Cases
-// ============================================================================
+test('GET /api/signals/:symbol returns the scoring output', async () => {
+  const res = await request('GET', '/api/signals/BRK.B');
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.json, { symbol: 'BRK.B', confluence_score: 71, argc: 1 });
+});
 
-async function testAPIConnectivity() {
-    printSection('Test 1: API Connectivity');
+test('symbol routes reject shell metacharacters with 400', async () => {
+  for (const bad of ['AAPL;touch%20pwned', '$(id)', 'A%20B', 'TOOLONGSYMBOL1']) {
+    const res = await request('GET', `/api/signals/${bad}`);
+    assert.equal(res.status, 400, `expected 400 for ${bad}`);
+    assert.equal(res.json.error, 'Invalid symbol');
+  }
+  assert.equal(fs.existsSync(path.join(ROOT, 'pwned')), false);
+});
 
-    try {
-        const response = await makeRequest('GET', '/api/health');
-        testAssert(response.status === 200, 'Backend responds on port 3001');
-    } catch (err) {
-        testAssert(false, 'Backend responds on port 3001 (Error: backend may not be running)');
-    }
-}
+test('GET /api/indicators/:symbol wraps non-JSON script output as raw', async () => {
+  const res = await request('GET', '/api/indicators/MSFT');
+  assert.equal(res.status, 200);
+  assert.equal(res.json.symbol, 'MSFT');
+  assert.equal(res.json.raw.trim(), 'not json for MSFT');
+});
 
-async function testDashboardEndpoint() {
-    printSection('Test 2: Dashboard Endpoint');
+test('GET /api/stats returns 500 with an error when the script fails', async () => {
+  const res = await request('GET', '/api/stats');
+  assert.equal(res.status, 500);
+  assert.equal(typeof res.json.error, 'string');
+});
 
-    try {
-        const response = await makeRequest('GET', '/api/dashboard');
-        testAssert(response.status === 200, 'GET /api/dashboard returns 200');
-        testAssert(response.data !== null, 'Response is valid JSON');
+test('GET /api/trades returns the trade log as an array', async () => {
+  const res = await request('GET', '/api/trades');
+  assert.equal(res.status, 200);
+  assert.equal(res.json.trades.length, 2);
+  assert.equal(res.json.trades[1].symbol, 'MSFT');
+});
 
-        if (response.data) {
-            testAssert(Array.isArray(response.data.watchlist), 'Response contains watchlist array');
-            testAssert(response.data.stats !== undefined, 'Response contains stats object');
-        }
-    } catch (err) {
-        testAssert(false, `GET /api/dashboard accessible (Error: ${err.message})`);
-    }
-}
+test('GET /api/trades returns an empty list when there is no trade log', async () => {
+  const log = path.join(ROOT, '.trades/trade_log.json');
+  const saved = fs.readFileSync(log);
+  fs.rmSync(log);
+  try {
+    const res = await request('GET', '/api/trades');
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.json.trades, []);
+  } finally {
+    fs.writeFileSync(log, saved);
+  }
+});
 
-async function testAnalysisEndpoint() {
-    printSection('Test 3: Analysis Endpoint');
+test('GET /api/settings parses config.sh and masks secrets', async () => {
+  const res = await request('GET', '/api/settings');
+  assert.equal(res.status, 200);
+  assert.equal(res.json.ALPACA_API_KEY, '********');
+  assert.equal(res.json.ALPACA_SECRET_KEY, '********');
+  assert.equal(res.json.RISK_PER_TRADE, '0.02');
+  assert.equal(res.json.TRADING_ENABLED, 'false');
+  assert.ok(!res.text.includes('pk_live_secret_value'));
+});
 
-    try {
-        const response = await makeRequest('GET', '/api/analysis/AAPL');
-        testAssert(response.status === 200 || response.status === 404, 'Analysis endpoint accessible');
+test('POST /api/settings updates an allowed setting and keeps comments', async () => {
+  const res = await request('POST', '/api/settings', { body: { setting: 'RISK_PER_TRADE', value: '0.05' } });
+  assert.equal(res.status, 200);
+  assert.equal(res.json.success, true);
+  assert.match(configText(), /^RISK_PER_TRADE=0\.05 # percent of equity$/m);
+});
 
-        if (response.status === 200 && response.data) {
-            testAssert(response.data.symbol !== undefined, 'Response contains symbol');
-            testAssert(response.data.score !== undefined, 'Response contains score');
-            testAssert(response.data.indicators !== undefined, 'Response contains indicators');
-        }
-    } catch (err) {
-        testAssert(false, `GET /api/analysis/:symbol accessible (Error: ${err.message})`);
-    }
-}
+test('POST /api/settings only touches the exact setting name', async () => {
+  const res = await request('POST', '/api/settings', { body: { setting: 'TRADING_ENABLED', value: true } });
+  assert.equal(res.status, 200);
+  assert.match(configText(), /^TRADING_ENABLED=true$/m);
+  assert.match(configText(), /^ALPACA_TRADING_ENABLED=true$/m);
+});
 
-async function testWatchlistEndpoint() {
-    printSection('Test 4: Watchlist Endpoint');
+test('POST /api/settings rejects disallowed settings and unsafe values', async () => {
+  const before = configText();
+  const cases = [
+    [{ setting: 'ALPACA_API_KEY', value: 'x' }, /not allowed/],
+    [{ setting: 'MAX_POSITION_SIZE', value: '$(rm -rf /)' }, /Invalid value/],
+    [{ setting: 'MIN_CONFLUENCE_SCORE', value: '101' }, /Invalid value/],
+    [{ setting: 'TRADING_ENABLED', value: 'yes' }, /Invalid value/],
+  ];
+  for (const [body, msg] of cases) {
+    const res = await request('POST', '/api/settings', { body });
+    assert.equal(res.status, 400, JSON.stringify(body));
+    assert.match(res.json.error, msg);
+  }
+  assert.equal(configText(), before);
+});
 
-    try {
-        const response = await makeRequest('GET', '/api/watchlist');
-        testAssert(response.status === 200, 'GET /api/watchlist returns 200');
-        testAssert(Array.isArray(response.data), 'Watchlist is an array');
-    } catch (err) {
-        testAssert(false, `GET /api/watchlist accessible (Error: ${err.message})`);
-    }
-}
+test('GET /api/backtest returns parsed JSON result files only', async () => {
+  const res = await request('GET', '/api/backtest');
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.json.results, [{ file: 'backtest_AAPL_1.json', data: { symbol: 'AAPL', total_pnl: 42 } }]);
+});
 
-async function testAddToWatchlist() {
-    printSection('Test 5: Add to Watchlist');
-
-    try {
-        const response = await makeRequest('POST', '/api/watchlist', { symbol: 'AAPL' });
-        testAssert(response.status === 200 || response.status === 201, 'POST /api/watchlist accepted');
-    } catch (err) {
-        testAssert(false, `POST /api/watchlist accessible (Error: ${err.message})`);
-    }
-}
-
-async function testTradeHistoryEndpoint() {
-    printSection('Test 6: Trade History Endpoint');
-
-    try {
-        const response = await makeRequest('GET', '/api/trades');
-        testAssert(response.status === 200, 'GET /api/trades returns 200');
-        testAssert(Array.isArray(response.data) || response.data === null, 'Trades is array or null');
-    } catch (err) {
-        testAssert(false, `GET /api/trades accessible (Error: ${err.message})`);
-    }
-}
-
-async function testCORSHeaders() {
-    printSection('Test 7: CORS Configuration');
-
-    try {
-        const response = await makeRequest('GET', '/api/health');
-        const corsHeader = response.headers['access-control-allow-origin'];
-        
-        if (corsHeader) {
-            testAssert(corsHeader === '*' || corsHeader.includes('localhost'), 'CORS header present and valid');
-        } else {
-            testAssert(true, 'CORS headers not required for health check');
-        }
-    } catch (err) {
-        testAssert(false, `CORS verification failed (Error: ${err.message})`);
-    }
-}
-
-async function testErrorHandling() {
-    printSection('Test 8: Error Handling');
-
-    try {
-        const response = await makeRequest('GET', '/api/nonexistent');
-        testAssert(response.status === 404, '404 response for nonexistent endpoint');
-    } catch (err) {
-        testAssert(false, `Error handling works (Error: ${err.message})`);
-    }
-}
-
-async function testResponseFormat() {
-    printSection('Test 9: Response Format Validation');
-
-    try {
-        const response = await makeRequest('GET', '/api/dashboard');
-        testAssert(response.headers['content-type'].includes('application/json'), 
-                   'Content-Type is application/json');
-
-        if (response.data) {
-            testAssert(typeof response.data === 'object', 'Response is JSON object or array');
-        }
-    } catch (err) {
-        testAssert(true, 'Response format validation (backend may not be running)');
-    }
-}
-
-async function testSettingsEndpoint() {
-    printSection('Test 10: Settings Endpoint');
-
-    try {
-        const response = await makeRequest('GET', '/api/settings');
-        testAssert(response.status === 200 || response.status === 404, 'Settings endpoint accessible');
-    } catch (err) {
-        testAssert(true, 'Settings endpoint accessible (optional)');
-    }
-}
-
-// ============================================================================
-// Summary
-// ============================================================================
-
-function printSummary() {
-    console.log(`\n${BLUE}╔════════════════════════════════════════════════════════════╗${NC}`);
-    console.log(`${BLUE}║${NC}        Backend API Test Summary${NC}`);
-    console.log(`${BLUE}╚════════════════════════════════════════════════════════════╝${NC}`);
-    console.log(`Tests Run:     ${testsRun}`);
-    console.log(`Tests Passed:  ${GREEN}${testsPassed}${NC}`);
-    console.log(`Tests Failed:  ${RED}${testsFailed}${NC}`);
-
-    if (testsFailed === 0) {
-        console.log(`\n${GREEN}✓ All tests passed!${NC}`);
-        return 0;
-    } else {
-        console.log(`\n${YELLOW}⚠ Some tests did not pass (backend may not be running)${NC}`);
-        console.log(`  Start backend with: cd backend && npm start`);
-        return testsFailed > 0 ? 1 : 0;
-    }
-}
-
-// ============================================================================
-// Main Execution
-// ============================================================================
-
-async function runTests() {
-    console.log(`${BLUE}╔════════════════════════════════════════════════════════════╗${NC}`);
-    console.log(`${BLUE}║${NC}    StockSwingTrader: Backend API Test Suite${NC}`);
-    console.log(`${BLUE}║${NC}    Enhancement 3: React Dashboard Backend${NC}`);
-    console.log(`${BLUE}╚════════════════════════════════════════════════════════════╝${NC}`);
-
-    await testAPIConnectivity();
-    
-    // Wait a moment for server to be ready
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    await testDashboardEndpoint();
-    await testAnalysisEndpoint();
-    await testWatchlistEndpoint();
-    await testAddToWatchlist();
-    await testTradeHistoryEndpoint();
-    await testCORSHeaders();
-    await testErrorHandling();
-    await testResponseFormat();
-    await testSettingsEndpoint();
-
-    process.exit(printSummary());
-}
-
-// Run tests
-runTests().catch(err => {
-    console.error(`${RED}Test execution failed: ${err.message}${NC}`);
-    process.exit(1);
+test('unknown routes return 404', async () => {
+  const res = await request('GET', '/api/nonexistent');
+  assert.equal(res.status, 404);
 });

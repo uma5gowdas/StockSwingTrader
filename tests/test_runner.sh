@@ -2,19 +2,26 @@
 # ============================================================================
 # StockSwingTrader: Master Test Runner
 # ============================================================================
-# Executes all test suites and generates comprehensive report
-# Exit code: 0 if all pass, 1 if any fail
+# Executes all test suites, parses each suite's own pass/fail counts and
+# writes a report to .agents/tasks/test-report.md.
+#
+# A suite PASSES only when it exits 0, reports at least one passed test and
+# reports zero failures. A suite whose counts cannot be parsed FAILS.
+# Exit code: 0 if every suite passes, 1 otherwise.
+#
+# Suites run offline (SST_OFFLINE=1): no yfinance/broker network calls.
+# Works with macOS bash 3.2 (no `timeout`, no `date +%N` needed).
 # ============================================================================
 
 set -o pipefail
 
-# Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 REPORT_DIR="${PROJECT_DIR}/.agents/tasks"
 REPORT_FILE="${REPORT_DIR}/test-report.md"
 
-# Create output directory
+export SST_OFFLINE=1
+
 mkdir -p "$REPORT_DIR"
 
 # Color codes for output
@@ -24,24 +31,22 @@ YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-# Test counters
+# Totals (individual test cases across all suites)
 TOTAL_TESTS_PASSED=0
 TOTAL_TESTS_FAILED=0
 TOTAL_TESTS_RUN=0
+SUITES_PASSED=0
+SUITES_FAILED=0
 
-# Test results - using simpler approach for compatibility
+# Markdown table rows for the report
 TEST_RESULTS=""
 
-# Test list (ordered)
 TEST_NAMES=()
 TEST_FILES=()
-TEST_STATUS=()
 
-# Add tests
 add_test() {
     TEST_NAMES+=("$1")
     TEST_FILES+=("$2")
-    TEST_STATUS+=("")
 }
 
 add_test "ML Predictor" "${SCRIPT_DIR}/test_ml_predictor.sh"
@@ -58,6 +63,31 @@ add_test "Backend API" "${SCRIPT_DIR}/test_backend.js"
 # Utility Functions
 # ============================================================================
 
+now_ms() {
+    perl -MTime::HiRes=time -e 'printf "%d\n", time * 1000'
+}
+
+strip_ansi() {
+    perl -pe 's/\e\[[0-9;]*[A-Za-z]//g; s/\r//g'
+}
+
+# Extract "passed failed" from a suite's (ANSI-stripped) output.
+# Recognised summary formats:
+#   Tests Passed:  N / Tests Failed:  N   (ml_predictor, backtest, python)
+#   Passed:        N / Failed:        N   (regime, kalman, ml scoring)
+#   ℹ pass N / ℹ fail N  or  # pass N / # fail N   (node --test)
+# The last occurrence wins. Prints nothing if either count is missing.
+parse_counts() {
+    awk '
+        { line = $0 }
+        match(line, /^[ \t]*(Tests[ \t]+)?Passed:[ \t]*[0-9]+[ \t]*$/) { n = line; gsub(/[^0-9]/, "", n); passed = n }
+        match(line, /^[ \t]*(Tests[ \t]+)?Failed:[ \t]*[0-9]+[ \t]*$/) { n = line; gsub(/[^0-9]/, "", n); failed = n }
+        match(line, /^(ℹ|#) pass [0-9]+$/) { n = line; sub(/^(ℹ|#) pass /, "", n); passed = n }
+        match(line, /^(ℹ|#) fail [0-9]+$/) { n = line; sub(/^(ℹ|#) fail /, "", n); failed = n }
+        END { if (passed != "" && failed != "") print passed, failed }
+    '
+}
+
 print_header() {
     echo -e "\n${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${BLUE}║${NC}    StockSwingTrader: Comprehensive Test Suite Runner${NC}"
@@ -65,204 +95,90 @@ print_header() {
     echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}\n"
 }
 
-print_test_start() {
+record_row() {
+    TEST_RESULTS="${TEST_RESULTS}| $1 | $2 | $3 | $4 |"$'\n'
+}
+
+# Run one suite and fold its counts into the totals
+# Args: name, file
+run_suite() {
     local test_name=$1
+    local test_file=$2
+    local -a cmd=()
+
     echo -e "${BLUE}[TEST]${NC} Running: ${test_name}..."
-}
 
-print_test_pass() {
-    local test_name=$1
-    local time_taken=$2
-    echo -e "${GREEN}[PASS]${NC} ${test_name} (${time_taken}ms)"
-}
-
-print_test_fail() {
-    local test_name=$1
-    local time_taken=$2
-    local reason=$3
-    echo -e "${RED}[FAIL]${NC} ${test_name} (${time_taken}ms)"
-    if [[ -n "$reason" ]]; then
-        echo -e "  ${YELLOW}Reason: ${reason}${NC}"
-    fi
-}
-
-print_test_skip() {
-    local test_name=$1
-    local reason=$2
-    echo -e "${YELLOW}[SKIP]${NC} ${test_name}"
-    if [[ -n "$reason" ]]; then
-        echo -e "  ${YELLOW}Reason: ${reason}${NC}"
-    fi
-}
-
-run_shell_test() {
-    local test_name=$1
-    local test_file=$2
-    
-    print_test_start "$test_name"
-    
     if [[ ! -f "$test_file" ]]; then
-        print_test_skip "$test_name" "Test file not found"
-        TEST_RESULTS="${TEST_RESULTS}| $test_name | ⏭ SKIP | Test file not found |"$'\n'
-        return 2
-    fi
-    
-    if ! command -v bash &> /dev/null; then
-        print_test_skip "$test_name" "Bash not available"
-        TEST_RESULTS="${TEST_RESULTS}| $test_name | ⏭ SKIP | Bash not available |"$'\n'
-        return 2
-    fi
-    
-    # Run test and capture output
-    local start_time=$(date +%s)
-    local output=$(bash "$test_file" 2>&1)
-    local exit_code=$?
-    local end_time=$(date +%s)
-    local elapsed=$((end_time - start_time))
-    
-    # Parse results from output
-    if echo "$output" | grep -q "Tests Passed"; then
-        local passed=$(echo "$output" | grep "Tests Passed:" | head -1 | awk '{print $NF}' | tr -d '\r')
-        local failed=$(echo "$output" | grep "Tests Failed:" | head -1 | awk '{print $NF}' | tr -d '\r')
-        
-        # Ensure we have numeric values
-        if ! [[ "$passed" =~ ^[0-9]+$ ]]; then
-            passed=0
-        fi
-        if ! [[ "$failed" =~ ^[0-9]+$ ]]; then
-            failed=0
-        fi
-        
-        if [[ $exit_code -eq 0 ]]; then
-            print_test_pass "$test_name" "$elapsed"
-            TOTAL_TESTS_PASSED=$((TOTAL_TESTS_PASSED + passed))
-            TEST_RESULTS="${TEST_RESULTS}| $test_name | ✅ PASS | ${passed} passed, ${failed} failed |"$'\n'
-            return 0
-        else
-            print_test_fail "$test_name" "$elapsed" "Exit code: $exit_code"
-            TOTAL_TESTS_FAILED=$((TOTAL_TESTS_FAILED + failed))
-            TEST_RESULTS="${TEST_RESULTS}| $test_name | ❌ FAIL | ${passed} passed, ${failed} failed |"$'\n'
-            return 1
-        fi
-    else
-        print_test_fail "$test_name" "$elapsed" "Could not parse results"
+        echo -e "${RED}[FAIL]${NC} ${test_name}: test file not found ($test_file)"
+        SUITES_FAILED=$((SUITES_FAILED + 1))
         TOTAL_TESTS_FAILED=$((TOTAL_TESTS_FAILED + 1))
-        TEST_RESULTS="${TEST_RESULTS}| $test_name | ❌ FAIL | Could not parse results |"$'\n'
+        record_row "$test_name" "❌ FAIL" "-" "Test file not found"
         return 1
     fi
-}
 
-run_python_test() {
-    local test_name=$1
-    local test_file=$2
-    
-    print_test_start "$test_name"
-    
-    if [[ ! -f "$test_file" ]]; then
-        print_test_skip "$test_name" "Test file not found"
-        TEST_RESULTS="${TEST_RESULTS}| $test_name | ⏭ SKIP | Test file not found |"$'\n'
-        return 2
-    fi
-    
-    if ! command -v python3 &> /dev/null; then
-        print_test_skip "$test_name" "Python3 not available"
-        TEST_RESULTS="${TEST_RESULTS}| $test_name | ⏭ SKIP | Python3 not available |"$'\n'
-        return 2
-    fi
-    
-    # Run test and capture output
-    local start_time=$(date +%s)
-    local output=$(python3 "$test_file" 2>&1)
-    local exit_code=$?
-    local end_time=$(date +%s)
-    local elapsed=$((end_time - start_time))
-    
-    # Parse results from output
-    if echo "$output" | grep -q "Tests Passed:"; then
-        local passed=$(echo "$output" | grep "Tests Passed:" | head -1 | awk '{print $NF}' | tr -d '\r')
-        local failed=$(echo "$output" | grep "Tests Failed:" | head -1 | awk '{print $NF}' | tr -d '\r')
-        
-        # Ensure we have numeric values
-        if ! [[ "$passed" =~ ^[0-9]+$ ]]; then
-            passed=0
-        fi
-        if ! [[ "$failed" =~ ^[0-9]+$ ]]; then
-            failed=0
-        fi
-        
-        if [[ $exit_code -eq 0 ]]; then
-            print_test_pass "$test_name" "$elapsed"
-            TOTAL_TESTS_PASSED=$((TOTAL_TESTS_PASSED + passed))
-            TEST_RESULTS="${TEST_RESULTS}| $test_name | ✅ PASS | ${passed} passed, ${failed} failed |"$'\n'
-            return 0
-        else
-            print_test_fail "$test_name" "$elapsed" "Exit code: $exit_code"
-            TOTAL_TESTS_FAILED=$((TOTAL_TESTS_FAILED + failed))
-            TEST_RESULTS="${TEST_RESULTS}| $test_name | ❌ FAIL | ${passed} passed, ${failed} failed |"$'\n'
-            return 1
-        fi
-    else
-        print_test_fail "$test_name" "$elapsed" "Could not parse results"
+    case "$test_file" in
+        *.py) cmd=(python3 "$test_file") ;;
+        *.js) cmd=(node --test --test-reporter=spec "$test_file") ;;
+        *)    cmd=(bash "$test_file") ;;
+    esac
+
+    if ! command -v "${cmd[0]}" &> /dev/null; then
+        echo -e "${RED}[FAIL]${NC} ${test_name}: ${cmd[0]} not available"
+        SUITES_FAILED=$((SUITES_FAILED + 1))
         TOTAL_TESTS_FAILED=$((TOTAL_TESTS_FAILED + 1))
-        TEST_RESULTS="${TEST_RESULTS}| $test_name | ❌ FAIL | Could not parse results |"$'\n'
+        record_row "$test_name" "❌ FAIL" "-" "${cmd[0]} not available"
         return 1
     fi
+
+    local start_time end_time elapsed output exit_code counts
+    start_time=$(now_ms)
+    output=$(cd "$PROJECT_DIR" && "${cmd[@]}" < /dev/null 2>&1 | strip_ansi)
+    exit_code=$?
+    end_time=$(now_ms)
+    elapsed=$((end_time - start_time))
+
+    counts=$(echo "$output" | parse_counts)
+    if [[ -z "$counts" ]]; then
+        echo -e "${RED}[FAIL]${NC} ${test_name} (${elapsed}ms)"
+        echo -e "  ${YELLOW}Reason: could not parse pass/fail counts (exit code ${exit_code})${NC}"
+        echo "$output" | tail -5 | sed 's/^/    /'
+        SUITES_FAILED=$((SUITES_FAILED + 1))
+        TOTAL_TESTS_FAILED=$((TOTAL_TESTS_FAILED + 1))
+        record_row "$test_name" "❌ FAIL" "${elapsed}ms" "Could not parse results (exit ${exit_code})"
+        return 1
+    fi
+
+    local passed=${counts% *}
+    local failed=${counts#* }
+    TOTAL_TESTS_PASSED=$((TOTAL_TESTS_PASSED + passed))
+    TOTAL_TESTS_FAILED=$((TOTAL_TESTS_FAILED + failed))
+
+    if [[ $exit_code -eq 0 && $failed -eq 0 && $passed -gt 0 ]]; then
+        echo -e "${GREEN}[PASS]${NC} ${test_name} (${elapsed}ms) - ${passed} passed, ${failed} failed"
+        SUITES_PASSED=$((SUITES_PASSED + 1))
+        record_row "$test_name" "✅ PASS" "${elapsed}ms" "${passed} passed, ${failed} failed"
+        return 0
+    fi
+
+    local reason="exit code ${exit_code}"
+    [[ $passed -eq 0 && $failed -eq 0 ]] && reason="no tests executed (exit code ${exit_code})"
+    echo -e "${RED}[FAIL]${NC} ${test_name} (${elapsed}ms) - ${passed} passed, ${failed} failed"
+    echo -e "  ${YELLOW}Reason: ${reason}${NC}"
+    echo "$output" | grep -E '✗|✖|FAIL' | head -10 | sed 's/^/    /'
+    if [[ $failed -eq 0 ]]; then
+        # Non-zero exit without reported failures still counts as a failure
+        TOTAL_TESTS_FAILED=$((TOTAL_TESTS_FAILED + 1))
+    fi
+    SUITES_FAILED=$((SUITES_FAILED + 1))
+    record_row "$test_name" "❌ FAIL" "${elapsed}ms" "${passed} passed, ${failed} failed (${reason})"
+    return 1
 }
 
-run_node_test() {
-    local test_name=$1
-    local test_file=$2
-    
-    print_test_start "$test_name"
-    
-    if [[ ! -f "$test_file" ]]; then
-        print_test_skip "$test_name" "Test file not found"
-        TEST_RESULTS="${TEST_RESULTS}| $test_name | ⏭ SKIP | Test file not found |"$'\n'
-        return 2
-    fi
-    
-    if ! command -v node &> /dev/null; then
-        print_test_skip "$test_name" "Node.js not available"
-        TEST_RESULTS="${TEST_RESULTS}| $test_name | ⏭ SKIP | Node.js not available |"$'\n'
-        return 2
-    fi
-    
-    # Run test and capture output
-    local start_time=$(date +%s)
-    local output=$(node "$test_file" 2>&1)
-    local exit_code=$?
-    local end_time=$(date +%s)
-    local elapsed=$((end_time - start_time))
-    
-    # Parse results from output
-    if echo "$output" | grep -q "Tests Passed:"; then
-        local passed=$(echo "$output" | grep "Tests Passed:" | head -1 | awk '{print $NF}' | tr -d '\r')
-        local failed=$(echo "$output" | grep "Tests Failed:" | head -1 | awk '{print $NF}' | tr -d '\r')
-        
-        # Ensure we have numeric values
-        if ! [[ "$passed" =~ ^[0-9]+$ ]]; then
-            passed=0
-        fi
-        if ! [[ "$failed" =~ ^[0-9]+$ ]]; then
-            failed=0
-        fi
-        
-        if [[ $exit_code -eq 0 ]] || [[ $failed -eq 0 ]]; then
-            print_test_pass "$test_name" "$elapsed"
-            TOTAL_TESTS_PASSED=$((TOTAL_TESTS_PASSED + passed))
-            TEST_RESULTS="${TEST_RESULTS}| $test_name | ✅ PASS | ${passed} passed, ${failed} failed |"$'\n'
-            return 0
-        else
-            print_test_fail "$test_name" "$elapsed" "Exit code: $exit_code"
-            TOTAL_TESTS_FAILED=$((TOTAL_TESTS_FAILED + failed))
-            TEST_RESULTS="${TEST_RESULTS}| $test_name | ❌ FAIL | ${passed} passed, ${failed} failed |"$'\n'
-            return 1
-        fi
+success_rate() {
+    if [[ $TOTAL_TESTS_RUN -eq 0 ]]; then
+        echo "0"
     else
-        print_test_fail "$test_name" "$elapsed" "Could not parse results"
-        TOTAL_TESTS_FAILED=$((TOTAL_TESTS_FAILED + 1))
-        TEST_RESULTS="${TEST_RESULTS}| $test_name | ❌ FAIL | Could not parse results |"$'\n'
-        return 1
+        echo $(( TOTAL_TESTS_PASSED * 100 / TOTAL_TESTS_RUN ))
     fi
 }
 
@@ -272,170 +188,55 @@ run_node_test() {
 
 generate_markdown_report() {
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    
+    local overall="✅ All suites passed"
+    [[ $SUITES_FAILED -gt 0 ]] && overall="❌ ${SUITES_FAILED} suite(s) failed"
+
     cat > "$REPORT_FILE" << EOF
-# StockSwingTrader v6.3 - Comprehensive Test Report
+# StockSwingTrader v6.3 - Test Report
 
 **Generated:** $timestamp  
-**Project:** StockSwingTrader - AI-Enhanced Swing Trading Platform  
-**Version:** 6.3
+**Command:** \`bash tests/test_runner.sh\`  
+**Result:** $overall
 
-## Executive Summary
+## Summary
 
 | Metric | Value |
 |--------|-------|
+| Suites | $((SUITES_PASSED + SUITES_FAILED)) (${SUITES_PASSED} passed, ${SUITES_FAILED} failed) |
 | Total Tests | ${TOTAL_TESTS_RUN} |
 | Tests Passed | **${TOTAL_TESTS_PASSED}** |
 | Tests Failed | **${TOTAL_TESTS_FAILED}** |
-| Success Rate | $(( TOTAL_TESTS_PASSED * 100 / (TOTAL_TESTS_RUN + 1) ))% |
+| Success Rate | $(success_rate)% |
 
-## Test Results by Module
+## Results by Suite
 
-| Module | Status | Details |
-|--------|--------|---------|
-EOF
+| Suite | Status | Time | Details |
+|-------|--------|------|---------|
+${TEST_RESULTS}
+Counts are taken from each suite's own summary output. A suite passes only
+when it exits 0 with at least one passed test and zero failures.
 
-    # Write test results from TEST_RESULTS string
-    echo "$TEST_RESULTS" >> "$REPORT_FILE"
+## Suites
 
-    cat >> "$REPORT_FILE" << 'EOF'
+| Suite | File | Runner | Exercises |
+|-------|------|--------|-----------|
+| ML Predictor | tests/test_ml_predictor.sh | bash | lib/ml_inference.py with the trained XGBoost model, lib/ml_predictor.sh |
+| Regime Weighting | tests/test_regime_weighting.sh | bash | lib/regime_weighting.sh (weights, multipliers, recommendations) |
+| Kalman Filter | tests/test_kalman_filter.sh | bash | lib/kalman_filter.sh + lib/kalman_inference.py |
+| Backtest | tests/test_backtest.sh | bash | lib/backtest.sh + lib/backtest_engine.py end to end (JSON/CSV/HTML) |
+| ML Scoring Integration | tests/test_ml_scoring_integration.sh | bash | lib/scoring.sh calculate_confluence_score_v2 with the real ML predictor |
+| Regime Detector | tests/test_regime_detector.sh | bash | lib/regime_detector.sh (trend, ADX, BB width, cache, batch) |
+| Scoring Integration (Python) | tests/test_scoring_integration.py | python3 | Confluence weighting formula and signal thresholds |
+| Dashboard Components | tests/test_dashboard.js | node --test | frontend/src utils, usePolling hook, all App routes, tsc --noEmit |
+| Backend API | tests/test_backend.js | node --test | backend/server.js routes on an ephemeral port |
 
-## Enhancement Modules Tested
+## Environment
 
-### Enhancement 1: XGBoost ML Predictor
-- **Status:** ✅ Tested
-- **File:** `tests/test_ml_predictor.sh`
-- **Tests:**
-  - JSON output format validation
-  - Inference latency < 1s
-  - Error handling
-  - Confidence threshold validation
-  - Multiple prediction consistency
-
-### Enhancement 2: Regime-Adaptive Weighting
-- **Status:** ✅ Tested
-- **File:** `tests/test_regime_weighting.sh`
-- **Tests:**
-  - Regime detection (sideways, trending_bull, trending_bear, volatile)
-  - Weight application validation
-  - Output JSON format validation
-  - Regime transitions
-
-### Enhancement 3: React Dashboard
-- **Status:** ✅ Tested
-- **Files:** 
-  - `tests/test_dashboard.js` (Component structure)
-  - `tests/test_backend.js` (API endpoints)
-- **Tests:**
-  - Project structure validation
-  - Component mounting and rendering
-  - API endpoint connectivity
-  - 5-second refresh mechanism
-  - CORS configuration
-  - Response format validation
-
-### Enhancement 4: Kalman Filter
-- **Status:** ✅ Tested
-- **File:** `tests/test_kalman_filter.sh`
-- **Tests:**
-  - Basic filtering with synthetic data
-  - Smoothness improvement measurement
-  - Performance validation (<500ms)
-  - False signal reduction
-  - Edge cases handling
-
-### Enhancement 5: Complete Backtesting
-- **Status:** ✅ Tested
-- **File:** `tests/test_backtest.sh`
-- **Tests:**
-  - Backtest output generation
-  - Trade log CSV format
-  - HTML report generation
-  - Performance metrics validation
-  - Parameter consistency
-
-### Scoring Integration
-- **Status:** ✅ Tested
-- **File:** `tests/test_scoring_integration.py`
-- **Tests:**
-  - Component weighting: ML (15%), Regime (35%), Technical (30%), Volume (20%)
-  - Score range validation (0-100)
-  - Signal generation logic
-  - Confidence level determination
-  - Mock data integration
-
-## Detailed Test Coverage
-
-### ML Predictor (Enhancement 1)
-✅ Direction prediction (up/down)  
-✅ Confidence scoring (0-100)  
-✅ Probability estimation (0-1)  
-✅ Latency monitoring  
-
-### Regime Detection (Enhancement 2)
-✅ Sideways market detection  
-✅ Bullish trend identification  
-✅ Bearish trend identification  
-✅ Volatile market detection  
-✅ Adaptive weight calculation  
-
-### Dashboard (Enhancement 3)
-✅ React component structure  
-✅ Dashboard page (portfolio overview)  
-✅ Analysis page (symbol deep-dive)  
-✅ Trade history page  
-✅ Watchlist management  
-✅ Settings page  
-✅ 5-second polling mechanism  
-✅ REST API connectivity  
-✅ CORS headers  
-✅ JSON response validation  
-
-### Kalman Filter (Enhancement 5)
-✅ Price smoothing  
-✅ Noise reduction (60%+)  
-✅ Volatility estimation  
-✅ Whipsaw prevention  
-✅ Multi-timeframe support  
-
-### Backtesting (Enhancement 4)
-✅ Trade log generation  
-✅ Win rate calculation  
-✅ Sharpe ratio computation  
-✅ Max drawdown tracking  
-✅ Profit factor analysis  
-✅ CSV export  
-✅ HTML report generation  
-
-## Performance Benchmarks
-
-| Module | Target | Measured | Status |
-|--------|--------|----------|--------|
-| ML Inference | <1s | ~500ms | ✅ Pass |
-| Regime Detection | <500ms | ~300ms | ✅ Pass |
-| Kalman Filter | <500ms | ~400ms | ✅ Pass |
-| Scoring Calculation | <100ms | ~50ms | ✅ Pass |
-| Full Pipeline | <5s | ~2.5s | ✅ Pass |
-
-## Test Execution Environment
-
-**Operating System:** $(uname -s)  
-**Architecture:** $(uname -m)  
-**Bash Version:** $(bash --version | head -1)  
-**Python Version:** $(python3 --version 2>&1)  
-**Node Version:** $(node --version 2>&1)  
-
-## Recommendations
-
-1. **All Tests Passing:** ✅ Production-ready deployment
-2. **Monitor Performance:** Consider running performance tests monthly
-3. **Regression Testing:** Run full suite after each enhancement
-4. **CI/CD Integration:** Add test runner to automated build pipeline
-
----
-
-**Test Suite Version:** 1.0  
-**Last Updated:** $timestamp
+- **OS:** $(uname -s) $(uname -r) ($(uname -m))
+- **Bash:** $(bash --version | head -1)
+- **Python:** $(python3 --version 2>&1)
+- **Node:** $(node --version 2>&1)
+- **Offline mode:** SST_OFFLINE=1 (synthetic/seeded data, no network)
 EOF
 
     echo -e "\n${GREEN}✓${NC} Report generated: $REPORT_FILE"
@@ -447,62 +248,34 @@ EOF
 
 main() {
     print_header
-    
-    # Track start time
-    local start_time=$(date +%s)
-    
-    # Determine test type and run
+
+    local start_time=$(now_ms)
+
     local i=0
     for test_name in "${TEST_NAMES[@]}"; do
-        local test_file="${TEST_FILES[$i]}"
-        local test_type=""
-        
-        # Determine test type by extension
-        if [[ "$test_file" == *.py ]]; then
-            test_type="python"
-        elif [[ "$test_file" == *.js ]]; then
-            test_type="node"
-        else
-            test_type="shell"
-        fi
-        
-        # Run appropriate test
-        case "$test_type" in
-            python)
-                run_python_test "$test_name" "$test_file"
-                ;;
-            node)
-                run_node_test "$test_name" "$test_file"
-                ;;
-            shell)
-                run_shell_test "$test_name" "$test_file"
-                ;;
-        esac
-        
-        ((i++))
+        run_suite "$test_name" "${TEST_FILES[$i]}"
+        i=$((i + 1))
     done
-    
-    # Calculate total tests
+
     TOTAL_TESTS_RUN=$((TOTAL_TESTS_PASSED + TOTAL_TESTS_FAILED))
-    
-    # Generate report
+
     generate_markdown_report
-    
-    # Print summary
+
+    local end_time=$(now_ms)
+    local elapsed=$(( (end_time - start_time) / 1000 ))
+
     echo -e "\n${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${BLUE}║${NC}        Test Execution Summary${NC}"
     echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
+    echo -e "Suites:              $((SUITES_PASSED + SUITES_FAILED)) (${SUITES_PASSED} passed, ${SUITES_FAILED} failed)"
     echo -e "Total Tests Run:     ${TOTAL_TESTS_RUN}"
     echo -e "Tests Passed:        ${GREEN}${TOTAL_TESTS_PASSED}${NC}"
     echo -e "Tests Failed:        ${RED}${TOTAL_TESTS_FAILED}${NC}"
-    echo -e "Success Rate:        $(( TOTAL_TESTS_PASSED * 100 / (TOTAL_TESTS_RUN + 1) ))%"
+    echo -e "Success Rate:        $(success_rate)%"
     echo -e "Report File:         ${REPORT_FILE}"
-    
-    local end_time=$(date +%s)
-    local elapsed=$((end_time - start_time))
     echo -e "Total Execution:     ${elapsed}s"
-    
-    if [[ $TOTAL_TESTS_FAILED -eq 0 ]]; then
+
+    if [[ $SUITES_FAILED -eq 0 && $TOTAL_TESTS_FAILED -eq 0 && $TOTAL_TESTS_PASSED -gt 0 ]]; then
         echo -e "\n${GREEN}✅ All tests PASSED!${NC}"
         return 0
     else
@@ -511,6 +284,5 @@ main() {
     fi
 }
 
-# Execute main
 main
 exit $?
