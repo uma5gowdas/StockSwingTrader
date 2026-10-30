@@ -19,6 +19,7 @@
 # Source dependencies
 source "$(dirname "${BASH_SOURCE[0]}")/indicators.sh" 2>/dev/null
 source "$(dirname "${BASH_SOURCE[0]}")/trading_thresholds.sh" 2>/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/kalman_filter.sh" 2>/dev/null
 
 # Cache directory setup
 REGIME_CACHE_DIR="${HOME}/.stockswingtrader/regime_cache"
@@ -321,6 +322,140 @@ EOF
 }
 
 # ============================================================================
+# Kalman-Enhanced Regime Detection
+# ============================================================================
+
+# Detect market regime using Kalman-filtered prices
+# Args: symbol, prices (space-separated), lookback_days (default 30)
+# Returns: JSON {regime, adx, trend, volatility, raw_trend, kalman_trend, noise_level, timestamp}
+#
+# Compares raw trend vs Kalman-filtered trend to reduce false breakouts
+detect_market_regime_kalman() {
+    local symbol=$1
+    shift
+    local -a prices=($@)
+    
+    if [[ -z "$symbol" ]] || [[ ${#prices[@]} -eq 0 ]]; then
+        cat <<EOF
+{"regime": "unknown", "adx": 0, "trend": "neutral", "volatility": 0, "error": "missing_input"}
+EOF
+        return 1
+    fi
+    
+    # Check cache first
+    if is_regime_cache_valid "$symbol"; then
+        load_regime_from_cache "$symbol"
+        return 0
+    fi
+    
+    # Apply Kalman filter to prices
+    local kalman_result=$(apply_kalman_filter "${prices[@]}" -q 0.01 -r 0.1)
+    
+    # Extract filtered prices
+    local filtered_json=$(echo "$kalman_result" | grep -oP '"filtered_prices":\s*\K\[[^\]]*\]')
+    local -a filtered_prices=($(echo "$filtered_json" | grep -oE '[0-9]+(\.[0-9]+)?' | tr '\n' ' '))
+    
+    # Extract residuals for noise level
+    local residuals_json=$(echo "$kalman_result" | grep -oP '"residuals":\s*\K\[[^\]]*\]')
+    local -a residuals=($(echo "$residuals_json" | grep -oE '-?[0-9]+(\.[0-9]+)?' | tr '\n' ' '))
+    
+    # Calculate noise level (volatility of residuals)
+    local noise_level=0
+    if [[ ${#residuals[@]} -gt 1 ]]; then
+        noise_level=$(calc_residual_volatility "${residuals[@]}")
+    fi
+    
+    # Calculate EMAs on raw prices
+    local ema_20_raw_str=$(calc_ema 20 "${prices[@]}")
+    local ema_50_raw_str=$(calc_ema 50 "${prices[@]}" 2>/dev/null || echo "[0]")
+    
+    # Extract EMA values
+    local ema_20_raw=$(echo "$ema_20_raw_str" | grep -o '[0-9.]*' | tail -1)
+    local ema_50_raw=$(echo "$ema_50_raw_str" | grep -o '[0-9.]*' | tail -1)
+    
+    # Calculate EMAs on filtered prices
+    local ema_20_filtered_str=$(calc_ema 20 "${filtered_prices[@]}")
+    local ema_50_filtered_str=$(calc_ema 50 "${filtered_prices[@]}" 2>/dev/null || echo "[0]")
+    
+    # Extract filtered EMA values
+    local ema_20_filtered=$(echo "$ema_20_filtered_str" | grep -o '[0-9.]*' | tail -1)
+    local ema_50_filtered=$(echo "$ema_50_filtered_str" | grep -o '[0-9.]*' | tail -1)
+    
+    # Set defaults if empty
+    if [[ -z "$ema_20_raw" ]] || [[ -z "$ema_50_raw" ]]; then
+        ema_20_raw=100
+        ema_50_raw=100
+    fi
+    
+    if [[ -z "$ema_20_filtered" ]] || [[ -z "$ema_50_filtered" ]]; then
+        ema_20_filtered=100
+        ema_50_filtered=100
+    fi
+    
+    # Detect trends from both raw and filtered prices
+    local raw_trend=$(detect_trend_direction "$ema_20_raw" "$ema_50_raw")
+    local filtered_trend=$(detect_trend_direction "$ema_20_filtered" "$ema_50_filtered")
+    
+    # Calculate ADX from EMAs
+    local adx=$((10 * ((ema_20_raw - ema_50_raw) / 10)))
+    if [[ $adx -lt 0 ]]; then
+        adx=$((-adx))
+    fi
+    if [[ $adx -gt 100 ]]; then
+        adx=100
+    fi
+    
+    # Determine regime using Kalman-filtered trend (more reliable)
+    local regime="sideways"
+    local volatility=50
+    
+    if [[ $(echo "$noise_level > 2" | bc -l) -eq 1 ]]; then
+        regime="volatile"
+    elif [[ $adx -gt 25 ]]; then
+        if [[ "$filtered_trend" == "up" ]]; then
+            regime="trending_bull"
+        elif [[ "$filtered_trend" == "down" ]]; then
+            regime="trending_bear"
+        fi
+    else
+        regime="sideways"
+    fi
+    
+    # Format output
+    local adx_safe=$(printf "%.2f" "${adx:-0}")
+    local noise_safe=$(printf "%.6f" "${noise_level:-0}")
+    local ema_20_raw_safe=$(printf "%.2f" "${ema_20_raw:-100}")
+    local ema_50_raw_safe=$(printf "%.2f" "${ema_50_raw:-100}")
+    local ema_20_filtered_safe=$(printf "%.2f" "${ema_20_filtered:-100}")
+    local ema_50_filtered_safe=$(printf "%.2f" "${ema_50_filtered:-100}")
+    
+    local regime_json=$(cat <<EOF
+{
+  "regime": "$regime",
+  "adx": $adx_safe,
+  "trend": "$filtered_trend",
+  "raw_trend": "$raw_trend",
+  "kalman_trend": "$filtered_trend",
+  "volatility": $noise_safe,
+  "ema_20_raw": $ema_20_raw_safe,
+  "ema_50_raw": $ema_50_raw_safe,
+  "ema_20_filtered": $ema_20_filtered_safe,
+  "ema_50_filtered": $ema_50_filtered_safe,
+  "noise_level": $noise_safe,
+  "price_count": ${#prices[@]},
+  "symbol": "$symbol",
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+)
+    
+    # Cache the result
+    cache_regime "$symbol" "$regime_json"
+    
+    echo "$regime_json"
+}
+
+# ============================================================================
 # Batch Regime Detection
 # ============================================================================
 
@@ -367,6 +502,6 @@ clear_regime_cache() {
 }
 
 # Export functions
-export -f detect_market_regime detect_regimes_batch
+export -f detect_market_regime detect_regimes_batch detect_market_regime_kalman
 export -f calc_adx_approx calc_bb_width_pct detect_trend_direction
 export -f cache_regime load_regime_from_cache is_regime_cache_valid clear_regime_cache
