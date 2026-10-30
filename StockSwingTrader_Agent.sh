@@ -683,6 +683,12 @@ Options:
     --buy SYMBOL QTY                 Place a buy order with confirmation (broker-specific)
     --sell SYMBOL QTY                Place a sell order with confirmation (broker-specific)
     
+    Backtesting:
+    --backtest SYMBOLS               Run backtest on stocks (comma-separated)
+    --start START_DATE               Backtest start date (YYYY-MM-DD, default: 2 years ago)
+    --end END_DATE                   Backtest end date (YYYY-MM-DD, default: today)
+    --train-pct PCT                  Train/test split percentage (default: 80)
+    
     --help                           Show this help message
 
 Examples:
@@ -707,6 +713,10 @@ Examples:
     ./StockSwingTrader_Agent.sh --broker alpaca --symbols AAPL,MSFT --check-account
     ./StockSwingTrader_Agent.sh --broker robinhood --top-10 --view-positions
     ./StockSwingTrader_Agent.sh --symbols AAPL --buy AAPL 5 (uses default alpaca)
+    
+    # Backtesting
+    ./StockSwingTrader_Agent.sh --backtest AAPL --start 2022-01-01 --end 2024-01-01
+    ./StockSwingTrader_Agent.sh --backtest AAPL,MSFT,GOOGL --train-pct 80
 
 Features:
     - 8+ technical indicators (RSI, MACD, BB, Stochastic, Williams %R, OBV, ATR)
@@ -752,6 +762,12 @@ main() {
     local trading_buy_qty=""
     local trading_sell_symbol=""
     local trading_sell_qty=""
+    
+    # Backtest flags
+    local backtest_symbols=""
+    local backtest_start_date=""
+    local backtest_end_date=""
+    local backtest_train_pct="80"
     
     # Parse command-line arguments
     while [[ $# -gt 0 ]]; do
@@ -833,6 +849,22 @@ main() {
                 broker_trading_mode=true
                 shift
                 ;;
+            --backtest)
+                backtest_symbols="$2"
+                shift 2
+                ;;
+            --start)
+                backtest_start_date="$2"
+                shift 2
+                ;;
+            --end)
+                backtest_end_date="$2"
+                shift 2
+                ;;
+            --train-pct)
+                backtest_train_pct="$2"
+                shift 2
+                ;;
             --help)
                 usage
                 exit 0
@@ -850,6 +882,32 @@ main() {
     log_info "StockSwingTrader Agent started"
     log_info "Broker: $BROKER_CHOICE"
     log_info "Debug mode: $DEBUG_MODE"
+    
+    # Handle backtest mode
+    if [[ -n "$backtest_symbols" ]]; then
+        log_info "Backtest mode enabled"
+        
+        # Load backtest module
+        if [[ ! -f "$SCRIPT_DIR/lib/backtest.sh" ]]; then
+            log_error "Backtest module not found: $SCRIPT_DIR/lib/backtest.sh"
+            exit 1
+        fi
+        source "$SCRIPT_DIR/lib/backtest.sh"
+        
+        # Set default dates if not provided
+        if [[ -z "$backtest_start_date" ]]; then
+            backtest_start_date=$(date -u -d "2 years ago" +%Y-%m-%d 2>/dev/null || date -u -v-2y +%Y-%m-%d)
+        fi
+        if [[ -z "$backtest_end_date" ]]; then
+            backtest_end_date=$(date +%Y-%m-%d)
+        fi
+        
+        log_info "Backtesting: $backtest_symbols ($backtest_start_date to $backtest_end_date)"
+        
+        # Run backtest
+        backtest_multi_symbol "$backtest_symbols" "$backtest_start_date" "$backtest_end_date" "$backtest_train_pct"
+        exit $?
+    fi
     
     # Handle broker trading commands
     if [[ "$broker_trading_mode" == "true" ]]; then
