@@ -4,7 +4,19 @@
 # ============================================================================
 # Scores individual indicators (0-100) and calculates multi-source confidence
 # Returns buy/sell/hold recommendations with 0-100 confidence scores
+#
+# ML Predictor Integration (v6.2):
+# - 15% weight: ML confidence (XGBoost direction prediction)
+# - 35% weight: Regime-adaptive strategy scores
+# - 30% weight: Technical indicators (RSI, MACD, Bollinger)
+# - 20% weight: Volume/Trend confirmation (OBV + Kalman filtered)
 # ============================================================================
+
+# Source integrated modules
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/ml_predictor.sh" 2>/dev/null || true
+source "${SCRIPT_DIR}/regime_weighting.sh" 2>/dev/null || true
+source "${SCRIPT_DIR}/kalman_filter.sh" 2>/dev/null || true
 
 # ============================================================================
 # Score Individual Technical Indicators
@@ -175,7 +187,7 @@ score_obv() {
 # Confluence Engine: Multi-Source Scoring
 # ============================================================================
 
-# Calculate final confidence score from all signals
+# Calculate final confidence score from all signals (Legacy - use calculate_confluence_score_v2)
 # Args: rsi_score, macd_score, bb_score, stochastic_score, williams_r_score, obv_score, sentiment_score
 # Returns: JSON with final_confidence, signal (BUY/SELL/HOLD), reasoning
 calculate_confluence_score() {
@@ -215,6 +227,269 @@ calculate_confluence_score() {
     final_confidence=$(printf "%.0f" "$final_confidence")
     
     echo "{\"final_confidence\":${final_confidence},\"signal\":\"${signal}\",\"reasoning\":\"${reasoning}\",\"technical_avg\":${technical_avg},\"sentiment_contribution\":${sentiment_score}}"
+}
+
+# ============================================================================
+# ML-Integrated Scoring Pipeline (v6.2)
+# ============================================================================
+
+# Calculate composite confidence score with ML predictor integration
+# Args:
+#   symbol: Stock symbol (e.g., "AAPL")
+#   rsi_score: RSI indicator score (0-100)
+#   macd_score: MACD indicator score (0-100)
+#   bb_score: Bollinger Bands score (0-100)
+#   obv_score: On-Balance Volume score (0-100)
+#   regime: Market regime (sideways|trending_bull|trending_bear|volatile)
+#   [mr_score]: Mean reversion strategy score (0-100, optional)
+#   [tf_score]: Trend following strategy score (0-100, optional)
+#   [kalman_trend]: Kalman-filtered trend direction (-1|0|1, optional)
+#
+# Returns: JSON with {
+#   "confluence_score": 0-100,
+#   "recommendation": "STRONG_BUY"|"BUY"|"HOLD"|"SELL"|"STRONG_SELL",
+#   "components": {
+#     "ml_confidence": (%, 15 weight),
+#     "regime_score": (%, 35 weight),
+#     "technical_score": (%, 30 weight),
+#     "volume_trend_score": (%, 20 weight)
+#   },
+#   "signal_strength": 0-5 (# of components in agreement),
+#   "breakdown": {...detailed scores...},
+#   "timestamp": ISO8601
+# }
+calculate_confluence_score_v2() {
+    local symbol=$1
+    local rsi_score=${2:-50}
+    local macd_score=${3:-50}
+    local bb_score=${4:-50}
+    local obv_score=${5:-50}
+    local regime=${6:-"sideways"}
+    local mr_score=${7:-50}
+    local tf_score=${8:-50}
+    local kalman_trend=${9:-0}
+    
+    local start_time=$(date +%s%N)
+    
+    # ========================================================================
+    # Component 1: ML Predictor (15% weight) - 5 second timeout
+    # ========================================================================
+    local ml_confidence=50
+    local ml_direction="neutral"
+    local ml_error=""
+    
+    if command -v ml_predict_direction &>/dev/null; then
+        local ml_result
+        ml_result=$(timeout 5 ml_predict_direction "$symbol" 5 2>/dev/null || echo "{\"error\": \"timeout\"}")
+        
+        if [[ ! "$ml_result" =~ "error" ]]; then
+            ml_confidence=$(echo "$ml_result" | jq -r '.confidence // 50' 2>/dev/null || echo "50")
+            ml_direction=$(echo "$ml_result" | jq -r '.direction // "neutral"' 2>/dev/null || echo "neutral")
+        else
+            ml_error=$(echo "$ml_result" | jq -r '.error // "unknown"' 2>/dev/null)
+        fi
+    fi
+    
+    # ========================================================================
+    # Component 2: Regime-Adaptive Strategy Score (35% weight)
+    # ========================================================================
+    local regime_score=50
+    local regime_weights_json
+    
+    # Determine regime weights
+    case "$regime" in
+        "sideways")
+            # Favor mean reversion: 70% MR + 30% TF
+            regime_score=$(echo "scale=2; ($mr_score * 0.7) + ($tf_score * 0.3)" | bc)
+            ;;
+        "trending_bull"|"trending_bear")
+            # Favor trend following: 30% MR + 70% TF
+            regime_score=$(echo "scale=2; ($mr_score * 0.3) + ($tf_score * 0.7)" | bc)
+            ;;
+        "volatile")
+            # Equal weighting with reduced confidence: 50% MR + 50% TF - 20%
+            regime_score=$(echo "scale=2; (($mr_score * 0.5) + ($tf_score * 0.5)) * 0.8" | bc)
+            ;;
+        *)
+            # Default neutral: 50% each
+            regime_score=$(echo "scale=2; ($mr_score * 0.5) + ($tf_score * 0.5)" | bc)
+            ;;
+    esac
+    
+    regime_score=$(printf "%.0f" "$regime_score")
+    
+    # ========================================================================
+    # Component 3: Technical Indicators Score (30% weight)
+    # ========================================================================
+    local technical_score
+    technical_score=$(echo "scale=2; ($rsi_score + $macd_score + $bb_score) / 3" | bc)
+    technical_score=$(printf "%.0f" "$technical_score")
+    
+    # ========================================================================
+    # Component 4: Volume/Trend Confirmation (20% weight)
+    # ========================================================================
+    # Combine OBV score with Kalman-filtered trend direction
+    local volume_trend_score
+    if [[ "$kalman_trend" == "1" ]]; then
+        # Uptrend confirmed by Kalman filter
+        volume_trend_score=$(echo "scale=2; ($obv_score * 0.8) + (75 * 0.2)" | bc)
+    elif [[ "$kalman_trend" == "-1" ]]; then
+        # Downtrend confirmed by Kalman filter
+        volume_trend_score=$(echo "scale=2; ($obv_score * 0.8) + (25 * 0.2)" | bc)
+    else
+        # Neutral Kalman signal
+        volume_trend_score=$obv_score
+    fi
+    
+    volume_trend_score=$(printf "%.0f" "$volume_trend_score")
+    
+    # ========================================================================
+    # Calculate Composite Confluence Score
+    # ========================================================================
+    local confluence_score
+    confluence_score=$(echo "scale=2; \
+        ($ml_confidence * 0.15) + \
+        ($regime_score * 0.35) + \
+        ($technical_score * 0.30) + \
+        ($volume_trend_score * 0.20)" | bc)
+    
+    confluence_score=$(printf "%.0f" "$confluence_score")
+    
+    # ========================================================================
+    # Determine Signal Strength (agreement level)
+    # ========================================================================
+    local signal_agreement=0
+    local bullish_signals=0
+    local bearish_signals=0
+    
+    # ML signal
+    if [[ "$ml_direction" == "up" && "$ml_confidence" -gt 60 ]]; then
+        ((bullish_signals++))
+    elif [[ "$ml_direction" == "down" && "$ml_confidence" -gt 60 ]]; then
+        ((bearish_signals++))
+    fi
+    
+    # Regime signal
+    if [[ "$regime_score" -gt 60 ]]; then
+        ((bullish_signals++))
+    elif [[ "$regime_score" -lt 40 ]]; then
+        ((bearish_signals++))
+    fi
+    
+    # Technical signal
+    if [[ "$technical_score" -gt 60 ]]; then
+        ((bullish_signals++))
+    elif [[ "$technical_score" -lt 40 ]]; then
+        ((bearish_signals++))
+    fi
+    
+    # Volume/Trend signal
+    if [[ "$volume_trend_score" -gt 60 ]]; then
+        ((bullish_signals++))
+    elif [[ "$volume_trend_score" -lt 40 ]]; then
+        ((bearish_signals++))
+    fi
+    
+    signal_agreement=$((bullish_signals + bearish_signals))
+    
+    # ========================================================================
+    # Generate Recommendation with Signal Validation
+    # ========================================================================
+    local recommendation="HOLD"
+    local confidence_note=""
+    
+    # Require at least 3 components in agreement for strong signals
+    if [[ "$signal_agreement" -ge 3 ]]; then
+        if [[ "$bullish_signals" -ge 3 && "$bearish_signals" -eq 0 ]]; then
+            if [[ "$confluence_score" -gt 70 ]]; then
+                recommendation="STRONG_BUY"
+                confidence_note="Strong consensus across all indicators"
+            elif [[ "$confluence_score" -gt 55 ]]; then
+                recommendation="BUY"
+                confidence_note="Multiple bullish signals confirmed"
+            fi
+        elif [[ "$bearish_signals" -ge 3 && "$bullish_signals" -eq 0 ]]; then
+            if [[ "$confluence_score" -lt 30 ]]; then
+                recommendation="STRONG_SELL"
+                confidence_note="Strong consensus across all indicators"
+            elif [[ "$confluence_score" -lt 45 ]]; then
+                recommendation="SELL"
+                confidence_note="Multiple bearish signals confirmed"
+            fi
+        fi
+    else
+        # Mixed or weak signals
+        if [[ "$confluence_score" -gt 60 ]]; then
+            recommendation="BUY"
+            confidence_note="Moderately bullish; some conflicting signals"
+        elif [[ "$confluence_score" -lt 40 ]]; then
+            recommendation="SELL"
+            confidence_note="Moderately bearish; some conflicting signals"
+        else
+            recommendation="HOLD"
+            confidence_note="Mixed signals; await clearer direction"
+        fi
+    fi
+    
+    # ========================================================================
+    # Calculate latency
+    # ========================================================================
+    local end_time=$(date +%s%N)
+    local latency_ms=$(( (end_time - start_time) / 1000000 ))
+    
+    # ========================================================================
+    # Generate JSON Output
+    # ========================================================================
+    cat <<EOF
+{
+  "confluence_score": ${confluence_score},
+  "recommendation": "${recommendation}",
+  "signal_strength": ${signal_agreement},
+  "components": {
+    "ml_confidence": {
+      "score": ${ml_confidence},
+      "direction": "${ml_direction}",
+      "weight_percent": 15
+    },
+    "regime_score": {
+      "score": ${regime_score},
+      "regime": "${regime}",
+      "weight_percent": 35
+    },
+    "technical_score": {
+      "score": ${technical_score},
+      "weight_percent": 30
+    },
+    "volume_trend_score": {
+      "score": ${volume_trend_score},
+      "weight_percent": 20
+    }
+  },
+  "breakdown": {
+    "symbol": "${symbol}",
+    "individual_scores": {
+      "rsi": ${rsi_score},
+      "macd": ${macd_score},
+      "bollinger_bands": ${bb_score},
+      "obv": ${obv_score},
+      "mean_reversion": ${mr_score},
+      "trend_following": ${tf_score},
+      "kalman_trend": ${kalman_trend}
+    },
+    "signal_counts": {
+      "bullish_signals": ${bullish_signals},
+      "bearish_signals": ${bearish_signals},
+      "total_agreement": ${signal_agreement}
+    }
+  },
+  "metadata": {
+    "confidence_note": "${confidence_note}",
+    "ml_error": "${ml_error}",
+    "latency_ms": ${latency_ms},
+    "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  }
+}
+EOF
 }
 
 # ============================================================================
@@ -308,6 +583,6 @@ generate_score_summary() {
 
 # Export all functions
 export -f score_rsi score_macd score_bollinger_bands score_stochastic
-export -f score_williams_r score_obv calculate_confluence_score
+export -f score_williams_r score_obv calculate_confluence_score calculate_confluence_score_v2
 export -f calc_stop_loss_atr calc_stop_loss_percent calc_take_profit
 export -f calc_risk_reward_ratio generate_score_summary
