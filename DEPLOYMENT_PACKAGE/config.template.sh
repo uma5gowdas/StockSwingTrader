@@ -16,9 +16,9 @@
 # API Keys & Credentials
 # ============================================================================
 # Leave as "demo" for testing; replace with real keys for production
-export API_KEY_ALPHA_VANTAGE="${API_KEY_ALPHA_VANTAGE:-demo}"
-export API_KEY_FINNHUB="${API_KEY_FINNHUB:-demo}"
-export API_KEY_NEWSAPI="${API_KEY_NEWSAPI:-demo}"
+export API_KEY_ALPHA_VANTAGE="YOUR_API_KEY_ALPHA_VANTAGE"
+export API_KEY_FINNHUB="YOUR_API_KEY_FINNHUB"
+export API_KEY_NEWSAPI="YOUR_API_KEY_NEWSAPI"
 
 # ============================================================================
 # Technical Indicator Periods & Thresholds

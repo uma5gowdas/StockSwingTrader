@@ -418,15 +418,15 @@ Root:
 - ✓ Credentials sourced from environment variables only
 - ✓ config.sh contains template placeholders (ALPACA_API_KEY="...")
 - ✓ Test suite suppresses credential logging: `export ALPACA_DEBUG=false`
-- ⚠️ WARNING: config.sh in the review contains **actual credentials** (see line with PK76WBZRA3WVIRGIZTD6SVVOTB)
+- ⚠️ WARNING: config.sh in the review contains **actual credentials** (see line with YOUR_ALPACA_API_KEY)
 
 #### Finding: Exposed Credentials in config.sh
 **Severity:** CRITICAL (but expected in review context)  
 **File:** config.sh, lines ~12-13  
 **Content:** 
 ```bash
-export ALPACA_API_KEY="PK76WBZRA3WVIRGIZTD6SVVOTB"
-export ALPACA_SECRET_KEY="Hgio83rdZWCzGqRZF8ABqvQgFmnL5xREsj6hw2ecQMxj"
+export ALPACA_API_KEY="YOUR_ALPACA_API_KEY"
+export ALPACA_SECRET_KEY="YOUR_ALPACA_SECRET_KEY"
 ```
 **Action Required:** These credentials must be revoked immediately. Use in review only; never commit to version control.
 
