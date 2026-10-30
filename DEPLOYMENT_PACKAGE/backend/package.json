@@ -1,0 +1,35 @@
+{
+  "name": "stockswingtrader-backend",
+  "version": "6.3.0",
+  "description": "StockSwingTrader backend API with ML enhancements",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "jest",
+    "lint": "eslint ."
+  },
+  "keywords": [
+    "trading",
+    "stocks",
+    "algorithmic",
+    "xgboost",
+    "kalman-filter"
+  ],
+  "author": "AI Dev",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "axios": "^1.5.0",
+    "ws": "^8.14.2",
+    "bull": "^4.11.4",
+    "redis": "^4.6.10"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1",
+    "jest": "^29.7.0",
+    "eslint": "^8.51.0"
+  }
+}

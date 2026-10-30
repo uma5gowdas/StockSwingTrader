@@ -1,0 +1,1632 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alpaca API Setup Guide - StockSwingTrader</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: #667eea;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #666;
+            font-size: 1.1em;
+        }
+
+        .tab-container {
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 30px;
+        }
+
+        .tabs {
+            display: flex;
+            flex-wrap: wrap;
+            background: #f5f5f5;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        .tab-button {
+            flex: 1;
+            min-width: 150px;
+            padding: 15px 20px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: 500;
+            color: #666;
+            transition: all 0.3s ease;
+            text-align: center;
+        }
+
+        .tab-button:hover {
+            background: #e0e0e0;
+            color: #667eea;
+        }
+
+        .tab-button.active {
+            background: white;
+            color: #667eea;
+            border-bottom: 3px solid #667eea;
+            margin-bottom: -2px;
+        }
+
+        .tab-content {
+            display: none;
+            padding: 30px;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        h2 {
+            color: #667eea;
+            font-size: 1.8em;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        h3 {
+            color: #764ba2;
+            font-size: 1.3em;
+            margin-top: 20px;
+            margin-bottom: 15px;
+        }
+
+        .section {
+            margin-bottom: 25px;
+        }
+
+        .callout {
+            padding: 15px 20px;
+            border-radius: 5px;
+            margin: 20px 0;
+            border-left: 4px solid;
+        }
+
+        .callout.warning {
+            background: #fff3cd;
+            border-left-color: #ff9800;
+            color: #856404;
+        }
+
+        .callout.info {
+            background: #d1ecf1;
+            border-left-color: #17a2b8;
+            color: #0c5460;
+        }
+
+        .callout.success {
+            background: #d4edda;
+            border-left-color: #28a745;
+            color: #155724;
+        }
+
+        .callout strong {
+            display: block;
+            font-size: 1.1em;
+            margin-bottom: 5px;
+        }
+
+        code {
+            background: #f5f5f5;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            color: #d63384;
+        }
+
+        pre {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            margin: 15px 0;
+            border-left: 4px solid #667eea;
+            font-family: 'Courier New', monospace;
+            font-size: 0.95em;
+        }
+
+        pre code {
+            background: transparent;
+            color: inherit;
+            padding: 0;
+        }
+
+        .step {
+            background: #f9f9f9;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
+            border-left: 4px solid #764ba2;
+        }
+
+        .step-number {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 30px;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+
+        .step p {
+            margin-left: 40px;
+            margin-top: 8px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            background: white;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+
+        th {
+            background: #667eea;
+            color: white;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+        }
+
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        tr:hover {
+            background: #f9f9f9;
+        }
+
+        .collapsible {
+            background: #f5f5f5;
+            cursor: pointer;
+            padding: 15px;
+            width: 100%;
+            border: 1px solid #e0e0e0;
+            border-radius: 5px;
+            text-align: left;
+            font-size: 1em;
+            font-weight: 500;
+            color: #667eea;
+            transition: background 0.3s ease;
+            margin: 10px 0;
+        }
+
+        .collapsible:hover {
+            background: #e8f0fe;
+        }
+
+        .collapsible::after {
+            content: ' ▶';
+            float: right;
+            transition: transform 0.3s ease;
+        }
+
+        .collapsible.active::after {
+            transform: rotate(90deg);
+        }
+
+        .collapsible-content {
+            display: none;
+            padding: 15px;
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-top: none;
+            border-radius: 0 0 5px 5px;
+            margin-bottom: 10px;
+        }
+
+        .collapsible-content.active {
+            display: block;
+        }
+
+        .button {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            text-decoration: none;
+            margin: 10px 10px 10px 0;
+            font-weight: 500;
+            transition: background 0.3s ease;
+        }
+
+        .button:hover {
+            background: #764ba2;
+        }
+
+        .button.secondary {
+            background: #764ba2;
+        }
+
+        .button.secondary:hover {
+            background: #667eea;
+        }
+
+        .feature-list {
+            list-style: none;
+            margin: 20px 0;
+        }
+
+        .feature-list li {
+            padding: 10px 0;
+            padding-left: 30px;
+            position: relative;
+        }
+
+        .feature-list li::before {
+            content: '✓';
+            position: absolute;
+            left: 0;
+            color: #28a745;
+            font-weight: bold;
+            font-size: 1.2em;
+        }
+
+        .error-code {
+            background: #ffe8e8;
+            border: 1px solid #ff6b6b;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 10px 0;
+        }
+
+        .error-code strong {
+            color: #d63384;
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        .response-example {
+            background: #f0f8ff;
+            border: 1px solid #87ceeb;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 15px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        footer {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            text-align: center;
+            padding: 20px;
+            margin-top: 30px;
+            border-radius: 8px;
+        }
+
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 1.8em;
+            }
+
+            .tab-button {
+                min-width: 120px;
+                font-size: 0.9em;
+                padding: 12px 10px;
+            }
+
+            .tab-content {
+                padding: 20px;
+            }
+
+            pre {
+                font-size: 0.85em;
+            }
+
+            table {
+                font-size: 0.9em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚀 Alpaca API Setup Guide</h1>
+            <p class="subtitle">Complete guide to setting up your Alpaca trading account and integrating with StockSwingTrader</p>
+        </header>
+
+        <div class="tab-container">
+            <div class="tabs">
+                <button class="tab-button active" onclick="openTab(event, 'getting-started')">Getting Started</button>
+                <button class="tab-button" onclick="openTab(event, 'api-generation')">API Key Generation</button>
+                <button class="tab-button" onclick="openTab(event, 'security')">Security</button>
+                <button class="tab-button" onclick="openTab(event, 'configuration')">Configuration</button>
+                <button class="tab-button" onclick="openTab(event, 'testing')">Testing</button>
+                <button class="tab-button" onclick="openTab(event, 'integration')">Integration</button>
+                <button class="tab-button" onclick="openTab(event, 'troubleshooting')">Troubleshooting</button>
+            </div>
+
+            <!-- TAB 1: GETTING STARTED -->
+            <div id="getting-started" class="tab-content active">
+                <h2>Getting Started with Alpaca</h2>
+
+                <div class="section">
+                    <h3>What is Alpaca?</h3>
+                    <p>Alpaca is a modern broker that provides commission-free stock trading, real-time market data, and a powerful API for algorithmic trading. Whether you're a beginner or an experienced trader, Alpaca offers the tools you need.</p>
+                </div>
+
+                <div class="section">
+                    <h3>Key Features</h3>
+                    <ul class="feature-list">
+                        <li><strong>Commission-Free Trading:</strong> Trade without paying commissions on stocks and ETFs</li>
+                        <li><strong>Paper Trading Account:</strong> Practice with virtual money before trading with real funds</li>
+                        <li><strong>Real-Time Market Data:</strong> Access live stock quotes and market information</li>
+                        <li><strong>Powerful API:</strong> Build algorithmic trading strategies programmatically</li>
+                        <li><strong>Multiple Data Feeds:</strong> Choose between SIP (detailed) or market data feeds</li>
+                        <li><strong>24/5 Trading:</strong> Trade during regular market hours</li>
+                    </ul>
+                </div>
+
+                <div class="callout info">
+                    <strong>💡 Pro Tip:</strong> Alpaca provides both live trading and paper trading. We recommend starting with a paper trading account to test your strategies risk-free.
+                </div>
+
+                <div class="section">
+                    <h3>Account Types</h3>
+                    <table>
+                        <tr>
+                            <th>Account Type</th>
+                            <th>Description</th>
+                            <th>Best For</th>
+                        </tr>
+                        <tr>
+                            <td><strong>Paper Trading</strong></td>
+                            <td>Virtual money, no real transactions</td>
+                            <td>Testing strategies, learning the API</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Live Trading</strong></td>
+                            <td>Real money, actual stock transactions</td>
+                            <td>Deploying tested strategies</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <div class="callout warning">
+                    <strong>⚠️ Warning:</strong> Only use live trading with real money after thoroughly testing your strategy in paper trading mode.
+                </div>
+
+                <div class="section">
+                    <h3>Ready to Get Started?</h3>
+                    <p>Click the button below to create your free Alpaca account:</p>
+                    <a href="https://alpaca.markets" target="_blank" class="button">Create Your Alpaca Account</a>
+                </div>
+            </div>
+
+            <!-- TAB 2: API KEY GENERATION -->
+            <div id="api-generation" class="tab-content">
+                <h2>Step-by-Step API Key Generation</h2>
+
+                <div class="callout info">
+                    <strong>ℹ️ Note:</strong> You need an Alpaca account before you can generate API keys. If you don't have one yet, <a href="https://alpaca.markets" target="_blank">sign up for free</a>.
+                </div>
+
+                <div class="section">
+                    <h3>Step 1: Create Your Alpaca Account</h3>
+                    <div class="step">
+                        <span class="step-number">1</span>
+                        <p>Visit <a href="https://alpaca.markets" target="_blank">https://alpaca.markets</a> and click "Sign Up"</p>
+                    </div>
+                    <div class="step">
+                        <span class="step-number">2</span>
+                        <p>Fill in your email address, create a strong password, and agree to the terms</p>
+                    </div>
+                    <div class="step">
+                        <span class="step-number">3</span>
+                        <p>Click "Create Account" to proceed</p>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Step 2: Email Verification</h3>
+                    <div class="step">
+                        <span class="step-number">1</span>
+                        <p>Check your email inbox for a verification email from Alpaca</p>
+                    </div>
+                    <div class="step">
+                        <span class="step-number">2</span>
+                        <p>Click the verification link in the email</p>
+                    </div>
+                    <div class="step">
+                        <span class="step-number">3</span>
+                        <p>Complete any additional account setup requirements (identity verification, broker questionnaire)</p>
+                    </div>
+
+                    <div class="callout info">
+                        <strong>ℹ️ Note:</strong> Alpaca may require identity verification for compliance with SEC regulations. This typically takes a few minutes and is done online.
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Step 3: Navigate to API Keys</h3>
+                    <div class="step">
+                        <span class="step-number">1</span>
+                        <p>Log in to your Alpaca account at <a href="https://app.alpaca.markets" target="_blank">https://app.alpaca.markets</a></p>
+                    </div>
+                    <div class="step">
+                        <span class="step-number">2</span>
+                        <p>Click on the user menu (top-right corner with your name or profile icon)</p>
+                    </div>
+                    <div class="step">
+                        <span class="step-number">3</span>
+                        <p>Select "Settings" from the dropdown menu</p>
+                    </div>
+                    <div class="step">
+                        <span class="step-number">4</span>
+                        <p>In the left sidebar, click on "API Keys"</p>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Step 4: Generate New API Key</h3>
+                    <div class="step">
+                        <span class="step-number">1</span>
+                        <p>On the API Keys page, click the "Create Key" or "Generate New Key" button</p>
+                    </div>
+                    <div class="step">
+                        <span class="step-number">2</span>
+                        <p>A new API Key and Secret Key will be generated</p>
+                    </div>
+                    <div class="step">
+                        <span class="step-number">3</span>
+                        <p><strong>IMPORTANT:</strong> Copy both the API Key and Secret Key and save them somewhere safe immediately</p>
+                    </div>
+
+                    <div class="callout warning">
+                        <strong>⚠️ Critical:</strong> The Secret Key is only shown once. If you lose it, you'll need to generate a new key pair. Save both values immediately!
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Step 5: Understanding Base URLs</h3>
+                    <table>
+                        <tr>
+                            <th>Environment</th>
+                            <th>Base URL</th>
+                            <th>Purpose</th>
+                        </tr>
+                        <tr>
+                            <td><strong>Paper Trading</strong></td>
+                            <td><code>https://paper-api.alpaca.markets</code></td>
+                            <td>Test strategies with virtual money</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Live Trading</strong></td>
+                            <td><code>https://api.alpaca.markets</code></td>
+                            <td>Execute real trades with real money</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Data API</strong></td>
+                            <td><code>https://data.alpaca.markets</code></td>
+                            <td>Retrieve market data and historical information</td>
+                        </tr>
+                    </table>
+
+                    <div class="callout info">
+                        <strong>💡 Tip:</strong> Use the paper trading URL for testing. You can always switch to the live API URL once you're confident in your strategy.
+                    </div>
+                </div>
+
+                <button class="collapsible" onclick="toggleCollapsible(event)">📋 Checklist: API Key Generation Complete?</button>
+                <div class="collapsible-content">
+                    <ul class="feature-list">
+                        <li>Created Alpaca account</li>
+                        <li>Verified email address</li>
+                        <li>Completed identity verification</li>
+                        <li>Generated API Key</li>
+                        <li>Generated Secret Key</li>
+                        <li>Saved both keys in a secure location</li>
+                        <li>Identified the correct base URL (paper or live)</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- TAB 3: SECURITY -->
+            <div id="security" class="tab-content">
+                <h2>Security Best Practices</h2>
+
+                <div class="callout warning">
+                    <strong>⚠️ Critical:</strong> Your API keys are as valuable as your trading account. Treat them with the same care as you would a password. If they're compromised, someone could trade with your money.
+                </div>
+
+                <div class="section">
+                    <h3>Never Commit API Keys to Git</h3>
+                    <p><strong>Why?</strong> If your API keys are committed to a public repository, anyone can access them and potentially trade with your account.</p>
+
+                    <button class="collapsible" onclick="toggleCollapsible(event)">❌ What NOT to Do</button>
+                    <div class="collapsible-content">
+                        <pre><code>// ❌ NEVER DO THIS
+const API_KEY = "PK_LIVE_1234567890abcdef";
+const SECRET_KEY = "abcdef1234567890ABCDEF";
+
+module.exports = { API_KEY, SECRET_KEY };
+</code></pre>
+                        <p>Even in private repositories, hardcoding credentials is a security risk.</p>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Use Environment Variables</h3>
+                    <p>Store your API keys as environment variables. These are kept separate from your code and never committed to version control.</p>
+
+                    <button class="collapsible" onclick="toggleCollapsible(event)">✅ Recommended: Environment Variables</button>
+                    <div class="collapsible-content">
+                        <pre><code># Set environment variables (in bash)
+export ALPACA_API_KEY="your_api_key_here"
+export ALPACA_SECRET_KEY="your_secret_key_here"
+
+# Access in your code
+const apiKey = process.env.ALPACA_API_KEY;
+const secretKey = process.env.ALPACA_SECRET_KEY;
+</code></pre>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Use Config Files Outside Git</h3>
+                    <p>If using a configuration file approach, store credentials in a file that's excluded from git.</p>
+
+                    <button class="collapsible" onclick="toggleCollapsible(event)">🔒 .gitignore Configuration</button>
+                    <div class="collapsible-content">
+                        <pre><code># Add to your .gitignore
+config/api_keys.sh
+config/credentials.json
+.env
+.env.local
+.env.*.local
+</code></pre>
+                        <p>Then create a template file that developers can copy and fill with their own credentials:</p>
+                        <pre><code># config/api_keys.sh.example
+export ALPACA_API_KEY="YOUR_API_KEY_HERE"
+export ALPACA_SECRET_KEY="YOUR_SECRET_KEY_HERE"
+export ALPACA_ENV="paper"  # or "live" for production
+</code></pre>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Other Security Best Practices</h3>
+                    <ul class="feature-list">
+                        <li><strong>Rotate Keys Periodically:</strong> Generate new API keys every 3-6 months and deactivate old ones</li>
+                        <li><strong>Use Different Keys for Different Environments:</strong> One key for paper trading, another for live trading</li>
+                        <li><strong>Limit Key Permissions:</strong> If Alpaca offers permission scoping, restrict keys to only necessary actions</li>
+                        <li><strong>Monitor API Usage:</strong> Regularly check your Alpaca dashboard for unusual API activity</li>
+                        <li><strong>Enable Account Alerts:</strong> Set up notifications for large trades or account changes</li>
+                        <li><strong>Use HTTPS:</strong> Always communicate with Alpaca over HTTPS (never HTTP)</li>
+                        <li><strong>Secure Your Dev Machine:</strong> Keep your development environment updated with security patches</li>
+                    </ul>
+                </div>
+
+                <div class="section">
+                    <h3>If Your Keys Are Compromised</h3>
+                    <div class="callout warning">
+                        <strong>🚨 Immediate Action Required:</strong>
+                        <ol style="margin-top: 10px;">
+                            <li>Log into your Alpaca account immediately</li>
+                            <li>Go to Settings > API Keys</li>
+                            <li>Delete or deactivate the compromised key</li>
+                            <li>Generate a new API key pair</li>
+                            <li>Update your configuration with the new keys</li>
+                            <li>Monitor your account for any unauthorized activity</li>
+                        </ol>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Alpaca Security Features</h3>
+                    <table>
+                        <tr>
+                            <th>Feature</th>
+                            <th>Description</th>
+                        </tr>
+                        <tr>
+                            <td><strong>Two-Factor Authentication</strong></td>
+                            <td>Enable 2FA on your Alpaca account for additional security</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Account Review</strong></td>
+                            <td>Alpaca reviews unusual trading activity and may flag accounts</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Rate Limiting</strong></td>
+                            <td>API rate limits prevent abuse and unauthorized activity</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Audit Logs</strong></td>
+                            <td>View all login and API activity in your account dashboard</td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+
+            <!-- TAB 4: CONFIGURATION -->
+            <div id="configuration" class="tab-content">
+                <h2>Configuration Setup</h2>
+
+                <div class="section">
+                    <h3>Overview</h3>
+                    <p>Once you have your API keys, you need to configure your environment to use them. There are several ways to do this, depending on your preference and use case.</p>
+                </div>
+
+                <div class="section">
+                    <h3>Option 1: Environment Variables (Recommended)</h3>
+                    <p>This is the simplest and most secure approach for local development.</p>
+
+                    <button class="collapsible" onclick="toggleCollapsible(event)">📝 Step-by-Step: Setting Environment Variables</button>
+                    <div class="collapsible-content">
+                        <h4>On macOS/Linux:</h4>
+                        <pre><code># Open or create ~/.bashrc or ~/.zshrc
+nano ~/.zshrc
+
+# Add these lines at the end
+export ALPACA_API_KEY="your_api_key_here"
+export ALPACA_SECRET_KEY="your_secret_key_here"
+export ALPACA_BASE_URL="https://paper-api.alpaca.markets"
+
+# Save and exit (Ctrl+X, then Y, then Enter)
+
+# Reload the shell configuration
+source ~/.zshrc
+</code></pre>
+
+                        <h4>On Windows (PowerShell):</h4>
+                        <pre><code># Open PowerShell as Administrator
+# Set environment variables
+[System.Environment]::SetEnvironmentVariable("ALPACA_API_KEY","your_api_key_here","User")
+[System.Environment]::SetEnvironmentVariable("ALPACA_SECRET_KEY","your_secret_key_here","User")
+[System.Environment]::SetEnvironmentVariable("ALPACA_BASE_URL","https://paper-api.alpaca.markets","User")
+
+# Restart PowerShell to apply changes
+</code></pre>
+
+                        <h4>Verify the Configuration:</h4>
+                        <pre><code># macOS/Linux
+echo $ALPACA_API_KEY
+
+# Windows PowerShell
+$env:ALPACA_API_KEY
+</code></pre>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Option 2: Configuration File</h3>
+                    <p>Create a shell script or config file to load your credentials. This is useful if you manage multiple API keys or environments.</p>
+
+                    <button class="collapsible" onclick="toggleCollapsible(event)">📄 Template: config/api_keys.sh</button>
+                    <div class="collapsible-content">
+                        <pre><code>#!/bin/bash
+# config/api_keys.sh
+# Configuration file for Alpaca API keys
+# ⚠️ IMPORTANT: Add this file to .gitignore
+
+# Your Alpaca API Key
+export ALPACA_API_KEY="your_api_key_here"
+
+# Your Alpaca Secret Key
+export ALPACA_SECRET_KEY="your_secret_key_here"
+
+# Environment: "paper" for paper trading, "live" for real trading
+export ALPACA_ENV="paper"
+
+# Base URL (automatically set based on ALPACA_ENV)
+if [ "$ALPACA_ENV" = "paper" ]; then
+    export ALPACA_BASE_URL="https://paper-api.alpaca.markets"
+else
+    export ALPACA_BASE_URL="https://api.alpaca.markets"
+fi
+
+# Data API URL
+export ALPACA_DATA_URL="https://data.alpaca.markets"
+
+# Optional: API timeout in seconds
+export ALPACA_TIMEOUT="30"
+
+echo "✓ Alpaca API configuration loaded"
+</code></pre>
+
+                        <h4>How to Use This File:</h4>
+                        <pre><code># Source the configuration in your script
+source config/api_keys.sh
+
+# Now you can use the environment variables
+echo $ALPACA_API_KEY
+echo $ALPACA_BASE_URL
+</code></pre>
+
+                        <h4>Add to .gitignore:</h4>
+                        <pre><code>echo "config/api_keys.sh" >> .gitignore
+</code></pre>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Option 3: .env File (for Node.js/Python)</h3>
+                    <p>If you're using Node.js with the dotenv package or Python with python-dotenv, you can use a .env file.</p>
+
+                    <button class="collapsible" onclick="toggleCollapsible(event)">🔧 .env File Setup</button>
+                    <div class="collapsible-content">
+                        <pre><code># .env (DO NOT COMMIT TO GIT)
+ALPACA_API_KEY=your_api_key_here
+ALPACA_SECRET_KEY=your_secret_key_here
+ALPACA_ENV=paper
+ALPACA_BASE_URL=https://paper-api.alpaca.markets
+</code></pre>
+
+                        <h4>Node.js Example:</h4>
+                        <pre><code>// npm install dotenv
+const dotenv = require('dotenv');
+dotenv.config();
+
+const apiKey = process.env.ALPACA_API_KEY;
+const secretKey = process.env.ALPACA_SECRET_KEY;
+</code></pre>
+
+                        <h4>Python Example:</h4>
+                        <pre><code>// pip install python-dotenv
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+api_key = os.getenv('ALPACA_API_KEY')
+secret_key = os.getenv('ALPACA_SECRET_KEY')
+</code></pre>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Environment Variables Reference</h3>
+                    <table>
+                        <tr>
+                            <th>Variable</th>
+                            <th>Description</th>
+                            <th>Example</th>
+                        </tr>
+                        <tr>
+                            <td><code>ALPACA_API_KEY</code></td>
+                            <td>Your Alpaca API Key</td>
+                            <td><code>PK_LIVE_1234567890abcd</code></td>
+                        </tr>
+                        <tr>
+                            <td><code>ALPACA_SECRET_KEY</code></td>
+                            <td>Your Alpaca Secret Key</td>
+                            <td><code>abcdef1234567890ABCDEF</code></td>
+                        </tr>
+                        <tr>
+                            <td><code>ALPACA_ENV</code></td>
+                            <td>Trading environment: paper or live</td>
+                            <td><code>paper</code> or <code>live</code></td>
+                        </tr>
+                        <tr>
+                            <td><code>ALPACA_BASE_URL</code></td>
+                            <td>API base URL</td>
+                            <td><code>https://paper-api.alpaca.markets</code></td>
+                        </tr>
+                        <tr>
+                            <td><code>ALPACA_DATA_URL</code></td>
+                            <td>Data API endpoint</td>
+                            <td><code>https://data.alpaca.markets</code></td>
+                        </tr>
+                    </table>
+                </div>
+
+                <div class="callout success">
+                    <strong>✅ Configuration Complete:</strong> Your environment variables are now set up and ready to use. Proceed to the Testing tab to verify your configuration works correctly.
+                </div>
+            </div>
+
+            <!-- TAB 5: TESTING -->
+            <div id="testing" class="tab-content">
+                <h2>Testing Your Credentials</h2>
+
+                <div class="section">
+                    <h3>Why Test?</h3>
+                    <p>Before integrating Alpaca into your trading application, it's important to verify that your API credentials are valid and that you can successfully connect to the Alpaca API.</p>
+                </div>
+
+                <div class="section">
+                    <h3>Test 1: Using curl (Command Line)</h3>
+                    <p>The simplest way to test your credentials is using curl to make a direct API request.</p>
+
+                    <button class="collapsible" onclick="toggleCollapsible(event)">📡 curl Test Command</button>
+                    <div class="collapsible-content">
+                        <pre><code>curl -H "APCA-API-KEY-ID: $ALPACA_API_KEY" \
+  -H "APCA-API-SECRET-KEY: $ALPACA_SECRET_KEY" \
+  https://paper-api.alpaca.markets/v2/account
+</code></pre>
+
+                        <h4>Step by Step:</h4>
+                        <div class="step">
+                            <span class="step-number">1</span>
+                            <p>Make sure your environment variables are set:</p>
+                            <pre><code>export ALPACA_API_KEY="your_api_key"
+export ALPACA_SECRET_KEY="your_secret_key"
+</code></pre>
+                        </div>
+
+                        <div class="step">
+                            <span class="step-number">2</span>
+                            <p>Run the curl command above</p>
+                        </div>
+
+                        <div class="step">
+                            <span class="step-number">3</span>
+                            <p>Check the response (see below for what to expect)</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Successful Response</h3>
+                    <p>If your credentials are valid, you should receive a JSON response with your account information:</p>
+
+                    <div class="response-example">
+                        <pre><code>{
+  "id": "00000000-0000-0000-0000-000000000000",
+  "account_number": "PA123456",
+  "status": "ACTIVE",
+  "currency": "USD",
+  "buying_power": "100000",
+  "regt_buying_power": "100000",
+  "daytrading_buying_power": "100000",
+  "cash": "100000",
+  "portfolio_value": "100000",
+  "long_market_value": "0",
+  "short_market_value": "0",
+  "equity": "100000",
+  "last_equity": "100000",
+  "multiplier": "1",
+  "shorting_enabled": false,
+  "created_at": "2024-01-15T10:30:00Z",
+  "trading_suspended_by_user": false,
+  "account_type": "MARGIN",
+  "role": "AccountOwner",
+  "permissions": [
+    "read",
+    "write"
+  ],
+  "pat_pattern_day_trader": false
+}
+</code></pre>
+
+                        <div class="callout success">
+                            <strong>✅ Success!</strong> Your API credentials are working correctly. You're ready to integrate with StockSwingTrader.
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Common Error Responses</h3>
+
+                    <div class="error-code">
+                        <strong>401 Unauthorized</strong>
+                        <p><strong>Cause:</strong> Invalid API key or secret key</p>
+                        <p><strong>Solution:</strong></p>
+                        <ul style="margin-left: 20px;">
+                            <li>Verify the keys match exactly (copy/paste from Alpaca dashboard)</li>
+                            <li>Check for extra spaces at the beginning or end of keys</li>
+                            <li>Regenerate the API key if you suspect it's corrupted</li>
+                        </ul>
+                    </div>
+
+                    <div class="error-code">
+                        <strong>403 Forbidden</strong>
+                        <p><strong>Cause:</strong> API key doesn't have required permissions</p>
+                        <p><strong>Solution:</strong></p>
+                        <ul style="margin-left: 20px;">
+                            <li>Verify the key was created in your Alpaca account</li>
+                            <li>Check if your account is in good standing</li>
+                            <li>Try regenerating the API key</li>
+                        </ul>
+                    </div>
+
+                    <div class="error-code">
+                        <strong>Connection Timeout</strong>
+                        <p><strong>Cause:</strong> Network issue or Alpaca server unreachable</p>
+                        <p><strong>Solution:</strong></p>
+                        <ul style="margin-left: 20px;">
+                            <li>Check your internet connection</li>
+                            <li>Verify Alpaca API status at <a href="https://status.alpaca.markets" target="_blank">status.alpaca.markets</a></li>
+                            <li>Check if your network blocks outbound connections to Alpaca</li>
+                            <li>Try from a different network</li>
+                        </ul>
+                    </div>
+
+                    <div class="error-code">
+                        <strong>rate_limit_exceeded</strong>
+                        <p><strong>Cause:</strong> You've exceeded Alpaca's API rate limits</p>
+                        <p><strong>Solution:</strong></p>
+                        <ul style="margin-left: 20px;">
+                            <li>Alpaca has rate limits: 200 requests per minute for paper trading</li>
+                            <li>Wait a minute before retrying</li>
+                            <li>Implement rate limiting in your application</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Test 2: Using Python</h3>
+
+                    <button class="collapsible" onclick="toggleCollapsible(event)">🐍 Python Test Script</button>
+                    <div class="collapsible-content">
+                        <pre><code>#!/usr/bin/env python3
+import os
+import json
+import requests
+
+# Load environment variables
+api_key = os.getenv('ALPACA_API_KEY')
+secret_key = os.getenv('ALPACA_SECRET_KEY')
+base_url = os.getenv('ALPACA_BASE_URL', 'https://paper-api.alpaca.markets')
+
+# Verify variables are set
+if not api_key or not secret_key:
+    print("❌ Error: ALPACA_API_KEY or ALPACA_SECRET_KEY not set")
+    exit(1)
+
+# Make the API request
+headers = {
+    'APCA-API-KEY-ID': api_key,
+    'APCA-API-SECRET-KEY': secret_key,
+}
+
+try:
+    response = requests.get(f'{base_url}/v2/account', headers=headers, timeout=10)
+    
+    if response.status_code == 200:
+        print("✅ Connection successful!")
+        account = response.json()
+        print(f"\nAccount Information:")
+        print(f"  Status: {account['status']}")
+        print(f"  Buying Power: ${account['buying_power']}")
+        print(f"  Cash: ${account['cash']}")
+        print(f"  Portfolio Value: ${account['portfolio_value']}")
+    else:
+        print(f"❌ Error: {response.status_code}")
+        print(f"  {response.text}")
+except Exception as e:
+    print(f"❌ Connection failed: {e}")
+</code></pre>
+
+                        <h4>How to Use:</h4>
+                        <pre><code># Save as test_alpaca.py
+# Make it executable
+chmod +x test_alpaca.py
+
+# Run the test
+python3 test_alpaca.py
+</code></pre>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Test 3: Using Node.js</h3>
+
+                    <button class="collapsible" onclick="toggleCollapsible(event)">📦 Node.js Test Script</button>
+                    <div class="collapsible-content">
+                        <pre><code>// test_alpaca.js
+const https = require('https');
+
+const apiKey = process.env.ALPACA_API_KEY;
+const secretKey = process.env.ALPACA_SECRET_KEY;
+const baseUrl = process.env.ALPACA_BASE_URL || 'https://paper-api.alpaca.markets';
+
+if (!apiKey || !secretKey) {
+    console.error('❌ Error: ALPACA_API_KEY or ALPACA_SECRET_KEY not set');
+    process.exit(1);
+}
+
+const options = {
+    hostname: baseUrl.replace('https://', ''),
+    path: '/v2/account',
+    method: 'GET',
+    headers: {
+        'APCA-API-KEY-ID': apiKey,
+        'APCA-API-SECRET-KEY': secretKey,
+    },
+};
+
+const req = https.request(options, (res) => {
+    let data = '';
+    
+    res.on('data', (chunk) => {
+        data += chunk;
+    });
+    
+    res.on('end', () => {
+        if (res.statusCode === 200) {
+            console.log('✅ Connection successful!');
+            const account = JSON.parse(data);
+            console.log('\nAccount Information:');
+            console.log(`  Status: ${account.status}`);
+            console.log(`  Buying Power: $${account.buying_power}`);
+            console.log(`  Cash: $${account.cash}`);
+            console.log(`  Portfolio Value: $${account.portfolio_value}`);
+        } else {
+            console.error(`❌ Error: ${res.statusCode}`);
+            console.error(`  ${data}`);
+        }
+    });
+});
+
+req.on('error', (e) => {
+    console.error(`❌ Connection failed: ${e.message}`);
+});
+
+req.end();
+</code></pre>
+
+                        <h4>How to Use:</h4>
+                        <pre><code>node test_alpaca.js
+</code></pre>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Next Steps</h3>
+                    <p>Once your credentials are verified, you're ready to integrate with StockSwingTrader. Head to the Integration tab to learn how to configure your trading agent.</p>
+                </div>
+            </div>
+
+            <!-- TAB 6: INTEGRATION -->
+            <div id="integration" class="tab-content">
+                <h2>Integration with StockSwingTrader</h2>
+
+                <div class="section">
+                    <h3>Overview</h3>
+                    <p>StockSwingTrader is built to work seamlessly with Alpaca's trading API. Once your credentials are configured, you can start using the automated trading features.</p>
+                </div>
+
+                <div class="section">
+                    <h3>Quick Start Command</h3>
+                    <p>Use this command to launch StockSwingTrader with Alpaca integration and check your account:</p>
+
+                    <pre><code>./StockSwingTrader_Agent.sh --alpaca --check-account
+</code></pre>
+
+                    <div class="callout info">
+                        <strong>ℹ️ Note:</strong> Make sure your environment variables are set before running this command.
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Understanding Account Display</h3>
+                    <p>When you run the check-account command, you'll see:</p>
+
+                    <button class="collapsible" onclick="toggleCollapsible(event)">💰 Account Balance Display</button>
+                    <div class="collapsible-content">
+                        <pre><code>Account Status: ACTIVE
+Account Number: PA123456
+Buying Power: $100,000.00
+Cash Balance: $95,000.00
+Portfolio Value: $100,000.00
+Open Positions: 3
+
+Position 1: AAPL
+  Qty: 10 shares
+  Entry Price: $180.50
+  Current Price: $185.20
+  P&L: +$47.00 (+0.88%)
+
+Position 2: GOOGL
+  Qty: 5 shares
+  Entry Price: $140.30
+  Current Price: $142.15
+  P&L: +$9.25 (+0.13%)
+
+Position 3: MSFT
+  Qty: 8 shares
+  Entry Price: $395.60
+  Current Price: $398.80
+  P&L: +$25.60 (+0.81%)
+</code></pre>
+
+                        <h4>Key Terms:</h4>
+                        <table>
+                            <tr>
+                                <th>Term</th>
+                                <th>Meaning</th>
+                            </tr>
+                            <tr>
+                                <td><strong>Buying Power</strong></td>
+                                <td>Amount available to trade (includes margin)</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Cash Balance</strong></td>
+                                <td>Uninvested cash in your account</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Portfolio Value</strong></td>
+                                <td>Total value (cash + stock positions)</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Open Positions</strong></td>
+                                <td>Stocks you currently own</td>
+                            </tr>
+                            <tr>
+                                <td><strong>P&L</strong></td>
+                                <td>Profit and Loss on each position</td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Understanding Open Positions</h3>
+                    <p>Open positions show stocks you currently hold. Each position displays:</p>
+
+                    <ul class="feature-list">
+                        <li><strong>Symbol:</strong> Stock ticker (e.g., AAPL, GOOGL)</li>
+                        <li><strong>Quantity:</strong> Number of shares owned</li>
+                        <li><strong>Entry Price:</strong> Average price you paid per share</li>
+                        <li><strong>Current Price:</strong> Latest market price</li>
+                        <li><strong>P&L:</strong> Profit/Loss in dollars and percentage</li>
+                    </ul>
+
+                    <div class="callout info">
+                        <strong>💡 Example:</strong> If you bought 10 AAPL at $180 (total $1,800) and it's now at $185, your P&L is +$50 (+2.78%).
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Paper Trading vs Live Trading</h3>
+
+                    <button class="collapsible" onclick="toggleCollapsible(event)">📊 Paper vs Live Trading</button>
+                    <div class="collapsible-content">
+                        <table>
+                            <tr>
+                                <th>Aspect</th>
+                                <th>Paper Trading</th>
+                                <th>Live Trading</th>
+                            </tr>
+                            <tr>
+                                <td><strong>Money</strong></td>
+                                <td>Virtual - $100,000 free</td>
+                                <td>Real money you deposit</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Risk</strong></td>
+                                <td>No financial risk</td>
+                                <td>Real financial risk</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Execution</strong></td>
+                                <td>Instant fills (simulated)</td>
+                                <td>Real market execution</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Data</strong></td>
+                                <td>Same as live</td>
+                                <td>Real market data</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Best For</strong></td>
+                                <td>Testing strategies, learning</td>
+                                <td>Real trading</td>
+                            </tr>
+                        </table>
+
+                        <div class="callout warning">
+                            <strong>⚠️ Recommendation:</strong> Always thoroughly test your trading strategy in paper trading mode before deploying to live trading.
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Paper Trading Safety Notes</h3>
+                    <ul class="feature-list">
+                        <li>Paper trading resets daily - your positions don't carry over</li>
+                        <li>Fills are simulated and may not match real execution</li>
+                        <li>Market impact (your large orders affecting prices) is not simulated</li>
+                        <li>Commissions and fees are not deducted</li>
+                        <li>Use it to verify logic, not to predict live performance</li>
+                    </ul>
+                </div>
+
+                <div class="section">
+                    <h3>Common Integration Commands</h3>
+
+                    <button class="collapsible" onclick="toggleCollapsible(event)">⚙️ Available Commands</button>
+                    <div class="collapsible-content">
+                        <pre><code># Check account status
+./StockSwingTrader_Agent.sh --alpaca --check-account
+
+# Start paper trading
+bash start_paper.sh
+
+# Start live trading (use with caution!)
+bash start_live.sh
+
+# View recent trades
+./StockSwingTrader_Agent.sh --alpaca --show-trades
+
+# Get market data
+./StockSwingTrader_Agent.sh --alpaca --get-market-data
+
+# Test connection
+./StockSwingTrader_Agent.sh --alpaca --test
+</code></pre>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Troubleshooting Integration Issues</h3>
+
+                    <div class="error-code">
+                        <strong>"API key not found" error</strong>
+                        <p><strong>Cause:</strong> Environment variables not set</p>
+                        <p><strong>Solution:</strong></p>
+                        <ul style="margin-left: 20px;">
+                            <li>Verify environment variables are set: <code>echo $ALPACA_API_KEY</code></li>
+                            <li>Source your config file: <code>source config/api_keys.sh</code></li>
+                            <li>Check .bashrc or .zshrc for exported variables</li>
+                        </ul>
+                    </div>
+
+                    <div class="error-code">
+                        <strong>"Connection refused" error</strong>
+                        <p><strong>Cause:</strong> Can't reach Alpaca API</p>
+                        <p><strong>Solution:</strong></p>
+                        <ul style="margin-left: 20px;">
+                            <li>Check internet connection</li>
+                            <li>Verify correct base URL is set</li>
+                            <li>Check Alpaca status page for outages</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Next Steps</h3>
+                    <p>Now that Alpaca is integrated, you can:</p>
+                    <ul class="feature-list">
+                        <li>Set up trading rules and strategies</li>
+                        <li>Configure alerts and notifications</li>
+                        <li>Schedule automated trades</li>
+                        <li>Monitor your portfolio in real-time</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- TAB 7: TROUBLESHOOTING -->
+            <div id="troubleshooting" class="tab-content">
+                <h2>Troubleshooting Guide</h2>
+
+                <div class="section">
+                    <h3>Error: 401 Unauthorized</h3>
+
+                    <div class="error-code">
+                        <strong>Error Message:</strong> <code>401 Unauthorized</code>
+                        <p><strong>What it means:</strong> Your API credentials are invalid or incorrect.</p>
+
+                        <h4>Common Causes:</h4>
+                        <ol style="margin-left: 20px;">
+                            <li>Typo in API key or secret key</li>
+                            <li>Extra spaces before or after the keys</li>
+                            <li>Using someone else's API key</li>
+                            <li>API key was deleted or revoked</li>
+                            <li>Environment variables not properly set</li>
+                        </ol>
+
+                        <h4>How to Fix:</h4>
+                        <ol style="margin-left: 20px;">
+                            <li>Log into Alpaca dashboard</li>
+                            <li>Go to Settings → API Keys</li>
+                            <li>Verify your API key is listed and active</li>
+                            <li>Copy the API key and Secret Key again (carefully)</li>
+                            <li>Update your environment variables or config file</li>
+                            <li>Test the connection again using curl</li>
+                        </ol>
+
+                        <h4>Last Resort - Generate New Keys:</h4>
+                        <ol style="margin-left: 20px;">
+                            <li>In Alpaca dashboard, click the trash icon to delete old key</li>
+                            <li>Click "Create Key" to generate a new one</li>
+                            <li>Copy both the API Key and Secret Key immediately</li>
+                            <li>Update your configuration with the new keys</li>
+                        </ol>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Error: 403 Forbidden</h3>
+
+                    <div class="error-code">
+                        <strong>Error Message:</strong> <code>403 Forbidden</code>
+                        <p><strong>What it means:</strong> Your API key doesn't have permission to perform this action.</p>
+
+                        <h4>Common Causes:</h4>
+                        <ol style="margin-left: 20px;">
+                            <li>Account is not fully verified</li>
+                            <li>Account is restricted due to pattern day trading rules</li>
+                            <li>Alpaca account is closed or suspended</li>
+                            <li>Insufficient funds for trading</li>
+                        </ol>
+
+                        <h4>How to Fix:</h4>
+                        <ol style="margin-left: 20px;">
+                            <li>Log into your Alpaca account</li>
+                            <li>Check account status in Dashboard</li>
+                            <li>Complete any pending verifications or requirements</li>
+                            <li>If paper trading, ensure it's enabled</li>
+                            <li>For live trading, verify sufficient funds are deposited</li>
+                            <li>Contact Alpaca support if account is suspended</li>
+                        </ol>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Error: Connection Timeout</h3>
+
+                    <div class="error-code">
+                        <strong>Error Message:</strong> <code>Connection timed out</code> or <code>Network unreachable</code>
+                        <p><strong>What it means:</strong> Cannot reach Alpaca's servers.</p>
+
+                        <h4>Common Causes:</h4>
+                        <ol style="margin-left: 20px;">
+                            <li>No internet connection</li>
+                            <li>Network blocks outbound HTTPS connections</li>
+                            <li>Alpaca servers are down or slow</li>
+                            <li>Wrong base URL configured</li>
+                            <li>Firewall or proxy blocking the connection</li>
+                        </ol>
+
+                        <h4>How to Fix:</h4>
+                        <ol style="margin-left: 20px;">
+                            <li>Test basic internet: <code>ping google.com</code></li>
+                            <li>Check Alpaca status: <a href="https://status.alpaca.markets" target="_blank">status.alpaca.markets</a></li>
+                            <li>Verify base URL is correct:
+                                <pre><code>echo $ALPACA_BASE_URL</code></pre>
+                            </li>
+                            <li>Try with a different network (e.g., mobile hotspot)</li>
+                            <li>Check if your network blocks HTTPS traffic</li>
+                            <li>Try increasing the timeout:
+                                <pre><code>curl --max-time 30 https://paper-api.alpaca.markets/v2/account</code></pre>
+                            </li>
+                        </ol>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Error: Rate Limit Exceeded</h3>
+
+                    <div class="error-code">
+                        <strong>Error Message:</strong> <code>rate_limit_exceeded</code> or <code>429 Too Many Requests</code>
+                        <p><strong>What it means:</strong> You've made too many API calls in a short time.</p>
+
+                        <h4>Alpaca Rate Limits:</h4>
+                        <table>
+                            <tr>
+                                <th>Account Type</th>
+                                <th>Rate Limit</th>
+                            </tr>
+                            <tr>
+                                <td>Paper Trading</td>
+                                <td>200 requests/minute</td>
+                            </tr>
+                            <tr>
+                                <td>Live Trading</td>
+                                <td>200 requests/minute</td>
+                            </tr>
+                        </table>
+
+                        <h4>How to Fix:</h4>
+                        <ol style="margin-left: 20px;">
+                            <li>Stop making API calls and wait 1 minute</li>
+                            <li>Implement request batching in your code</li>
+                            <li>Add delays between requests:
+                                <pre><code>import time
+time.sleep(0.5)  # Wait 500ms between requests</code></pre>
+                            </li>
+                            <li>Cache responses instead of making repeated calls</li>
+                            <li>Use WebSocket for real-time data instead of polling</li>
+                        </ol>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Error: Invalid Base URL</h3>
+
+                    <div class="error-code">
+                        <strong>Error Message:</strong> <code>invalid_url</code> or <code>connection refused</code>
+                        <p><strong>What it means:</strong> The API endpoint URL is incorrect.</p>
+
+                        <h4>Correct URLs:</h4>
+                        <table>
+                            <tr>
+                                <th>Purpose</th>
+                                <th>Correct URL</th>
+                            </tr>
+                            <tr>
+                                <td>Paper Trading API</td>
+                                <td><code>https://paper-api.alpaca.markets</code></td>
+                            </tr>
+                            <tr>
+                                <td>Live Trading API</td>
+                                <td><code>https://api.alpaca.markets</code></td>
+                            </tr>
+                            <tr>
+                                <td>Data API</td>
+                                <td><code>https://data.alpaca.markets</code></td>
+                            </tr>
+                        </table>
+
+                        <h4>How to Fix:</h4>
+                        <ol style="margin-left: 20px;">
+                            <li>Verify your base URL is spelled correctly</li>
+                            <li>Make sure it includes <code>https://</code> (never <code>http://</code>)</li>
+                            <li>Check environment variable:
+                                <pre><code>echo $ALPACA_BASE_URL</code></pre>
+                            </li>
+                            <li>Update if needed:
+                                <pre><code>export ALPACA_BASE_URL="https://paper-api.alpaca.markets"</code></pre>
+                            </li>
+                        </ol>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Error: Environment Variables Not Set</h3>
+
+                    <div class="error-code">
+                        <strong>Error Message:</strong> <code>ALPACA_API_KEY not found</code> or similar
+                        <p><strong>What it means:</strong> Your environment variables are not accessible to the application.</p>
+
+                        <h4>How to Fix:</h4>
+                        <ol style="margin-left: 20px;">
+                            <li><strong>Verify variables are set:</strong>
+                                <pre><code>echo $ALPACA_API_KEY
+echo $ALPACA_SECRET_KEY</code></pre>
+                            </li>
+                            <li><strong>If empty, set them now:</strong>
+                                <pre><code>export ALPACA_API_KEY="your_key_here"
+export ALPACA_SECRET_KEY="your_secret_here"</code></pre>
+                            </li>
+                            <li><strong>If you're using a config file:</strong>
+                                <pre><code>source config/api_keys.sh
+echo $ALPACA_API_KEY  # Should show your key</code></pre>
+                            </li>
+                            <li><strong>If using .env file, verify it exists:</strong>
+                                <pre><code>ls -la .env</code></pre>
+                            </li>
+                            <li><strong>If running in a new terminal, add to .bashrc or .zshrc:</strong>
+                                <pre><code>echo 'export ALPACA_API_KEY="your_key"' >> ~/.zshrc
+echo 'export ALPACA_SECRET_KEY="your_secret"' >> ~/.zshrc
+source ~/.zshrc</code></pre>
+                            </li>
+                        </ol>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Error: Invalid JSON Response</h3>
+
+                    <div class="error-code">
+                        <strong>Error Message:</strong> <code>JSON decode error</code> or <code>Invalid JSON</code>
+                        <p><strong>What it means:</strong> The API response is not valid JSON (might be HTML error page).</p>
+
+                        <h4>How to Fix:</h4>
+                        <ol style="margin-left: 20px;">
+                            <li>Check the actual response:
+                                <pre><code>curl -v https://paper-api.alpaca.markets/v2/account \
+  -H "APCA-API-KEY-ID: $ALPACA_API_KEY" \
+  -H "APCA-API-SECRET-KEY: $ALPACA_SECRET_KEY"</code></pre>
+                            </li>
+                            <li>Look for error messages in the response</li>
+                            <li>Verify the endpoint is correct</li>
+                            <li>Check API documentation for correct request format</li>
+                        </ol>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Still Having Issues?</h3>
+
+                    <div class="callout info">
+                        <strong>📞 Get Help:</strong>
+                        <ul style="margin-top: 10px; margin-left: 20px;">
+                            <li><strong>Alpaca Support:</strong> <a href="https://support.alpaca.markets" target="_blank">support.alpaca.markets</a></li>
+                            <li><strong>Alpaca Community:</strong> <a href="https://forum.alpaca.markets" target="_blank">forum.alpaca.markets</a></li>
+                            <li><strong>API Documentation:</strong> <a href="https://docs.alpaca.markets" target="_blank">docs.alpaca.markets</a></li>
+                            <li><strong>Status Page:</strong> <a href="https://status.alpaca.markets" target="_blank">status.alpaca.markets</a></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <footer>
+            <p>StockSwingTrader Alpaca Setup Guide | Last Updated: 2024</p>
+            <p>For more information, visit <a href="https://alpaca.markets" target="_blank" style="color: white; text-decoration: underline;">alpaca.markets</a></p>
+        </footer>
+    </div>
+
+    <script>
+        function openTab(evt, tabName) {
+            // Hide all tab contents
+            const tabContents = document.querySelectorAll('.tab-content');
+            tabContents.forEach(tab => tab.classList.remove('active'));
+
+            // Remove active class from all buttons
+            const tabButtons = document.querySelectorAll('.tab-button');
+            tabButtons.forEach(btn => btn.classList.remove('active'));
+
+            // Show the current tab
+            document.getElementById(tabName).classList.add('active');
+
+            // Add active class to the clicked button
+            evt.currentTarget.classList.add('active');
+        }
+
+        function toggleCollapsible(evt) {
+            evt.target.classList.toggle('active');
+            const content = evt.target.nextElementSibling;
+            if (content && content.classList.contains('collapsible-content')) {
+                content.classList.toggle('active');
+            }
+        }
+
+        // Initialize first tab as active on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            const firstTab = document.querySelector('.tab-button');
+            if (firstTab) {
+                firstTab.click();
+            }
+        });
+    </script>
+</body>
+</html>
