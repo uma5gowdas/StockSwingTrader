@@ -43,3 +43,8 @@ cache/
 dist/
 build/
 *.egg-info/
+
+# Local environment files (may hold API keys)
+.env
+**/.env
+!.env.example
