@@ -58,6 +58,13 @@ else
     exit 2
 fi
 
+# Load local credentials/overrides (untracked; create with
+# `cp config.template.sh config.sh` and fill in your keys).
+# Sourced after the template so its values replace the placeholders.
+if [[ -f "$SCRIPT_DIR/config.sh" ]]; then
+    source "$SCRIPT_DIR/config.sh"
+fi
+
 # Load libraries
 source "$SCRIPT_DIR/lib/indicators.sh" 2>/dev/null || echo "WARNING: indicators.sh not found"
 source "$SCRIPT_DIR/lib/sentiment.sh" 2>/dev/null || echo "WARNING: sentiment.sh not found"
