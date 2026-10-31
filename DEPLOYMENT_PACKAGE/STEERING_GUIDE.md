@@ -720,7 +720,7 @@ These are targets, not verified benchmarks: under 5 s per symbol for the full pi
 
 ## Testing
 
-`bash tests/test_runner.sh` runs 14 suites offline (`SST_OFFLINE=1`) and writes `.agents/tasks/test-report.md`. Last verified result: **14 suites, 468/468 passing**.
+`bash tests/test_runner.sh` runs 14 suites offline (`SST_OFFLINE=1`) and writes `.agents/tasks/test-report.md`. Last verified result: **14 suites, 468/468 passing**, both in the working copy and on a fresh clone that trained its own model (`python3 lib/train_ml_model.py`, xgboost 3.4.1 / numpy 2.5.4). The ML Scoring Integration suite does not depend on what the trained model predicts: it checks the predictor's contract (schema, confidence range, determinism) and runs the STRONG_BUY/STRONG_SELL threshold tests with a stub predictor.
 
 | Suite | File | Runner |
 |---|---|---|
