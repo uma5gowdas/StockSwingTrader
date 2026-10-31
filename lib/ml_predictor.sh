@@ -25,8 +25,11 @@ PYTHON_SCRIPT="${LIB_DIR}/ml_inference.py"
 #   $3 - ohlcv_json: Current OHLCV data as JSON (optional stdin)
 #
 # Returns:
-#   JSON with direction, confidence, probability
-#   {"direction": "up"|"down", "confidence": 0-100, "probability": 0.0-1.0}
+#   JSON with direction, confidence, probability and data_source
+#   {"available": true, "direction": "up"|"down", "confidence": 0-100,
+#    "probability": 0.0-1.0, "data_source": "yfinance"|"stdin"|"synthetic"}
+#   {"available": false, "reason": "...", "data_source": null} (exit 0)
+#     when there is not enough real data; callers give ML zero weight
 #   {"error": "message"} on failure
 #
 # Example:
@@ -53,23 +56,12 @@ ml_predict_direction() {
         return 1
     fi
     
-    # Read OHLCV data from stdin or create placeholder for current data fetch
-    local ohlcv_data
-    if [[ -t 0 ]]; then
-        # No stdin, create placeholder data structure
-        ohlcv_data=$(cat <<'EOF'
-{
-  "symbol": "PLACEHOLDER",
-  "open": 0.0,
-  "high": 0.0,
-  "low": 0.0,
-  "close": 0.0,
-  "volume": 0
-}
-EOF
-)
-    else
-        # Read from stdin
+    # OHLCV data from stdin (JSON array of records) if any. With no stdin the
+    # inference script fetches market data itself; it never invents data
+    # unless synthetic data is explicitly allowed (SST_ALLOW_SYNTHETIC=1 or
+    # SST_OFFLINE=1), and then marks the result "data_source": "synthetic".
+    local ohlcv_data=""
+    if [[ ! -t 0 ]]; then
         ohlcv_data=$(cat)
     fi
     

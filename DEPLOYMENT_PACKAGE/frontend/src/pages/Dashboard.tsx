@@ -3,13 +3,15 @@ import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis
 import { usePolling } from '../hooks/usePolling';
 import { useWatchlist } from '../hooks/usePreferences';
 import { errorMessage, getHealth, getPortfolio, getSignals, getStats, type JsonObject } from '../utils/api';
-import { extractScore, extractSignal, flatten, formatNumber } from '../utils/format';
+import { dataProvenance, extractScore, extractSignal, flatten, formatNumber } from '../utils/format';
 import { ErrorMessage, KeyValueList, LastUpdated, Loading, PageHeader, Section, SignalBadge, StatCard } from '../components/ui';
 
 interface SymbolSignal {
   symbol: string;
   score?: number;
   signal?: string;
+  /** Score was computed from synthetic (demo/test) data. */
+  synthetic?: boolean;
   error?: string;
 }
 
@@ -18,7 +20,7 @@ async function fetchWatchlistSignals(symbols: string[], signal: AbortSignal): Pr
   return results.map((result, i) => {
     if (result.status === 'rejected') return { symbol: symbols[i], error: errorMessage(result.reason) };
     const data: JsonObject = result.value;
-    return { symbol: symbols[i], score: extractScore(data), signal: extractSignal(data) };
+    return { symbol: symbols[i], score: extractScore(data), signal: extractSignal(data), synthetic: dataProvenance(data).synthetic };
   });
 }
 
@@ -95,6 +97,11 @@ export default function Dashboard() {
 
         <Section title="Watchlist signals">
           <ErrorMessage message={signals.error} />
+          {rows.some((r) => r.synthetic) && (
+            <p role="alert" className="mb-3 rounded-md border border-amber-600 bg-amber-950 px-3 py-2 text-sm text-amber-100">
+              <strong>Synthetic data:</strong> scores marked “synthetic” were computed from generated demo/test data, not market data.
+            </p>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <caption className="sr-only">Current signal per watchlist symbol</caption>
@@ -113,7 +120,10 @@ export default function Dashboard() {
                         {r.symbol}
                       </Link>
                     </th>
-                    <td className="table-cell">{r.error ? <span className="text-red-300">{r.error}</span> : formatNumber(r.score, 1)}</td>
+                    <td className="table-cell">
+                      {r.error ? <span className="text-red-300">{r.error}</span> : formatNumber(r.score, 1)}
+                      {r.synthetic && <span className="ml-2 rounded bg-amber-900 px-1.5 py-0.5 text-xs font-semibold text-amber-100">synthetic</span>}
+                    </td>
                     <td className="table-cell"><SignalBadge signal={r.signal} /></td>
                   </tr>
                 ))}

@@ -21,11 +21,22 @@ Input JSON Format:
 Output JSON Format:
   {
     "symbol": "AAPL",
+    "available": true,
     "direction": "up|down",
     "confidence": 0-100,
     "probability": 0.0-1.0,
+    "data_source": "yfinance|file|stdin|synthetic",
+    "model_training_data": "synthetic",
     "timestamp": "2024-01-15T14:30:00Z"
   }
+
+  When there is not enough real data (and synthetic data was not requested):
+  {"symbol": "AAPL", "available": false, "reason": "...", "data_source": null, ...}
+
+Synthetic features are used ONLY when explicitly requested: --synthetic,
+SST_ALLOW_SYNTHETIC=1 (real data first, synthetic fallback) or SST_OFFLINE=1
+(no network, synthetic). Such results carry "data_source": "synthetic" and a
+"warning" string.
 """
 
 import os
@@ -61,6 +72,23 @@ logger = logging.getLogger(__name__)
 SCRIPT_DIR = Path(__file__).parent
 MODELS_DIR = SCRIPT_DIR / 'models'
 MODEL_PATH = MODELS_DIR / 'xgboost_predictor.pkl'
+
+# Rows of real OHLCV needed for the indicator features (EMA50 etc.)
+MIN_ROWS = 50
+
+# train_ml_model.py only trains on generated data; reported with every
+# prediction so a real-data prediction is not mistaken for a validated model.
+MODEL_TRAINING_DATA = 'synthetic'
+
+SYNTHETIC_WARNING = ('Prediction uses SYNTHETIC features (demo/test mode), '
+                     'not market data. Do not trade on it.')
+
+
+def synthetic_allowed(flag=False):
+    """Synthetic data is opt-in: --synthetic, SST_ALLOW_SYNTHETIC=1 or SST_OFFLINE=1."""
+    return (bool(flag)
+            or os.environ.get('SST_ALLOW_SYNTHETIC') == '1'
+            or os.environ.get('SST_OFFLINE') == '1')
 
 
 def calculate_rsi(prices, period=14):
@@ -161,32 +189,36 @@ def calculate_ema(prices, period):
 
 
 def fetch_current_data(symbol, periods=50):
-    """Fetch current OHLCV data from yfinance.
+    """Fetch recent daily OHLCV from yfinance.
 
-    Returns None when offline (SST_OFFLINE=1), when yfinance is missing,
-    or when no data is available.
+    Returns (DataFrame, None) on success or (None, reason) when offline
+    (SST_OFFLINE=1), yfinance is missing, the fetch fails or returns nothing.
     """
     if os.environ.get('SST_OFFLINE') == '1':
-        return None
+        return None, 'SST_OFFLINE=1: market data fetch disabled'
     try:
         import yfinance as yf
     except ImportError:
-        return None
+        return None, 'yfinance not installed'
     try:
         data = yf.download(symbol, period='3mo', progress=False)
-        if data.empty:
-            return None
+        if data is None or data.empty:
+            return None, f'yfinance returned no data for {symbol}'
         # Recent yfinance returns (field, ticker) MultiIndex columns
         if isinstance(data.columns, pd.MultiIndex):
             data.columns = data.columns.get_level_values(0)
-        return data.tail(periods).reset_index()
+        return data.tail(periods).reset_index(), None
     except Exception as e:
         logger.error(f"Error fetching data: {e}")
-        return None
+        return None, f'yfinance fetch failed: {e}'
 
 
 def generate_synthetic_features_for_symbol(symbol):
-    """Generate synthetic features for a symbol when real data unavailable."""
+    """Generate seeded synthetic features for a symbol.
+
+    Only called when synthetic data was explicitly requested (see
+    synthetic_allowed()); results are marked "data_source": "synthetic".
+    """
     # Stable per-symbol seed (built-in hash() is randomised per process)
     np.random.seed(zlib.crc32(symbol.encode('utf-8')))
     
@@ -212,7 +244,7 @@ def generate_synthetic_features_for_symbol(symbol):
 
 def extract_features_from_data(df):
     """Extract features from DataFrame."""
-    if df is None or len(df) < 50:
+    if df is None or len(df) < MIN_ROWS:
         return None
     
     close = df['Close'].values
@@ -265,23 +297,52 @@ def extract_features_from_data(df):
     return features
 
 
-def predict(symbol, period, model, historical_data=None):
-    """Make prediction using loaded model."""
+def unavailable_result(symbol, period, reason):
+    """Explicit 'no prediction' result: callers give ML zero weight."""
+    return {
+        "symbol": symbol,
+        "available": False,
+        "reason": reason,
+        "data_source": None,
+        "period": period,
+        "timestamp": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    }
+
+
+def predict(symbol, period, model, historical_data=None, data_source=None, allow_synthetic=False):
+    """Make prediction using loaded model.
+
+    historical_data/data_source: OHLCV supplied by the caller ('file' or
+    'stdin'). With fewer than MIN_ROWS supplied rows, stdin data is ignored
+    and yfinance is tried; a too-short data file is reported as such.
+    Without enough real data the result is unavailable_result() unless
+    synthetic data is allowed (synthetic_allowed()).
+    """
     try:
-        # Fetch or use provided data
-        if historical_data is None:
-            df = fetch_current_data(symbol, periods=50)
+        features_dict = None
+        source = None
+        reason = None
+
+        if historical_data is not None and len(historical_data) >= MIN_ROWS:
+            features_dict = extract_features_from_data(historical_data)
+            source = data_source
+        elif historical_data is not None and data_source == 'file':
+            reason = f'data file has {len(historical_data)} rows; {MIN_ROWS} needed'
         else:
-            df = historical_data
-        
-        if df is None or len(df) < 20:
-            # Generate synthetic features for demo/testing
-            logger.warning(f"Insufficient real data for {symbol}, using synthetic features for demo")
+            df, reason = fetch_current_data(symbol, periods=MIN_ROWS)
+            if df is not None and len(df) >= MIN_ROWS:
+                features_dict = extract_features_from_data(df)
+                source = 'yfinance'
+            elif df is not None:
+                reason = f'yfinance returned {len(df)} rows for {symbol}; {MIN_ROWS} needed'
+
+        if features_dict is None and source is None:
+            if not synthetic_allowed(allow_synthetic):
+                return unavailable_result(symbol, period, reason or 'no market data')
+            logger.warning(f"No real data for {symbol} ({reason}); using SYNTHETIC features (explicitly allowed)")
             features_dict = generate_synthetic_features_for_symbol(symbol)
-        else:
-            # Extract features from real data
-            features_dict = extract_features_from_data(df)
-        
+            source = 'synthetic'
+
         if features_dict is None:
             return {"error": "Failed to extract features"}
         
@@ -314,12 +375,17 @@ def predict(symbol, period, model, historical_data=None):
         
         result = {
             "symbol": symbol,
+            "available": True,
             "direction": direction,
             "confidence": confidence,
             "probability": round(prob_value, 4),
             "period": period,
+            "data_source": source,
+            "model_training_data": MODEL_TRAINING_DATA,
             "timestamp": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         }
+        if source == 'synthetic':
+            result["warning"] = SYNTHETIC_WARNING
         
         return result
     
@@ -335,6 +401,9 @@ def main():
     parser.add_argument('--period', type=int, default=5, help='Forecast period in days')
     parser.add_argument('--data-file', type=str, default=None,
                         help='Optional CSV file with Open/High/Low/Close/Volume columns')
+    parser.add_argument('--synthetic', action='store_true',
+                        help='Allow seeded synthetic features when real data is unavailable '
+                             '(demo/test only; output is marked data_source=synthetic)')
     
     args = parser.parse_args()
     
@@ -349,6 +418,7 @@ def main():
         model = load(MODEL_PATH)
         
         historical_data = None
+        data_source = None
         if args.data_file:
             # Historical OHLCV from CSV (column names are case-insensitive)
             try:
@@ -362,6 +432,7 @@ def main():
                 print(json.dumps({"error": f"Data file missing columns: {', '.join(missing)}"}))
                 return 1
             historical_data = df
+            data_source = 'file'
         # Otherwise try to read input data from stdin
         elif not sys.stdin.isatty():
             try:
@@ -380,13 +451,26 @@ def main():
                                 'Volume': [json_data.get('volume', 0)]
                             }
                             historical_data = pd.DataFrame(df_dict)
+                            data_source = 'stdin'
+                        elif isinstance(json_data, list) and json_data:
+                            # Array of OHLCV records (keys case-insensitive,
+                            # values may be numeric strings)
+                            df = pd.DataFrame(json_data)
+                            df.columns = [str(c).strip().capitalize() for c in df.columns]
+                            ohlcv_cols = ('High', 'Low', 'Close', 'Volume')
+                            if all(c in df.columns for c in ohlcv_cols):
+                                for c in ohlcv_cols:
+                                    df[c] = pd.to_numeric(df[c], errors='coerce')
+                                historical_data = df.dropna(subset=list(ohlcv_cols)).reset_index(drop=True)
+                                data_source = 'stdin'
                     except json.JSONDecodeError:
                         pass
             except Exception as e:
                 logger.debug(f"No stdin data: {e}")
         
         # Make prediction
-        result = predict(args.symbol, args.period, model, historical_data)
+        result = predict(args.symbol, args.period, model, historical_data,
+                         data_source=data_source, allow_synthetic=args.synthetic)
         
         # Output JSON to stdout
         print(json.dumps(result), file=sys.stdout)

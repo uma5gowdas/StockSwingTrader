@@ -89,6 +89,33 @@ export function numericEntries(data: unknown): Array<{ name: string; value: numb
     .filter((e): e is { name: string; value: number } => e.value !== undefined);
 }
 
+export interface DataProvenance {
+  /** Some part of the payload was computed from synthetic (demo/test) data. */
+  synthetic: boolean;
+  /** Top-level data_source, when the payload reports one. */
+  source?: string;
+  /** Reason the ML component was unavailable (it then has zero weight). */
+  mlUnavailable?: string;
+}
+
+/**
+ * Where the numbers in a backend payload came from. Any "data_source":
+ * "synthetic" (at any depth) marks the payload synthetic; an ML component
+ * with "available": false is reported with its reason.
+ */
+export function dataProvenance(data: unknown): DataProvenance {
+  const entries = flatten(data);
+  const synthetic = entries.some(([key, value]) => (key === 'data_source' || key.endsWith('.data_source')) && value === 'synthetic');
+  const source = isObject(data) && typeof data.data_source === 'string' ? data.data_source : undefined;
+  let mlUnavailable: string | undefined;
+  const components = isObject(data) ? data.components : undefined;
+  const ml = isObject(components) ? components.ml_confidence : undefined;
+  if (isObject(ml) && ml.available === false) {
+    mlUnavailable = typeof ml.reason === 'string' && ml.reason ? ml.reason : 'no market data';
+  }
+  return { synthetic, source, mlUnavailable };
+}
+
 export function signalClass(signal: string | undefined): string {
   if (!signal) return 'bg-gray-700 text-gray-200';
   if (signal.includes('BUY')) return 'bg-green-900 text-green-200';

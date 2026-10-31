@@ -105,6 +105,27 @@ cache_regime() {
     echo "$regime_json" > "$cache_file"
 }
 
+# Synthetic data is opt-in: SST_ALLOW_SYNTHETIC=1 or SST_OFFLINE=1
+_regime_synthetic_allowed() {
+    [[ "${SST_OFFLINE:-0}" == "1" || "${SST_ALLOW_SYNTHETIC:-0}" == "1" ]]
+}
+
+# Print the cached regime and return 0 when the cache is fresh and usable:
+# a result computed from the synthetic demo series (or an old entry without
+# a data_source) is only reused while synthetic data is allowed.
+# Args: symbol
+_regime_load_cache_if_ok() {
+    local symbol=$1
+    is_regime_cache_valid "$symbol" || return 1
+    local cached
+    cached=$(load_regime_from_cache "$symbol")
+    if [[ "$(echo "$cached" | jq -r '.data_source // "synthetic"' 2>/dev/null)" == "synthetic" ]] \
+        && ! _regime_synthetic_allowed; then
+        return 1
+    fi
+    echo "$cached"
+}
+
 # Load regime from cache
 # Args: symbol
 # Returns: cached regime JSON or empty string
@@ -210,8 +231,14 @@ detect_trend_direction() {
 # ============================================================================
 
 # Detect current market regime for a symbol
-# Args: symbol, lookback_days (default 30)
-# Returns: JSON {regime, adx, trend, volatility, timestamp}
+# Args: symbol, lookback_days (default 30), [closes...]
+#   closes: real closing prices (oldest first, >= 20). Without them there is
+#   no market data source here: the built-in 30-price demo series is used
+#   only when synthetic data is allowed (SST_ALLOW_SYNTHETIC=1 or
+#   SST_OFFLINE=1) and the result is marked "data_source": "synthetic" with a
+#   "warning"; otherwise the result is
+#   {"regime": "unknown", "available": false, "reason": ..., "data_source": null}.
+# Returns: JSON {regime, adx, trend, volatility, data_source, timestamp}
 #
 # Regimes:
 #   - "sideways": ADX < 25 and BB_width < 15%
@@ -229,24 +256,41 @@ EOF
         return 1
     fi
     
-    # Check cache first
-    if is_regime_cache_valid "$symbol"; then
-        load_regime_from_cache "$symbol"
-        return 0
+    shift 2 2>/dev/null || shift $#
+    local -a closes=("$@")
+    local data_source warning=""
+    
+    if [[ ${#closes[@]} -gt 0 ]]; then
+        if [[ ${#closes[@]} -lt 20 ]]; then
+            cat <<EOF
+{"regime": "unknown", "available": false, "reason": "need at least 20 closing prices, got ${#closes[@]}", "data_source": null, "symbol": "$symbol", "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+EOF
+            return 0
+        fi
+        data_source="caller"
+    else
+        # Check cache first (synthetic entries only while synthetic is allowed)
+        if _regime_load_cache_if_ok "$symbol"; then
+            return 0
+        fi
+        if ! _regime_synthetic_allowed; then
+            cat <<EOF
+{"regime": "unknown", "available": false, "reason": "no market data: pass closing prices, or set SST_ALLOW_SYNTHETIC=1 for the demo series", "data_source": null, "symbol": "$symbol", "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+EOF
+            return 0
+        fi
+        # Built-in demo series (explicitly allowed synthetic data)
+        closes=(100.5 101.2 100.8 101.5 102.0 101.8 102.5 103.0 102.8 103.5
+                104.0 103.2 103.8 104.5 105.0 104.8 105.5 106.0 105.8 106.5
+                107.0 106.8 107.5 108.0 107.8 108.5 109.0 108.8 109.5 110.0)
+        data_source="synthetic"
+        warning=",
+  \"warning\": \"Regime computed from a SYNTHETIC demo price series, not market data\""
     fi
     
-    # In production, would fetch real OHLC data via API
-    # For now, use mock data structure
-    
-    # Mock data setup (in production, fetch from broker API)
-    # This allows testing the regime logic
-    local -a mock_closes=(100.5 101.2 100.8 101.5 102.0 101.8 102.5 103.0 102.8 103.5
-                          104.0 103.2 103.8 104.5 105.0 104.8 105.5 106.0 105.8 106.5
-                          107.0 106.8 107.5 108.0 107.8 108.5 109.0 108.8 109.5 110.0)
-    
     # Calculate indicators (EMA50 falls back to the mean when < 50 prices)
-    local ema_20=$(_regime_ema_or_mean 20 "${mock_closes[@]}")
-    local ema_50=$(_regime_ema_or_mean 50 "${mock_closes[@]}")
+    local ema_20=$(_regime_ema_or_mean 20 "${closes[@]}")
+    local ema_50=$(_regime_ema_or_mean 50 "${closes[@]}")
     
     if [[ -z "$ema_20" ]] || [[ -z "$ema_50" ]]; then
         ema_20=100
@@ -254,7 +298,7 @@ EOF
     fi
     
     # Get Bollinger Bands
-    local bb_json=$(calc_bollinger_bands 20 2 "${mock_closes[@]}")
+    local bb_json=$(calc_bollinger_bands 20 2 "${closes[@]}")
     local bb_upper=$(echo "$bb_json" | grep -o '"upper":[0-9.]*' | cut -d: -f2)
     local bb_middle=$(echo "$bb_json" | grep -o '"middle":[0-9.]*' | cut -d: -f2)
     local bb_lower=$(echo "$bb_json" | grep -o '"lower":[0-9.]*' | cut -d: -f2)
@@ -316,8 +360,9 @@ EOF
   "bb_upper": $bb_upper_safe,
   "bb_middle": $bb_middle_safe,
   "bb_lower": $bb_lower_safe,
+  "data_source": "$data_source",
   "symbol": "$symbol",
-  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"${warning}
 }
 EOF
 )
@@ -349,9 +394,8 @@ EOF
         return 1
     fi
     
-    # Check cache first
-    if is_regime_cache_valid "$symbol"; then
-        load_regime_from_cache "$symbol"
+    # Check cache first (never reuse a synthetic result unless allowed)
+    if _regime_load_cache_if_ok "$symbol"; then
         return 0
     fi
     
@@ -430,6 +474,7 @@ EOF
   "ema_50_filtered": $ema_50_filtered_safe,
   "noise_level": $noise_safe,
   "price_count": ${#prices[@]},
+  "data_source": "caller",
   "symbol": "$symbol",
   "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }

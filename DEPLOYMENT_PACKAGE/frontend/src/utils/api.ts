@@ -48,6 +48,9 @@ export interface TradesResponse {
 export interface BacktestResult {
   file: string;
   data: JsonObject;
+  /** "yfinance", "synthetic" (demo/test run) or "unknown" (older files). */
+  data_source?: string;
+  synthetic?: boolean;
 }
 
 export interface BacktestResponse {

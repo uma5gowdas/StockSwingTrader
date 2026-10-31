@@ -62,6 +62,7 @@ add_test "Kelly Sizing & Risk Budget" "${SCRIPT_DIR}/test_kelly_sizing.sh"
 add_test "Sentiment (deterministic)" "${SCRIPT_DIR}/test_sentiment.sh"
 add_test "MiroFish Cache Adapter" "${SCRIPT_DIR}/test_mirofish_adapter.sh"
 add_test "Phase 1 Integration (CLI)" "${SCRIPT_DIR}/test_phase1_integration.sh"
+add_test "No Silent Fake Data" "${SCRIPT_DIR}/test_no_fake_data.sh"
 
 # ============================================================================
 # Utility Functions

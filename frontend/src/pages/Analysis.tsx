@@ -4,7 +4,7 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 import { usePolling } from '../hooks/usePolling';
 import { getIndicators, getQuote, getSignals, isValidSymbol, normalizeSymbol } from '../utils/api';
 import { extractPrice, extractScore, extractSignal, flatten, formatNumber, numericEntries } from '../utils/format';
-import { ErrorMessage, KeyValueList, LastUpdated, Loading, PageHeader, Section, SignalBadge, StatCard } from '../components/ui';
+import { DataSourceNotice, ErrorMessage, KeyValueList, LastUpdated, Loading, PageHeader, Section, SignalBadge, StatCard } from '../components/ui';
 
 export default function Analysis() {
   const [params, setParams] = useSearchParams();
@@ -67,6 +67,7 @@ export default function Analysis() {
             <StatCard label="Confluence score" value={formatNumber(score, 1)} hint="0–100" />
             <StatCard label="Signal" value={<SignalBadge signal={extractSignal(signals.data)} />} />
           </dl>
+          <DataSourceNotice data={signals.data} />
           <LastUpdated date={signals.lastUpdated} loading={signals.loading} />
 
           <div className="mt-4 grid grid-cols-1 gap-6 lg:grid-cols-2">

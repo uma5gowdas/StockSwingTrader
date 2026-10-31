@@ -237,6 +237,15 @@ generate_html_report() {
             font-size: 0.9em;
             color: #999;
         }
+        .data-warning {
+            background: #fff3cd;
+            border: 2px solid #b45309;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 30px;
+            color: #78350f;
+            font-weight: 600;
+        }
         .disclaimer {
             background: #fff3cd;
             border: 1px solid #ffc107;
@@ -273,6 +282,7 @@ generate_html_report() {
         </div>
         
         <div class="content">
+            DATA_SOURCE_BANNER
             <!-- Stock Summary Section -->
             <div class="section">
                 <div class="stock-header">
@@ -433,6 +443,15 @@ EOF
     local price=$(echo "$stock_data" | grep -o '"price":[0-9.]*' | head -1 | grep -o '[0-9.]*')
     local symbol=$(echo "$stock_data" | grep -o '"symbol":"[^"]*' | head -1 | grep -o '[^"]*$')
     
+    # Data provenance banner: synthetic demo prices are always called out
+    local banner=""
+    if echo "$stock_data" | grep -Eq '"data_source": *"synthetic"'; then
+        banner='<div class="data-warning" role="alert">SYNTHETIC DATA: this report was built from generated demo prices (SST_OFFLINE=1 or SST_ALLOW_SYNTHETIC=1), not market data. Do not trade on it.</div>'
+    elif echo "$stock_data" | grep -Eq '"data_source": *"unknown"'; then
+        banner='<div class="data-warning" role="alert">Unknown data source: the analysis does not record where its prices came from.</div>'
+    fi
+    sed -i '' "s|DATA_SOURCE_BANNER|${banner}|g" "$output_file"
+
     sed -i '' "s/SYMBOL/${symbol:-N\/A}/g" "$output_file"
     sed -i '' "s/\$PRICE/\$${price:-0.00}/g" "$output_file"
     sed -i '' "s/REPORT_TIMESTAMP/${timestamp}/g" "$output_file"
@@ -444,16 +463,16 @@ EOF
     sed -i '' "s/OBV_TREND/--/g" "$output_file"
     sed -i '' "s/SENTIMENT_SUMMARY/Aggregated from multiple sources/g" "$output_file"
     sed -i '' "s/SIGNAL/ANALYZE/g" "$output_file"
-    sed -i '' "s/CONFIDENCE_PCT/50/g" "$output_file"
-    sed -i '' "s/CONFIDENCE%/50%/g" "$output_file"
+    sed -i '' "s/CONFIDENCE_PCT/0/g" "$output_file"
+    sed -i '' "s/CONFIDENCE%/--/g" "$output_file"
     sed -i '' "s/REASONING/Analysis data loaded successfully/g" "$output_file"
     sed -i '' "s/CHANGE_CLASS/neutral/g" "$output_file"
     sed -i '' "s/CHANGE %/0.00%/g" "$output_file"
     sed -i '' "s/SIGNAL_CLASS/signal-hold/g" "$output_file"
-    sed -i '' "s/TWITTER_SCORE/50/g" "$output_file"
-    sed -i '' "s/REDDIT_SCORE/50/g" "$output_file"
-    sed -i '' "s/STOCKTWITS_SCORE/50/g" "$output_file"
-    sed -i '' "s/NEWS_SCORE/50/g" "$output_file"
+    sed -i '' "s/TWITTER_SCORE/--/g" "$output_file"
+    sed -i '' "s/REDDIT_SCORE/--/g" "$output_file"
+    sed -i '' "s/STOCKTWITS_SCORE/--/g" "$output_file"
+    sed -i '' "s/NEWS_SCORE/--/g" "$output_file"
     sed -i '' "s/\$ENTRY_PRICE/\$${price:-0.00}/g" "$output_file"
     sed -i '' "s/\$STOP_LOSS/\$--/g" "$output_file"
     sed -i '' "s/\$TAKE_PROFIT/\$--/g" "$output_file"

@@ -3,7 +3,7 @@ import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YA
 import { usePolling } from '../hooks/usePolling';
 import { getBacktestResults, getTrades, type Trade } from '../utils/api';
 import { flatten, formatNumber, formatValue, toNumber } from '../utils/format';
-import { ErrorMessage, KeyValueList, LastUpdated, Loading, PageHeader, Section, StatCard } from '../components/ui';
+import { DataSourceNotice, ErrorMessage, KeyValueList, LastUpdated, Loading, PageHeader, Section, StatCard } from '../components/ui';
 
 type Outcome = 'all' | 'win' | 'loss';
 
@@ -182,8 +182,20 @@ export default function TradeHistory() {
           <div className="space-y-4">
             {backtest.data?.results.map((r) => (
               <details key={r.file} className="rounded-md border border-gray-700 p-3">
-                <summary className="cursor-pointer font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">{r.file}</summary>
+                <summary className="cursor-pointer font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">
+                  {r.file}{' '}
+                  <span
+                    className={`ml-2 rounded px-1.5 py-0.5 text-xs font-semibold ${
+                      (r.data_source ?? 'unknown') === 'synthetic' || (r.data_source ?? 'unknown') === 'unknown'
+                        ? 'bg-amber-900 text-amber-100'
+                        : 'bg-gray-700 text-gray-100'
+                    }`}
+                  >
+                    Data: {r.data_source ?? 'unknown'}
+                  </span>
+                </summary>
                 <div className="mt-3">
+                  <DataSourceNotice data={{ ...r.data, data_source: r.data_source ?? r.data.data_source }} unknownSourceWarning />
                   <KeyValueList entries={flatten(r.data.performance ?? r.data)} />
                 </div>
               </details>

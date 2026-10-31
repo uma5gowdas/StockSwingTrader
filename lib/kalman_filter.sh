@@ -197,14 +197,21 @@ apply_kalman_filter_fast() {
 # Get Kalman-filtered prices for regime detection
 # Args: symbol, lookback_days (default 30)
 # Returns: JSON with filtered prices and residuals
+#   There is no market data source here: the random-walk demo series is only
+#   generated when synthetic data is allowed (SST_ALLOW_SYNTHETIC=1 or
+#   SST_OFFLINE=1) and the output is marked "data_source": "synthetic".
+#   Otherwise prints {"available": false, ...} and returns 1. For real data,
+#   call apply_kalman_filter with the prices directly.
 get_kalman_filtered_prices() {
     local symbol=$1
     local lookback_days=${2:-30}
     
-    # In production, would fetch real prices via API
-    # For now, use placeholder
+    if [[ "${SST_OFFLINE:-0}" != "1" && "${SST_ALLOW_SYNTHETIC:-0}" != "1" ]]; then
+        echo "{\"symbol\": \"${symbol}\", \"available\": false, \"reason\": \"no market data source; pass prices to apply_kalman_filter or set SST_ALLOW_SYNTHETIC=1 for demo data\", \"data_source\": null}"
+        return 1
+    fi
     
-    # Generate synthetic data for testing
+    # Synthetic random walk (explicitly allowed demo data)
     local -a synthetic_prices=()
     local base_price=100
     
@@ -215,8 +222,9 @@ get_kalman_filtered_prices() {
         synthetic_prices+=("$base_price")
     done
     
-    # Apply Kalman filter
-    apply_kalman_filter "${synthetic_prices[@]}" -q 0.01 -r 0.1
+    # Apply Kalman filter and mark the output as synthetic
+    apply_kalman_filter "${synthetic_prices[@]}" -q 0.01 -r 0.1 \
+        | jq -c '. + {data_source: "synthetic", warning: "Filtered a SYNTHETIC random-walk series, not market data"}'
 }
 
 # ============================================================================

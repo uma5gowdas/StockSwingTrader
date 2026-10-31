@@ -1,5 +1,36 @@
 import type { ReactNode } from 'react';
-import { formatValue, humanizeKey, signalClass } from '../utils/format';
+import { dataProvenance, formatValue, humanizeKey, signalClass } from '../utils/format';
+
+/**
+ * Warns when a payload was computed from synthetic (demo/test) data or from
+ * a source that is not recorded, and notes an unavailable ML component.
+ * Renders nothing for payloads backed by real data.
+ */
+export function DataSourceNotice({ data, unknownSourceWarning = false }: { data: unknown; unknownSourceWarning?: boolean }) {
+  if (data === null || data === undefined) return null;
+  const p = dataProvenance(data);
+  const unknown = unknownSourceWarning && !p.synthetic && (p.source === undefined || p.source === 'unknown');
+  if (!p.synthetic && !unknown && !p.mlUnavailable) return null;
+  return (
+    <div className="mb-3 space-y-2">
+      {p.synthetic && (
+        <p role="alert" className="rounded-md border border-amber-600 bg-amber-950 px-3 py-2 text-sm text-amber-100">
+          <strong>Synthetic data:</strong> these numbers were computed from generated demo/test data, not market data. Do not trade on them.
+        </p>
+      )}
+      {unknown && (
+        <p role="status" className="rounded-md border border-amber-700 bg-gray-900 px-3 py-2 text-sm text-amber-200">
+          <strong>Unknown data source:</strong> this result does not record where its prices came from.
+        </p>
+      )}
+      {p.mlUnavailable && (
+        <p role="status" className="rounded-md border border-gray-600 bg-gray-900 px-3 py-2 text-sm text-gray-200">
+          ML prediction unavailable ({p.mlUnavailable}); it has zero weight in this score.
+        </p>
+      )}
+    </div>
+  );
+}
 
 export function PageHeader({ title, description, children }: { title: string; description?: string; children?: ReactNode }) {
   return (

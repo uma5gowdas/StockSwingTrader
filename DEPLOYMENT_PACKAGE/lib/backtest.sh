@@ -263,11 +263,18 @@ EOF
     
     log_debug "Config: $config_file"
     
-    # Run backtest engine
-    run_backtest_engine "$config_file"
+    # Run backtest engine. Its stdout is an error JSON when there is no real
+    # market data (exit 2); keep it off our stdout, which is the results path.
+    local engine_out
+    engine_out=$(run_backtest_engine "$config_file")
     local engine_exit=$?
     if [[ $engine_exit -ne 0 ]]; then
-        log_warn "Backtest engine returned non-zero but may have still produced results"
+        local reason
+        reason=$(echo "$engine_out" | jq -r '.reason // empty' 2>/dev/null)
+        log_error "Backtest failed for $symbol (engine exit $engine_exit)${reason:+: $reason}"
+        [[ -n "$engine_out" ]] && echo "$engine_out" >&2
+        rm -f "$config_file" "$results_file"
+        return 1
     fi
     
     # Verify results file was created
@@ -303,24 +310,31 @@ backtest_multi_symbol() {
     
     local IFS=','
     local results_files=()
+    local failed=0
     
     for symbol in $symbol_list; do
         symbol=$(echo "$symbol" | xargs)  # trim whitespace
-        local result=$(backtest_strategy "$symbol" "$start_date" "$end_date" "$train_pct")
-        if [[ -n "$result" ]]; then
-            results_files+=("$result")
+        local result
+        if result=$(backtest_strategy "$symbol" "$start_date" "$end_date" "$train_pct") && [[ -n "$result" ]]; then
+            # stdout also carries [INFO] lines; the results path is the last line
+            results_files+=("$(echo "$result" | tail -1)")
+        else
+            failed=$((failed + 1))
         fi
     done
     
-    log_info "Portfolio backtest complete: ${#results_files[@]} symbols processed"
+    log_info "Portfolio backtest complete: ${#results_files[@]} symbols processed, $failed failed"
     
     # Generate portfolio summary
     if [[ ${#results_files[@]} -gt 0 ]]; then
         log_debug "Portfolio summary input files: ${results_files[@]}"
         generate_portfolio_summary "${results_files[@]}"
     else
-        log_warn "No backtest result files to summarize"
+        log_error "No backtest results (no market data?); nothing to summarize"
+        return 1
     fi
+    # Any failed symbol (e.g. no market data) makes the run fail
+    [[ $failed -eq 0 ]]
 }
 
 # ============================================================================
@@ -349,6 +363,7 @@ generate_backtest_reports() {
 import json
 import sys
 import csv
+import html as html_lib
 from pathlib import Path
 
 results_file = sys.argv[1]
@@ -358,6 +373,17 @@ csv_file = sys.argv[3]
 try:
     with open(results_file, 'r') as f:
         results = json.load(f)
+    
+    data_source = html_lib.escape(str(results.get('data_source') or 'unknown'))
+    if data_source == 'synthetic':
+        source_banner = ('<div class="data-warning" role="alert"><strong>SYNTHETIC DATA:</strong> '
+                         'this backtest ran on generated prices (demo/test mode), not market data. '
+                         'The metrics below say nothing about real performance.</div>')
+    elif data_source == 'unknown':
+        source_banner = ('<div class="data-warning" role="alert"><strong>Unknown data source:</strong> '
+                         'this result does not record where its prices came from.</div>')
+    else:
+        source_banner = ''
     
     # Generate HTML report
     html = f'''<!DOCTYPE html>
@@ -379,11 +405,14 @@ try:
         table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
         th, td {{ padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }}
         th {{ background: #f9f9f9; font-weight: bold; }}
+        .data-warning {{ background: #fff3cd; border: 2px solid #b45309; color: #78350f; padding: 12px; border-radius: 4px; margin: 15px 0; }}
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Backtest Report: {results.get('symbol', 'UNKNOWN')}</h1>
+        {source_banner}
+        <p>Data source: <strong>{data_source}</strong></p>
         
         <div class="metrics">
             <div class="metric">
@@ -526,6 +555,7 @@ for file in results_files:
             symbol = result.get('symbol', 'UNKNOWN')
             portfolio_metrics['symbols'].append(symbol)
             portfolio_metrics['metrics'][symbol] = {
+                'data_source': result.get('data_source') or 'unknown',
                 'total_pnl': result.get('total_pnl', 0),
                 'win_rate': result.get('win_rate', 0),
                 'sharpe_ratio': result.get('sharpe_ratio', 0),
@@ -537,6 +567,10 @@ for file in results_files:
 total_pnl = sum(m.get('total_pnl', 0) for m in portfolio_metrics['metrics'].values())
 portfolio_metrics['portfolio_total_pnl'] = total_pnl
 portfolio_metrics['num_symbols'] = len(portfolio_metrics['symbols'])
+sources = sorted({m['data_source'] for m in portfolio_metrics['metrics'].values()})
+portfolio_metrics['data_sources'] = sources
+if 'synthetic' in sources:
+    portfolio_metrics['warning'] = 'Includes backtests on SYNTHETIC prices (demo/test mode), not market data.'
 
 with open(summary_file, 'w') as f:
     json.dump(portfolio_metrics, f, indent=2)

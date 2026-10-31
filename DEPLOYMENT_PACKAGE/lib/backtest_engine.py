@@ -50,11 +50,29 @@ SCRIPT_DIR = Path(__file__).parent
 # Data Fetching
 # ============================================================================
 
+class DataUnavailableError(Exception):
+    """No real market data and synthetic data was not explicitly requested."""
+
+
+SYNTHETIC_WARNING = ('Backtest ran on SYNTHETIC prices (demo/test mode), not market data. '
+                     'Metrics say nothing about real performance.')
+
+
+def synthetic_allowed(config: Dict[str, Any] = None) -> bool:
+    """Synthetic prices are opt-in: config "allow_synthetic": true,
+    SST_ALLOW_SYNTHETIC=1 (real data first, synthetic fallback) or
+    SST_OFFLINE=1 (no network, synthetic only)."""
+    return (bool((config or {}).get('allow_synthetic'))
+            or os.environ.get('SST_ALLOW_SYNTHETIC') == '1'
+            or os.environ.get('SST_OFFLINE') == '1')
+
+
 class DataFetcher:
     """Fetch historical OHLCV data."""
     
     @staticmethod
-    def fetch_data(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+    def fetch_data(symbol: str, start_date: str, end_date: str,
+                   allow_synthetic: bool = False) -> Tuple[pd.DataFrame, str]:
         """
         Fetch historical OHLCV data for a symbol.
         
@@ -62,24 +80,39 @@ class DataFetcher:
             symbol: Stock ticker symbol
             start_date: Start date (YYYY-MM-DD)
             end_date: End date (YYYY-MM-DD)
+            allow_synthetic: fall back to seeded synthetic prices when real
+                data is unavailable (SST_OFFLINE=1 always uses them)
         
         Returns:
-            DataFrame with OHLCV data
+            (DataFrame with OHLCV data, data_source) where data_source is
+            "yfinance" or "synthetic"
+        
+        Raises:
+            DataUnavailableError: no real data and synthetic not allowed
         """
         if os.environ.get('SST_OFFLINE') == '1':
-            logger.info("SST_OFFLINE=1, generating synthetic data")
-            return DataFetcher._generate_synthetic_data(symbol, start_date, end_date)
-        if not HAS_YFINANCE:
-            logger.warning("yfinance not installed, generating synthetic data")
-            return DataFetcher._generate_synthetic_data(symbol, start_date, end_date)
+            logger.warning("SST_OFFLINE=1: using SYNTHETIC prices (not market data)")
+            return DataFetcher._generate_synthetic_data(symbol, start_date, end_date), 'synthetic'
         
+        data, reason = DataFetcher._fetch_yfinance(symbol, start_date, end_date)
+        if data is not None:
+            return data, 'yfinance'
+        if allow_synthetic:
+            logger.warning(f"{reason}; using SYNTHETIC prices (explicitly allowed)")
+            return DataFetcher._generate_synthetic_data(symbol, start_date, end_date), 'synthetic'
+        raise DataUnavailableError(reason)
+    
+    @staticmethod
+    def _fetch_yfinance(symbol: str, start_date: str, end_date: str):
+        """Return (DataFrame, None) or (None, reason)."""
+        if not HAS_YFINANCE:
+            return None, 'yfinance not installed'
         try:
             logger.info(f"Fetching {symbol} data from {start_date} to {end_date}")
             data = yf.download(symbol, start=start_date, end=end_date, progress=False)
             
-            if data.empty:
-                logger.warning(f"No data fetched for {symbol}, generating synthetic")
-                return DataFetcher._generate_synthetic_data(symbol, start_date, end_date)
+            if data is None or data.empty:
+                return None, f'yfinance returned no data for {symbol} ({start_date} to {end_date})'
             
             # Ensure required columns. Recent yfinance returns (field, ticker)
             # MultiIndex columns even for a single symbol.
@@ -88,21 +121,20 @@ class DataFetcher:
             data.columns = [str(col).lower() for col in data.columns]
             required_cols = ['open', 'high', 'low', 'close', 'volume']
             
-            for col in required_cols:
-                if col not in data.columns:
-                    logger.error(f"Missing column: {col}")
-                    return pd.DataFrame()
+            missing = [col for col in required_cols if col not in data.columns]
+            if missing:
+                return None, f'yfinance data for {symbol} missing columns: {", ".join(missing)}'
             
             logger.info(f"Fetched {len(data)} bars for {symbol}")
-            return data
+            return data, None
         
         except Exception as e:
             logger.error(f"Error fetching data: {e}")
-            return DataFetcher._generate_synthetic_data(symbol, start_date, end_date)
+            return None, f'yfinance fetch failed for {symbol}: {e}'
     
     @staticmethod
     def _generate_synthetic_data(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
-        """Generate realistic synthetic data for testing."""
+        """Generate seeded synthetic prices (only when explicitly allowed)."""
         # Stable per-symbol seed (built-in hash() is randomised per process)
         np.random.seed(zlib.crc32(symbol.encode('utf-8')))
         
@@ -350,11 +382,13 @@ class BacktestEngine:
         """Execute backtest."""
         logger.info(f"Starting backtest for {self.symbol}")
         
-        # Fetch data
-        data = DataFetcher.fetch_data(self.symbol, self.start_date, self.end_date)
+        # Fetch data (raises DataUnavailableError without real data unless
+        # synthetic data was explicitly allowed)
+        data, data_source = DataFetcher.fetch_data(
+            self.symbol, self.start_date, self.end_date,
+            allow_synthetic=synthetic_allowed(self.config))
         if data.empty:
-            logger.error(f"No data available for {self.symbol}")
-            return {}
+            raise DataUnavailableError(f"No data available for {self.symbol}")
         
         # Split into train/test
         split_idx = int(len(data) * self.train_pct / 100)
@@ -396,6 +430,7 @@ class BacktestEngine:
                     'symbol': self.symbol,
                     'strategy': strategy_name,
                     'period': f"{self.start_date} to {self.end_date}",
+                    'data_source': data_source,
                     'data_points': len(test_data),
                     'initial_capital': 100000,
                     'final_capital': 100000 + total_pnl,
@@ -407,6 +442,8 @@ class BacktestEngine:
         if not best_results:
             logger.error("No strategy produced results")
             return {}
+        if data_source == 'synthetic':
+            best_results['warning'] = SYNTHETIC_WARNING
         
         # Save results
         self._save_results(best_results)
@@ -502,9 +539,23 @@ def main():
         logger.error(f"Error reading config: {e}")
         sys.exit(1)
     
-    # Run backtest
+    # Run backtest. Without real data (and no synthetic opt-in) print an error
+    # JSON on stdout and exit 2; no metrics or results file are produced.
     engine = BacktestEngine(config)
-    results = engine.run()
+    try:
+        results = engine.run()
+    except DataUnavailableError as e:
+        logger.error(f"Backtest aborted: {e}")
+        print(json.dumps({
+            "error": "market_data_unavailable",
+            "available": False,
+            "reason": str(e),
+            "symbol": config.get('symbol'),
+            "data_source": None,
+            "hint": "Install yfinance / check network, or set SST_ALLOW_SYNTHETIC=1 "
+                    "for a clearly marked synthetic demo run",
+        }))
+        sys.exit(2)
     
     if not results:
         sys.exit(1)

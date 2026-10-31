@@ -80,7 +80,7 @@ export API_KEY_FINNHUB="your_key_here"
 export API_KEY_NEWSAPI="your_key_here"
 ```
 
-**Note**: The agent works in demo mode without API keys, using simulated data and public Yahoo Finance endpoints.
+**Note**: Price history comes from Yahoo Finance via `yfinance` (no API key needed). Without market data the agent skips the symbol and exits 1; it never substitutes generated prices unless you ask for demo data with `SST_ALLOW_SYNTHETIC=1` or `SST_OFFLINE=1` (see [Data Sources and Synthetic Data](#data-sources-and-synthetic-data)).
 
 ### 3. Configure Trading Parameters (Optional)
 
@@ -426,6 +426,7 @@ The agent generates a professional interactive HTML report in `output/reports/`:
 - **Sentiment Analysis**: News score when a news API key is configured, otherwise "unavailable" (0 weight)
 - **Risk Metrics**: Entry, stop-loss, take-profit, risk-reward ratio, ATR
 - **Trade Summary**: Analysis reasoning and key levels
+- **Data source banner**: a "SYNTHETIC DATA" warning at the top when any analysis in the report ran on generated demo prices
 
 Example: `output/reports/swing_analysis_20250115_143022.html`
 
@@ -522,6 +523,29 @@ All activity is logged to `logs/agent.log`:
 No API client is configured, so these always report `status: "unavailable"` with a null score. Earlier versions returned random numbers here.
 
 **Aggregate Score**: 0-100 (0=very bearish, 50=neutral, 100=very bullish), the average of the available sources only. With no source available the score is `null`, the label is `unavailable` and sentiment gets 0 weight.
+
+## Data Sources and Synthetic Data
+
+Generated (synthetic) data is never used silently. It is used only when you ask for it, and every output built from it says so.
+
+| Opt-in | Effect |
+|---|---|
+| `SST_OFFLINE=1` | No network. Seeded synthetic prices/features everywhere (tests and demos). |
+| `SST_ALLOW_SYNTHETIC=1` | Real data first; synthetic fallback only when real data is unavailable. |
+| `python3 lib/ml_inference.py --synthetic` | Same as `SST_ALLOW_SYNTHETIC=1` for one ML call. |
+| backtest config `"allow_synthetic": true` | Same for one `backtest_engine.py` run. |
+
+Markers: synthetic results carry `"data_source": "synthetic"` plus a `warning` (ML, backtest JSON, regime) or `data_warning` (agent analysis, `calculate_confluence_score_v2` metadata). HTML reports (analysis and backtest) show a SYNTHETIC DATA banner; the dashboard shows an alert and a "synthetic" badge. Real results carry the actual source: `"yfinance"`, `"file"` / `"stdin"` (ML data you pass in) or `"caller"` (prices passed to the regime detector).
+
+Without the opt-in and without real data:
+
+- **Agent (`--symbols`)**: the symbol is skipped ("No market data for …"); with no symbol analyzed the run exits 1 and writes no report.
+- **ML (`lib/ml_inference.py`, `lib/ml_predictor.sh predict`)**: exit 0 with `{"available": false, "reason": "...", "data_source": null}` and no direction/confidence. `calculate_confluence_score_v2` then gives ML 0 weight and renormalizes the rest (regime 41.2%, technical 35.3%, volume/trend 23.5%), the same way unavailable sentiment and MiroFish are dropped.
+- **Backtest (`lib/backtest_engine.py`)**: exit 2 with `{"error": "market_data_unavailable", "reason": ...}`; no metrics or result files. `backtest_strategy`, `backtest_multi_symbol` and `--backtest` return non-zero.
+- **Regime (`detect_market_regime SYMBOL [LOOKBACK] [CLOSES...]`)**: `{"regime": "unknown", "available": false}` unless you pass at least 20 closes. Its 30-price demo series is synthetic and opt-in only; cached synthetic results are not reused once the opt-in is gone.
+- **Kalman (`get_kalman_filtered_prices`)**: `{"available": false}`, exit 1. Pass real prices to `apply_kalman_filter`.
+
+The XGBoost model itself is trained on synthetic samples (`lib/train_ml_model.py`), so every prediction reports `"model_training_data": "synthetic"`.
 
 ## Confidence Scoring Algorithm
 

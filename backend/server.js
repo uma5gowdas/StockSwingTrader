@@ -357,7 +357,10 @@ app.get('/api/backtest', (req, res) => {
       try {
         const filePath = path.join(backtestDir, file);
         const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-        results.push({ file, data });
+        // Provenance of the prices behind the metrics: "yfinance",
+        // "synthetic" (demo/test run) or "unknown" (file predates the field).
+        const dataSource = typeof data.data_source === 'string' && data.data_source ? data.data_source : 'unknown';
+        results.push({ file, data, data_source: dataSource, synthetic: dataSource === 'synthetic' });
       } catch (err) {
         logRequest('WARN', `Failed to parse backtest file: ${file}`, { error: err.message });
       }

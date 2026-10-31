@@ -465,3 +465,81 @@ test('Dashboard shows watchlist scores classified with the v6.3 thresholds', asy
     m.act(() => renderer.unmount());
   }
 });
+
+// ===========================================================================
+// Data provenance: synthetic / unknown / ML-unavailable results are flagged
+// ===========================================================================
+
+test('format: dataProvenance detects synthetic data at any depth and unavailable ML', () => {
+  const p = m.format.dataProvenance;
+  assert.deepEqual(p({ confluence_score: 71 }), { synthetic: false, source: undefined, mlUnavailable: undefined });
+  assert.equal(p({ data_source: 'synthetic' }).synthetic, true);
+  assert.equal(p({ components: { ml_confidence: { score: 82, data_source: 'synthetic' } } }).synthetic, true);
+  assert.equal(p({ data_source: 'yfinance' }).synthetic, false);
+  assert.equal(p({ data_source: 'yfinance' }).source, 'yfinance');
+  assert.equal(p({ components: { ml_confidence: { score: null, available: false, reason: 'yfinance returned no data' } } }).mlUnavailable,
+    'yfinance returned no data');
+  assert.equal(p({ components: { ml_confidence: { score: 60, available: true } } }).mlUnavailable, undefined);
+  assert.equal(p(null).synthetic, false);
+});
+
+async function renderedText(url, extraRoutes) {
+  resetBrowserState();
+  Object.assign(routes, extraRoutes);
+  const renderer = await renderRoute(url);
+  const text = textOf({ children: [].concat(renderer.toJSON()) });
+  const alerts = renderer.root.findAll((n) => n.props && n.props.role === 'alert').map(textOf);
+  m.act(() => renderer.unmount());
+  return { text, alerts };
+}
+
+test('Analysis warns when the signal was computed from synthetic data', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { alerts } = await renderedText('/analysis?symbol=AAPL', {
+    'GET /api/signals/AAPL': { data: { confluence_score: 68, components: { ml_confidence: { score: 82, available: true, data_source: 'synthetic' } } } },
+  });
+  assert.ok(alerts.some((a) => /Synthetic data/.test(a)), `expected a synthetic-data alert, got: ${alerts.join(' | ')}`);
+});
+
+test('Analysis shows no data warning for real-data signals', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { text, alerts } = await renderedText('/analysis?symbol=AAPL', {
+    'GET /api/signals/AAPL': { data: { confluence_score: 68, components: { ml_confidence: { score: 82, available: true, data_source: 'yfinance' } } } },
+  });
+  assert.ok(!alerts.some((a) => /Synthetic data/.test(a)));
+  assert.doesNotMatch(text, /ML prediction unavailable/);
+});
+
+test('Analysis says when the ML component was unavailable (zero weight)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { text } = await renderedText('/analysis?symbol=AAPL', {
+    'GET /api/signals/AAPL': { data: { confluence_score: 65, components: { ml_confidence: { score: null, available: false, reason: 'yfinance returned no data for AAPL', weight_percent: 0 } } } },
+  });
+  assert.match(text, /ML prediction unavailable \(yfinance returned no data for AAPL\); it has zero weight/);
+});
+
+test('Dashboard flags watchlist scores computed from synthetic data', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { text, alerts } = await renderedText('/', {
+    'GET /api/signals/MSFT': { data: { symbol: 'MSFT', confluence_score: 80, data_source: 'synthetic' } },
+  });
+  assert.ok(alerts.some((a) => /Synthetic data/.test(a)), 'dashboard shows a synthetic-data alert');
+  assert.match(text, /MSFT[\s\S]*80[\s\S]*synthetic/);
+  assert.doesNotMatch(text, /AAPL[\s\S]{0,40}synthetic[\s\S]*MSFT/, 'real-data rows are not marked synthetic');
+});
+
+test('Trade history labels each backtest with its data source and warns on synthetic/unknown', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { text, alerts } = await renderedText('/trades', {
+    'GET /api/backtest': { data: { results: [
+      { file: 'backtest_AAPL.json', data: { symbol: 'AAPL', total_pnl: 42, data_source: 'yfinance' }, data_source: 'yfinance', synthetic: false },
+      { file: 'backtest_MSFT.json', data: { symbol: 'MSFT', total_pnl: 7, data_source: 'synthetic' }, data_source: 'synthetic', synthetic: true },
+      { file: 'backtest_OLD.json', data: { symbol: 'OLD', total_pnl: 1 }, data_source: 'unknown', synthetic: false },
+    ] } },
+  });
+  assert.match(text, /backtest_AAPL\.json\s*Data: yfinance/);
+  assert.match(text, /backtest_MSFT\.json\s*Data: synthetic/);
+  assert.match(text, /backtest_OLD\.json\s*Data: unknown/);
+  assert.equal(alerts.filter((a) => /Synthetic data/.test(a)).length, 1, 'exactly the synthetic backtest gets the alert');
+  assert.match(text, /Unknown data source/);
+});

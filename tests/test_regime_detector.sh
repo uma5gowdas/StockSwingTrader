@@ -24,6 +24,9 @@ TESTS_FAILED=0
 export REGIME_CACHE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sst_regime_test.XXXXXX")"
 trap 'rm -rf "$REGIME_CACHE_DIR"' EXIT
 
+# detect_market_regime has no market data source; these tests exercise its
+# built-in demo series, which is only used with the synthetic opt-in.
+export SST_OFFLINE=1
 # Source modules under test
 source "$(dirname "$0")/../lib/regime_detector.sh"
 source "$(dirname "$0")/../lib/indicators.sh"

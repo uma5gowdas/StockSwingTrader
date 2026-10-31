@@ -1,6 +1,6 @@
 # StockSwingTrader v6.3 - Test Report
 
-**Generated:** 2026-10-31 01:30:35  
+**Generated:** 2026-10-31 02:04:19  
 **Command:** `bash tests/test_runner.sh`  
 **Result:** ✅ All suites passed
 
@@ -8,9 +8,9 @@
 
 | Metric | Value |
 |--------|-------|
-| Suites | 13 (13 passed, 0 failed) |
-| Total Tests | 390 |
-| Tests Passed | **390** |
+| Suites | 14 (14 passed, 0 failed) |
+| Total Tests | 468 |
+| Tests Passed | **468** |
 | Tests Failed | **0** |
 | Success Rate | 100% |
 
@@ -18,19 +18,20 @@
 
 | Suite | Status | Time | Details |
 |-------|--------|------|---------|
-| ML Predictor | ✅ PASS | 26183ms | 29 passed, 0 failed |
-| Regime Weighting | ✅ PASS | 32385ms | 30 passed, 0 failed |
-| Kalman Filter | ✅ PASS | 3417ms | 18 passed, 0 failed |
-| Backtest | ✅ PASS | 8359ms | 34 passed, 0 failed |
-| ML Scoring Integration | ✅ PASS | 33964ms | 29 passed, 0 failed |
-| Regime Detector | ✅ PASS | 32152ms | 20 passed, 0 failed |
+| ML Predictor | ✅ PASS | 25146ms | 29 passed, 0 failed |
+| Regime Weighting | ✅ PASS | 31448ms | 30 passed, 0 failed |
+| Kalman Filter | ✅ PASS | 3182ms | 18 passed, 0 failed |
+| Backtest | ✅ PASS | 7946ms | 34 passed, 0 failed |
+| ML Scoring Integration | ✅ PASS | 35325ms | 29 passed, 0 failed |
+| Regime Detector | ✅ PASS | 32477ms | 20 passed, 0 failed |
 | Scoring Integration (Python) | ✅ PASS | 106ms | 32 passed, 0 failed |
-| Dashboard Components | ✅ PASS | 1925ms | 21 passed, 0 failed |
-| Backend API | ✅ PASS | 722ms | 16 passed, 0 failed |
-| Kelly Sizing & Risk Budget | ✅ PASS | 6594ms | 51 passed, 0 failed |
-| Sentiment (deterministic) | ✅ PASS | 4341ms | 36 passed, 0 failed |
-| MiroFish Cache Adapter | ✅ PASS | 14054ms | 42 passed, 0 failed |
-| Phase 1 Integration (CLI) | ✅ PASS | 127931ms | 32 passed, 0 failed |
+| Dashboard Components | ✅ PASS | 1875ms | 27 passed, 0 failed |
+| Backend API | ✅ PASS | 774ms | 17 passed, 0 failed |
+| Kelly Sizing & Risk Budget | ✅ PASS | 6445ms | 51 passed, 0 failed |
+| Sentiment (deterministic) | ✅ PASS | 3905ms | 36 passed, 0 failed |
+| MiroFish Cache Adapter | ✅ PASS | 14341ms | 42 passed, 0 failed |
+| Phase 1 Integration (CLI) | ✅ PASS | 125740ms | 32 passed, 0 failed |
+| No Silent Fake Data | ✅ PASS | 96287ms | 71 passed, 0 failed |
 
 Counts are taken from each suite's own summary output. A suite passes only
 when it exits 0 with at least one passed test and zero failures.

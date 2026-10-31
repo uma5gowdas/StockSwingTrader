@@ -62,7 +62,8 @@ fi
 source "$SCRIPT_DIR/lib/indicators.sh" 2>/dev/null || echo "WARNING: indicators.sh not found"
 source "$SCRIPT_DIR/lib/sentiment.sh" 2>/dev/null || echo "WARNING: sentiment.sh not found"
 source "$SCRIPT_DIR/lib/scoring.sh" 2>/dev/null || echo "WARNING: scoring.sh not found"
-source "$SCRIPT_DIR/lib/html_report.sh" 2>/dev/null || echo "WARNING: html_report.sh not found"
+# AGENT_DIR: lib/scoring.sh (sourced above) resets SCRIPT_DIR to lib/
+source "$AGENT_DIR/lib/html_report.sh" 2>/dev/null || echo "WARNING: html_report.sh not found"
 # Phase 1 (v6.2 port): Kelly sizing + daily risk budget. The MiroFish cache
 # adapter is loaded by lib/scoring.sh.
 source "$AGENT_DIR/lib/kelly_sizing.sh" 2>/dev/null || echo "WARNING: kelly_sizing.sh not found"
@@ -109,7 +110,8 @@ log_debug() {
     if [[ "$DEBUG_MODE" == "true" ]]; then
         local msg="$1"
         local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-        echo "[DEBUG] [$timestamp] $msg" | tee -a "${LOG_FILE}"
+        # stderr: debug lines must not end up in captured JSON output
+        echo "[DEBUG] [$timestamp] $msg" | tee -a "${LOG_FILE}" >&2
     fi
 }
 
@@ -413,19 +415,67 @@ place_sell_order() {
 # API Fetching Functions
 # ============================================================================
 
-# Fetch historical OHLCV data from Yahoo Finance (no API key needed)
+# Synthetic data is opt-in: SST_ALLOW_SYNTHETIC=1 (real data first, demo
+# fallback) or SST_OFFLINE=1 (no network, demo data only)
+synthetic_data_allowed() {
+    [[ "${SST_OFFLINE:-0}" == "1" || "${SST_ALLOW_SYNTHETIC:-0}" == "1" ]]
+}
+
+# Fetch real daily OHLCV from Yahoo Finance via yfinance (no API key needed)
+# Args: symbol, bars
+# Returns: {"symbol","data_source":"yfinance","ohlcv":[...]} or nothing (exit 1)
+fetch_stock_ohlcv_yfinance() {
+    local symbol=$1
+    local bars=${2:-60}
+    python3 - "$symbol" "$bars" 2>/dev/null <<'PY'
+import json, sys
+import pandas as pd
+import yfinance as yf
+symbol, bars = sys.argv[1], int(sys.argv[2])
+df = yf.download(symbol, period='1y', interval='1d', progress=False)
+if df is None or df.empty:
+    sys.exit(1)
+if isinstance(df.columns, pd.MultiIndex):
+    df.columns = df.columns.get_level_values(0)
+df = df.dropna().tail(bars)
+rows = [{"date": idx.strftime('%Y-%m-%d'), "open": round(float(r['Open']), 4),
+         "high": round(float(r['High']), 4), "low": round(float(r['Low']), 4),
+         "close": round(float(r['Close']), 4), "volume": int(r['Volume'])}
+        for idx, r in df.iterrows()]
+if len(rows) < 30:
+    sys.exit(1)
+print(json.dumps({"symbol": symbol, "data_source": "yfinance", "ohlcv": rows}, separators=(',', ':')))
+PY
+}
+
+# Fetch historical OHLCV data. Real data (yfinance) unless offline; the
+# random demo series is generated only when synthetic data is explicitly
+# allowed and is marked "data_source":"synthetic". Without real data and
+# without the opt-in, prints nothing and returns 1 (the symbol is skipped).
 fetch_stock_ohlcv() {
     local symbol=$1
     local days_back=${2:-30}
     
     log_debug "Fetching OHLCV data for $symbol (last $days_back days)"
     
-    # Use a simpler approach with fallback data for demo
-    # In production, this would parse real CSV data
+    if [[ "${SST_OFFLINE:-0}" != "1" ]]; then
+        local real
+        if real=$(fetch_stock_ohlcv_yfinance "$symbol" "$days_back") && [[ -n "$real" ]]; then
+            log_debug "Fetched real OHLCV data for $symbol (yfinance)" >&2
+            echo "$real"
+            return 0
+        fi
+        if ! synthetic_data_allowed; then
+            log_error "No market data for $symbol (yfinance unavailable or empty). Set SST_ALLOW_SYNTHETIC=1 for clearly marked demo data."
+            return 1
+        fi
+    fi
+    log_warn "Using SYNTHETIC demo prices for $symbol (SST_OFFLINE/SST_ALLOW_SYNTHETIC); results are not market analysis" >&2
     
-    # For demo: return sample data structure
+    # Demo data (explicitly allowed): random walk around $150
     local json_output="{"
     json_output="${json_output}\"symbol\":\"${symbol}\","
+    json_output="${json_output}\"data_source\":\"synthetic\","
     json_output="${json_output}\"ohlcv\":["
     
     # Generate sample prices around $150 with realistic variation
@@ -453,7 +503,7 @@ local open=$(echo "$base_price + $variation" | bc)
     
     json_output="${json_output}]}"
     
-    log_debug "Successfully fetched OHLCV data for $symbol"
+    log_debug "Generated synthetic OHLCV data for $symbol"
     echo "$json_output"
 }
 
@@ -554,9 +604,18 @@ calculate_all_indicators() {
     
     local obv=$(calc_obv $cv_input)
     
+    # Where the prices came from ("yfinance" or "synthetic"; "unknown" if the
+    # series does not say) and the last close (Bollinger fallback price)
+    local data_source
+    data_source=$(echo "$ohlcv_json" | jq -r '.data_source // "unknown"' 2>/dev/null)
+    [[ -z "$data_source" ]] && data_source="unknown"
+    local last_close="${close_array[${#close_array[@]}-1]}"
+
     # Output all indicators as JSON
     echo "{
         \"symbol\":\"${symbol}\",
+        \"data_source\":\"${data_source}\",
+        \"last_close\":${last_close},
         \"indicators\": {
             \"rsi\": ${rsi},
             \"macd\": ${macd},
@@ -591,7 +650,18 @@ score_stock() {
     local bb_middle=$(echo "$bb" | grep -o '"middle":[0-9.]*' | grep -o '[0-9.]*')
     local bb_lower=$(echo "$bb" | grep -o '"lower":[0-9.]*' | grep -o '[0-9.]*')
     local current_price=$(fetch_current_price "$symbol")
-    local bb_score=$(score_bollinger_bands "$current_price" "$bb_upper" "$bb_middle" "$bb_lower")
+    # No live quote (offline / fetch failed): use the series' last close
+    # instead of 0, which scored every symbol as maximally oversold (100).
+    if [[ -z "$current_price" ]] || awk -v p="$current_price" 'BEGIN { exit !(p + 0 <= 0) }'; then
+        current_price=$(echo "$indicators_json" | jq -r '.last_close // empty' 2>/dev/null)
+    fi
+    local bb_score=$(score_bollinger_bands "${current_price:-0}" "$bb_upper" "$bb_middle" "$bb_lower")
+    local data_source=$(echo "$indicators_json" | jq -r '.data_source // "unknown"' 2>/dev/null)
+    [[ -z "$data_source" ]] && data_source="unknown"
+    local data_warning=""
+    if [[ "$data_source" == "synthetic" ]]; then
+        data_warning="SYNTHETIC demo prices (SST_OFFLINE/SST_ALLOW_SYNTHETIC): scores are not market analysis"
+    fi
     
     local stoch=$(echo "$indicators_json" | grep -o '"stochastic":[^}]*}' | head -1)
     local k_line=$(echo "$stoch" | grep -o '"k_line":[0-9.]*' | grep -o '[0-9.]*')
@@ -623,6 +693,8 @@ score_stock() {
     # Generate output
     echo "{
         \"symbol\": \"${symbol}\",
+        \"data_source\": \"${data_source}\",
+        \"data_warning\": \"${data_warning}\",
         \"scores\": {
             \"rsi\": $rsi_score,
             \"macd\": $macd_score,
@@ -647,15 +719,15 @@ analyze_stock() {
     log_info "Analyzing $symbol..."
     
     # Fetch OHLCV data
-    local ohlcv=$(fetch_stock_ohlcv "$symbol" 60)
-    if [[ -z "$ohlcv" ]]; then
+    local ohlcv
+    if ! ohlcv=$(fetch_stock_ohlcv "$symbol" 60) || [[ "$ohlcv" != *'"ohlcv":'* ]]; then
         log_error "Skipping $symbol - unable to fetch data"
         return 1
     fi
     
     # Calculate indicators
-    local indicators=$(calculate_all_indicators "$symbol" "$ohlcv")
-    if [[ -z "$indicators" ]]; then
+    local indicators
+    if ! indicators=$(calculate_all_indicators "$symbol" "$ohlcv") || [[ -z "$indicators" ]]; then
         log_error "Skipping $symbol - insufficient data"
         return 1
     fi
@@ -694,12 +766,12 @@ generate_report() {
     local timestamp=$(date +%Y%m%d_%H%M%S)
     local report_file="${output_dir}/swing_analysis_${timestamp}.html"
     
-    log_info "Generating HTML report: $report_file"
+    log_info "Generating HTML report: $report_file" >&2
     
     generate_html_report "$analysis_json" "$report_file"
     
     if [[ -f "$report_file" ]]; then
-        log_info "Report generated successfully: $report_file"
+        log_info "Report generated successfully: $report_file" >&2
         echo "$report_file"
         return 0
     else
@@ -1274,8 +1346,10 @@ main() {
             continue
         fi
         
-        local result=$(analyze_stock "$symbol")
-        if [[ -n "$result" ]]; then
+        local result
+        # Count a symbol only when analyze_stock succeeded (its log lines
+        # alone are not an analysis, e.g. when there is no market data)
+        if result=$(analyze_stock "$symbol") && [[ -n "$result" ]]; then
             if [[ -z "$all_results" ]]; then
                 all_results="$result"
             else

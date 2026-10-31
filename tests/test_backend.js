@@ -59,6 +59,8 @@ function setupFixtures() {
   fs.mkdirSync(BACKTEST_DIR, { recursive: true });
   fs.writeFileSync(path.join(BACKTEST_DIR, 'backtest_AAPL_1.json'), JSON.stringify({ symbol: 'AAPL', total_pnl: 42 }));
   fs.writeFileSync(path.join(BACKTEST_DIR, 'backtest_AAPL_1.html'), '<html></html>');
+  fs.writeFileSync(path.join(BACKTEST_DIR, 'backtest_MSFT_2.json'), JSON.stringify({ symbol: 'MSFT', total_pnl: 7, data_source: 'synthetic' }));
+  fs.writeFileSync(path.join(BACKTEST_DIR, 'backtest_TSLA_3.json'), JSON.stringify({ symbol: 'TSLA', total_pnl: -3, data_source: 'yfinance' }));
 }
 
 setupFixtures();
@@ -218,7 +220,23 @@ test('POST /api/settings rejects disallowed settings and unsafe values', async (
 test('GET /api/backtest returns parsed JSON result files only', async () => {
   const res = await request('GET', '/api/backtest');
   assert.equal(res.status, 200);
-  assert.deepEqual(res.json.results, [{ file: 'backtest_AAPL_1.json', data: { symbol: 'AAPL', total_pnl: 42 } }]);
+  assert.deepEqual(res.json.results.map((r) => r.file), ['backtest_AAPL_1.json', 'backtest_MSFT_2.json', 'backtest_TSLA_3.json']);
+  assert.deepEqual(res.json.results[0], {
+    file: 'backtest_AAPL_1.json', data: { symbol: 'AAPL', total_pnl: 42 }, data_source: 'unknown', synthetic: false,
+  });
+});
+
+test('GET /api/backtest reports each result\'s data source and flags synthetic runs', async () => {
+  const res = await request('GET', '/api/backtest');
+  const bySymbol = Object.fromEntries(res.json.results.map((r) => [r.data.symbol, r]));
+  assert.equal(bySymbol.AAPL.data_source, 'unknown', 'files without data_source are reported as unknown, not as real');
+  assert.equal(bySymbol.AAPL.synthetic, false);
+  assert.equal(bySymbol.MSFT.data_source, 'synthetic');
+  assert.equal(bySymbol.MSFT.synthetic, true);
+  assert.equal(bySymbol.TSLA.data_source, 'yfinance');
+  assert.equal(bySymbol.TSLA.synthetic, false);
+  // The result data itself is passed through unchanged
+  assert.deepEqual(bySymbol.MSFT.data, { symbol: 'MSFT', total_pnl: 7, data_source: 'synthetic' });
 });
 
 test('unknown routes return 404', async () => {

@@ -314,6 +314,10 @@ apply_mirofish_to_confluence() {
 #     "technical_score": (%, 30 weight),
 #     "volume_trend_score": (%, 20 weight)
 #   },
+#   (ML unavailable, i.e. predictor returned {"available": false}: ML score
+#    null, weight 0, the other weights renormalized to 41.2/35.3/23.5 and
+#    metadata.ml_available false. A synthetic ML result is marked
+#    components.ml_confidence.data_source "synthetic" + metadata.data_warning.)
 #   "signal_strength": 0-5 (# of components in agreement),
 #   "breakdown": {...detailed scores...},
 #   "timestamp": ISO8601
@@ -337,6 +341,12 @@ calculate_confluence_score_v2() {
     local ml_confidence=50
     local ml_direction="neutral"
     local ml_error=""
+    # ML availability: false when the predictor reports {"available": false}
+    # (no real market data). ML then gets 0 weight and the other four weights
+    # are renormalized, like unavailable sentiment/MiroFish.
+    local ml_available=true
+    local ml_reason=""
+    local ml_data_source=""
     
     if command -v ml_predict_direction &>/dev/null; then
         local ml_result
@@ -354,11 +364,18 @@ calculate_confluence_score_v2() {
             bash "${SCRIPT_DIR}/ml_predictor.sh" predict "$symbol" 5 </dev/null 2>/dev/null \
             || echo "{\"error\": \"timeout_or_failure\"}")
         
-        if [[ ! "$ml_result" =~ "error" ]]; then
+        if ! echo "$ml_result" | jq -e 'type == "object"' >/dev/null 2>&1; then
+            ml_error="invalid_predictor_output"
+        elif echo "$ml_result" | jq -e 'has("error")' >/dev/null 2>&1; then
+            ml_error=$(echo "$ml_result" | jq -r '.error // "unknown"' 2>/dev/null)
+        elif echo "$ml_result" | jq -e '.available == false' >/dev/null 2>&1; then
+            ml_available=false
+            ml_direction="unavailable"
+            ml_reason=$(echo "$ml_result" | jq -r '.reason // "no market data"' 2>/dev/null)
+        else
             ml_confidence=$(echo "$ml_result" | jq -r '.confidence // 50' 2>/dev/null || echo "50")
             ml_direction=$(echo "$ml_result" | jq -r '.direction // "neutral"' 2>/dev/null || echo "neutral")
-        else
-            ml_error=$(echo "$ml_result" | jq -r '.error // "unknown"' 2>/dev/null)
+            ml_data_source=$(echo "$ml_result" | jq -r '.data_source // "unknown"' 2>/dev/null)
         fi
     fi
     
@@ -433,7 +450,20 @@ calculate_confluence_score_v2() {
         fi
     fi
     local confluence_score
-    if [[ "$mf_applied" == "true" ]]; then
+    if [[ "$ml_available" != "true" ]]; then
+        # ML unavailable: 0 weight, regime/technical/volume renormalized to
+        # 35/85, 30/85, 20/85 (then scaled by 1 - w when MiroFish applies).
+        local mf_part=0 mf_scale=1
+        if [[ "$mf_applied" == "true" ]]; then
+            mf_part="$mf_score * $mf_w"
+            mf_scale="(1 - $mf_w)"
+        fi
+        confluence_score=$(echo "scale=4; \
+            (($regime_score * 35) + \
+            ($technical_score * 30) + \
+            ($volume_trend_score * 20)) / 85 * $mf_scale + \
+            $mf_part" | bc)
+    elif [[ "$mf_applied" == "true" ]]; then
         confluence_score=$(echo "scale=4; \
             (($ml_confidence * 0.15) + \
             ($regime_score * 0.35) + \
@@ -449,11 +479,34 @@ calculate_confluence_score_v2() {
     fi
     confluence_score=$(printf "%.0f" "$confluence_score")
     local wp_ml=15 wp_regime=35 wp_tech=30 wp_vt=20 mirofish_component=""
-    if [[ "$mf_applied" == "true" ]]; then
+    if [[ "$ml_available" != "true" ]]; then
+        local wscale=1
+        [[ "$mf_applied" == "true" ]] && wscale=$(awk -v w="$mf_w" 'BEGIN { print 1 - w }')
+        wp_ml=0
+        wp_regime=$(awk -v s="$wscale" 'BEGIN { printf "%.1f", 3500 / 85 * s }')
+        wp_tech=$(awk -v s="$wscale" 'BEGIN { printf "%.1f", 3000 / 85 * s }')
+        wp_vt=$(awk -v s="$wscale" 'BEGIN { printf "%.1f", 2000 / 85 * s }')
+    elif [[ "$mf_applied" == "true" ]]; then
         wp_ml=$(awk -v w="$mf_w" 'BEGIN { printf "%.1f", 15 * (1 - w) }')
         wp_regime=$(awk -v w="$mf_w" 'BEGIN { printf "%.1f", 35 * (1 - w) }')
         wp_tech=$(awk -v w="$mf_w" 'BEGIN { printf "%.1f", 30 * (1 - w) }')
         wp_vt=$(awk -v w="$mf_w" 'BEGIN { printf "%.1f", 20 * (1 - w) }')
+    fi
+    # JSON fragments for the ML component's availability / data source
+    local ml_score_json="$ml_confidence" ml_extra="" data_warning=""
+    if [[ "$ml_available" != "true" ]]; then
+        ml_score_json="null"
+        ml_extra=",
+      \"available\": false,
+      \"reason\": $(jq -Rn --arg r "$ml_reason" '$r'),
+      \"data_source\": null"
+    elif [[ -n "$ml_data_source" ]]; then
+        ml_extra=",
+      \"available\": true,
+      \"data_source\": \"${ml_data_source}\""
+        if [[ "$ml_data_source" == "synthetic" ]]; then
+            data_warning="ML component used SYNTHETIC features (demo/test mode); not market data"
+        fi
     fi
     if [[ -n "$mf_json" ]]; then
         local mf_wp="0"
@@ -559,9 +612,9 @@ calculate_confluence_score_v2() {
   "signal_strength": ${signal_agreement},
   "components": {
     "ml_confidence": {
-      "score": ${ml_confidence},
+      "score": ${ml_score_json},
       "direction": "${ml_direction}",
-      "weight_percent": ${wp_ml}
+      "weight_percent": ${wp_ml}${ml_extra}
     },
     "regime_score": {
       "score": ${regime_score},
@@ -597,6 +650,8 @@ calculate_confluence_score_v2() {
   "metadata": {
     "confidence_note": "${confidence_note}",
     "ml_error": "${ml_error}",
+    "ml_available": ${ml_available},
+    "data_warning": "${data_warning}",
     "latency_ms": ${latency_ms},
     "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   }
