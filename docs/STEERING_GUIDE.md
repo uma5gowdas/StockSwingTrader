@@ -1,22 +1,50 @@
 # StockSwingTrader v6.3 Steering Guide
-## Comprehensive Documentation for AI-Enhanced Development
+## Code-Verified Reference for AI-Assisted Development
 
-**Version:** 6.3  
-**Last Updated:** October 30, 2024  
-**Purpose:** Complete guide for future AI agents to understand, enhance, and maintain the codebase
+**Version:** 6.3 (`VERSION="6.3"` in `StockSwingTrader_Agent.sh`; the separate `VERSION` file still says v6.2)  
+**Last Updated:** 2026-10-30  
+**Verified against:** commit `532828e` on `main`  
+**Purpose:** Accurate guide for future AI agents to understand, enhance, and maintain the codebase. Every command, function, path, port, weight and threshold below was checked against the code. Where the code does not do something, this guide says so.
+
+> Not financial advice. The ML model is trained on synthetic data, sentiment scores are randomised placeholders, and the CLI analysis uses generated demo prices. Paper-trade only.
 
 ---
 
 ## Table of Contents
-1. [Architecture Overview](#architecture-overview)
-2. [Module Structure](#module-structure)
-3. [Data Flow & Pipeline](#data-flow--pipeline)
-4. [Enhancement Modules](#enhancement-modules)
-5. [API Documentation](#api-documentation)
-6. [Development Guidelines](#development-guidelines)
-7. [Testing Checklist](#testing-checklist)
-8. [Troubleshooting](#troubleshooting)
-9. [Future Enhancement Ideas](#future-enhancement-ideas)
+1. [Current State at a Glance](#current-state-at-a-glance)
+2. [Architecture Overview](#architecture-overview)
+3. [Module Structure](#module-structure)
+4. [Data Flow & Pipeline](#data-flow--pipeline)
+5. [Enhancement Modules](#enhancement-modules)
+6. [Scoring Pipeline Integration](#scoring-pipeline-integration)
+7. [Main Agent Flags](#main-agent-flags)
+8. [Setup & Configuration](#setup--configuration)
+9. [Development Guidelines](#development-guidelines)
+10. [Testing](#testing)
+11. [Troubleshooting](#troubleshooting)
+12. [Future Enhancement Ideas](#future-enhancement-ideas)
+13. [Deployment & Versioning](#deployment--versioning)
+14. [Appendix: File Reference](#appendix-file-reference)
+
+---
+
+## Current State at a Glance
+
+The v6.3 enhancement modules work when you call them directly (sourced as libraries or run as scripts). The main agent does **not** yet run them. Known issues at `532828e`, observed by running the commands:
+
+1. **Path bug.** `lib/scoring.sh` line 16 sets `SCRIPT_DIR` to `lib/`. The agent sources `scoring.sh`, so every later `$SCRIPT_DIR/lib/...` lookup becomes `lib/lib/...`. Effects:
+   - `WARNING: html_report.sh not found` on every run, and no HTML report is written (`generate_html_report: command not found`).
+   - `--ml` and `--kalman` log "module not found" and are skipped.
+   - `--backtest` exits 1 with `Backtest module not found: …/lib/lib/backtest.sh`.
+   - Broker flags (`--check-account`, `--view-positions`, `--buy`, `--sell`) fail to load the broker module.
+2. **Missing modules.** `--regime-adapt` looks for `lib/regime_adaptive.sh` and `--dashboard` looks for `lib/dashboard.sh`. Neither exists. The real regime modules are `lib/regime_detector.sh` and `lib/regime_weighting.sh`; there is no dashboard launcher.
+3. **Scoring not wired in.** The CLI always calls the legacy `calculate_confluence_score` (80% technical average, 20% sentiment). The ML/regime/Kalman engine `calculate_confluence_score_v2` (15/35/30/20) is only called by tests and `examples/ml_scoring_integration_example.sh`.
+4. **Demo data.** `fetch_stock_ohlcv` in the agent generates random OHLCV data; it does not fetch history. In the check run, close extraction found only 7 points, so analysis stopped with `Insufficient data points for AAPL (7 < 30)`. The agent still printed "Analysis Complete!" and exited 0.
+5. **Wrong help example.** `--backtest AAPL 2022-01-01 2024-01-01` (in `--help` and the script header) is rejected: `Unknown option: 2022-01-01`, exit 1. Dates go in `--start` / `--end`.
+6. **bash 3.2.** `--watchlist` uses `mapfile` (bash 4+). macOS `/bin/bash` 3.2 prints `mapfile: command not found` and analyzes 0 stocks.
+7. **Backend gaps.** `/api/signals`, `/api/quotes`, `/api/indicators`, `/api/stats` and `/api/portfolio` call lib scripts with sub-commands those scripts do not implement, so they return HTTP 200 with `{"raw": ""}`. Dashboard score and price panels stay empty.
+8. **Machine-specific paths.** Backtest output, backend log and ML training report default to `/Users/P3291917/Builds/6/.agents/tasks/...`. Override with `BACKTEST_OUTPUT_DIR` and `SST_LOG_FILE` (the training report path has no override).
+9. **ML batch.** `ml_predictor.sh batch '["AAPL", "MSFT"]' 5` returns only the first symbol.
 
 ---
 
@@ -27,337 +55,209 @@
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                   StockSwingTrader v6.3                         │
-│          AI-Powered Swing Trading Analysis Platform             │
+│              Swing Trading Analysis (demo/paper)                │
 └─────────────────────────────────────────────────────────────────┘
                               │
         ┌─────────────────────┼─────────────────────┐
         │                     │                     │
     ┌───▼────┐          ┌────▼─────┐         ┌────▼────┐
-    │  Data  │          │ Analysis  │         │ Output  │
-    │ Sources│          │ Engine    │         │ Modules │
+    │  Data  │          │ Analysis │         │ Output  │
+    │ (demo/ │          │ Modules  │         │ Modules │
+    │yfinance│          │ (lib/)   │         │         │
     └───┬────┘          └────┬─────┘         └────┬────┘
         │                    │                     │
     ┌───▼────────────────────▼─────────────────────▼────┐
-    │                                                    │
-    │  Scoring Pipeline & Integration Layer             │
-    │  - Technical Indicators (30%)                      │
-    │  - ML Predictor (15%)                              │
-    │  - Regime Weighting (35%)                          │
-    │  - Volume/Trend (20%)                              │
-    │                                                    │
+    │  Scoring (lib/scoring.sh)                          │
+    │  CLI today: calculate_confluence_score             │
+    │    80% technical avg + 20% sentiment               │
+    │  Library/tests: calculate_confluence_score_v2      │
+    │    15% ML + 35% regime + 30% technical             │
+    │    + 20% volume/trend                              │
     └───┬──────────────────────────────────────────────┬─┘
         │                                              │
-    ┌───▼──────────────┐                    ┌─────────▼──┐
-    │  Dashboard UI    │                    │  Reports   │
-    │  (React/Vite)    │                    │  & Export  │
-    └──────────────────┘                    └────────────┘
+    ┌───▼──────────────────────┐            ┌─────────▼──────────┐
+    │ Dashboard                │            │ Reports            │
+    │ backend :3000 (Express)  │            │ HTML (html_report) │
+    │ frontend :5173 (Vite)    │            │ Backtest JSON/HTML │
+    └──────────────────────────┘            └────────────────────┘
 ```
 
-### Module Dependency Graph
+### Module Dependency Graph (as sourced in code)
 
 ```
 StockSwingTrader_Agent.sh (Main Orchestrator)
 │
-├── config.template.sh (Configuration)
+├── config.template.sh          (always sourced; config.sh is NOT sourced by the agent)
+├── lib/indicators.sh           RSI, MACD, Bollinger, ATR, OBV, Stochastic, Williams %R, SMA, EMA
+├── lib/sentiment.sh            Twitter/Reddit/StockTwits placeholders (randomised)
+├── lib/scoring.sh              Indicator scores + confluence (resets SCRIPT_DIR, see issue 1)
+│   ├── lib/ml_predictor.sh  ── lib/ml_inference.py ── lib/models/xgboost_predictor.pkl
+│   ├── lib/regime_weighting.sh
+│   │   ├── lib/regime_detector.sh
+│   │   │   ├── lib/indicators.sh
+│   │   │   ├── lib/trading_thresholds.sh
+│   │   │   └── lib/kalman_filter.sh
+│   │   └── lib/trading_thresholds.sh
+│   └── lib/kalman_filter.sh ── lib/kalman_inference.py
+├── lib/html_report.sh          generate_html_report (not found at runtime, issue 1)
+├── lib/backtest.sh  ── lib/backtest_engine.py      (--backtest; not found at runtime, issue 1)
+├── lib/alpaca_broker.sh | lib/robinhood_broker.sh   (--broker; loaded after arg parsing)
 │
-├── lib/indicators.sh (Technical Indicators)
-│   ├── RSI(14), MACD, Bollinger Bands
-│   ├── ATR, OBV, Stochastic, Williams %R
-│   └── EMA(20), EMA(50)
-│
-├── lib/kalman_filter.sh (Price Smoothing)
-│   └── lib/kalman_inference.py
-│
-├── lib/regime_detector.sh (Market Regime Detection)
-│   └── Uses Kalman filter output
-│
-├── lib/regime_weighting.sh (Adaptive Weights)
-│   └── Uses regime classification
-│
-├── lib/ml_predictor.sh (XGBoost Predictions)
-│   ├── lib/ml_inference.py
-│   ├── lib/train_ml_model.py
-│   └── lib/models/xgboost_predictor.pkl
-│
-├── lib/strategy_mean_reversion.sh (MR Strategy)
-│
-├── lib/strategy_trend_follow.sh (TF Strategy)
-│
-├── lib/scoring.sh (Confluence Scoring)
-│   └── Integrates all signals
-│
-├── lib/sentiment.sh (Sentiment Analysis)
-│   ├── Twitter/Social signals
-│   ├── StockTwits
-│   └── News feeds
-│
-├── lib/backtest.sh (Backtesting)
-│   └── lib/backtest_engine.py
-│
-├── lib/alpaca_broker.sh OR lib/robinhood_broker.sh
-│   ├── Order execution
-│   └── Account management
-│
-├── lib/html_report.sh (Report Generation)
-│
-└── backend/server.js + frontend/ (Dashboard)
-    ├── React/TypeScript UI
-    ├── Recharts for visualization
-    └── Tailwind CSS styling
+│ Not sourced by the agent:
+├── lib/strategy_mean_reversion.sh, lib/strategy_trend_follow.sh
+│   └── lib/trading_thresholds.sh, risk_management.sh, trade_journal.sh, alpaca_wrappers.sh
+├── lib/train_ml_model.py       (run manually)
+└── backend/server.js + frontend/  (started manually with npm)
 ```
 
 ---
 
 ## Module Structure
 
-### Core Modules
+### Core Modules (function names verified with `grep '^name()'`)
 
-| Module | File | Purpose | Language | Key Functions |
-|--------|------|---------|----------|----------------|
-| Main Agent | `StockSwingTrader_Agent.sh` | Orchestrates all analysis | Bash | parse_args, run_analysis, main |
-| Indicators | `lib/indicators.sh` | Technical analysis | Bash | calc_rsi, calc_macd, calc_bollinger, calc_atr |
-| Kalman Filter | `lib/kalman_filter.sh` | Price smoothing | Bash | apply_kalman_filter, kalman_init |
-| Kalman Inference | `lib/kalman_inference.py` | Kalman computations | Python | filter_prices, estimate_volatility |
-| Regime Detector | `lib/regime_detector.sh` | Market condition detection | Bash | detect_regime, classify_market |
-| Regime Weighting | `lib/regime_weighting.sh` | Adaptive strategy weights | Bash | get_regime_weights, apply_weights |
-| ML Predictor | `lib/ml_predictor.sh` | XGBoost predictions | Bash | ml_predict_direction |
-| ML Inference | `lib/ml_inference.py` | Model inference logic | Python | predict, load_model, feature_engineering |
-| ML Training | `lib/train_ml_model.py` | Model training pipeline | Python | train, validate, save_model |
-| Mean Reversion | `lib/strategy_mean_reversion.sh` | MR strategy signals | Bash | mr_signals, mr_score |
-| Trend Following | `lib/strategy_trend_follow.sh` | TF strategy signals | Bash | tf_signals, tf_score |
-| Scoring | `lib/scoring.sh` | Confluence calculation | Bash | calculate_confluence_score |
-| Sentiment | `lib/sentiment.sh` | Social/news sentiment | Bash | get_sentiment_score |
-| Risk Management | `lib/risk_management.sh` | Stop-loss & profit targets | Bash | calculate_stops, calculate_targets |
-| Backtesting | `lib/backtest.sh` | Backtest framework | Bash | run_backtest |
-| Backtest Engine | `lib/backtest_engine.py` | Backtest logic | Python | backtest_strategy, optimize_params |
-| Alpaca Broker | `lib/alpaca_broker.sh` | Alpaca integration | Bash | submit_order, get_positions |
-| RH Broker | `lib/robinhood_broker.sh` | Robinhood integration | Bash | submit_order, get_positions |
-| Reports | `lib/html_report.sh` | HTML reports | Bash | generate_report |
-| Backend API | `backend/server.js` | REST API server | Node.js | /api/analysis, /api/watchlist |
-| Frontend UI | `frontend/src/` | React dashboard | TypeScript | Dashboard, Analysis, Watchlist |
+| Module | File | Language | Key Functions / Entry Points |
+|--------|------|----------|------------------------------|
+| Main Agent | `StockSwingTrader_Agent.sh` | Bash | `main`, `usage`, `display_version`, `analyze_stock`, `fetch_stock_ohlcv`, `calculate_all_indicators`, `score_stock`, `generate_report`, `init_ml_predictor`, `init_regime_adaptive`, `init_kalman_filter`, `init_dashboard`, `init_all_enhancements`, `load_broker_module` |
+| Indicators | `lib/indicators.sh` | Bash | `calc_rsi`, `calc_macd`, `calc_bollinger_bands`, `calc_atr`, `calc_obv`, `calc_stochastic`, `calc_williams_r`, `calc_sma`, `calc_ema` |
+| Extra indicators | `lib/indicators_new.sh` | Bash | `calc_rsi_divergence`, `calc_vwma`, `calc_momentum`, `calc_all_new_indicators` |
+| Kalman Filter | `lib/kalman_filter.sh` | Bash | `apply_kalman_filter`, `apply_kalman_filter_fast`, `calc_residual_volatility`, `get_kalman_filtered_prices` |
+| Kalman Inference | `lib/kalman_inference.py` | Python | `KalmanFilter1D`, `calculate_volatility`, `calculate_smoothness_improvement`; CLI: `kalman_inference.py [q] [r]` with prices on stdin |
+| Regime Detector | `lib/regime_detector.sh` | Bash | `detect_market_regime`, `detect_market_regime_kalman`, `detect_regimes_batch`, `calc_adx`, `calc_bb_width_pct`, `detect_trend_direction`, `clear_regime_cache` |
+| Regime Weighting | `lib/regime_weighting.sh` | Bash | `get_regime_weights`, `apply_regime_weights`, `apply_confidence_multiplier`, `apply_regime_weights_batch`, `select_best_strategy`, `calculate_adjusted_stop_loss`, `detect_regime_change` |
+| ML Predictor | `lib/ml_predictor.sh` | Bash | `ml_predict_direction`, `ml_get_model_status`, `ml_batch_predict`; CLI: `predict`, `status`, `batch` |
+| ML Inference | `lib/ml_inference.py` | Python | `predict`, `extract_features_from_data`, `generate_synthetic_features_for_symbol`, `fetch_current_data`; CLI: `--symbol`, `--period`, `--data-file` |
+| ML Training | `lib/train_ml_model.py` | Python | `main`, `train_model`, `generate_synthetic_features`, `generate_report` (no CLI options) |
+| Mean Reversion | `lib/strategy_mean_reversion.sh` | Bash | `mean_reversion_analyze`, `mean_reversion_exit_check`, `mean_reversion_enter`, `mean_reversion_exit`, `mean_reversion_scan`, `mean_reversion_stats` |
+| Trend Following | `lib/strategy_trend_follow.sh` | Bash | `trend_follow_analyze`, `trend_follow_exit_check`, `trend_follow_enter`, `trend_follow_exit`, `trend_follow_scan`, `trend_follow_stats` |
+| Thresholds | `lib/trading_thresholds.sh` | Bash | Exported constants (`MR_*`, `TF_*`, `RSI_*`, `MACD_*`, ...) |
+| Scoring | `lib/scoring.sh` | Bash | `score_rsi`, `score_macd`, `score_bollinger_bands`, `score_stochastic`, `score_williams_r`, `score_obv`, `calculate_confluence_score`, `calculate_confluence_score_v2`, `calc_stop_loss_atr`, `calc_stop_loss_percent`, `calc_take_profit`, `calc_risk_reward_ratio`, `generate_score_summary` |
+| Sentiment | `lib/sentiment.sh` | Bash | `parse_twitter_sentiment`, `parse_reddit_sentiment`, `parse_stocktwits_sentiment`, `analyze_news_sentiment`, `aggregate_sentiment`, `sentiment_to_confidence` |
+| Risk Management | `lib/risk_management.sh` | Bash | `calculate_position_size`, `calculate_position_qty`, `enforce_stop_loss`, `enforce_take_profit`, `check_max_positions`, `enforce_daily_drawdown_limit`, `monitor_all_positions`, `rebalance_check` |
+| Trade Journal | `lib/trade_journal.sh` | Bash | `log_trade_entry`, `close_trade`, `query_trade_journal`, `show_journal`, `export_backtest_data`, `get_strategy_stats` |
+| Backtesting | `lib/backtest.sh` | Bash | `backtest_strategy`, `backtest_multi_symbol`, `run_backtest_engine`, `generate_backtest_reports`, `generate_portfolio_summary` (library only, no CLI) |
+| Backtest Engine | `lib/backtest_engine.py` | Python | `DataFetcher`, `Indicators`, `MeanReversionStrategy`, `TrendFollowStrategy`, `BacktestEngine`; CLI: `backtest_engine.py CONFIG_JSON` |
+| Alpaca Broker | `lib/alpaca_broker.sh` (+ `lib/alpaca_wrappers.sh`) | Bash | `alpaca_init`, `alpaca_get_account`, `alpaca_get_positions`, `alpaca_place_order`, `alpaca_get_order_status`, `alpaca_cancel_order` |
+| Robinhood Broker | `lib/robinhood_broker.sh` (+ `robinhood_oauth.sh`, `robinhood_mcp_direct.sh`) | Bash | `robinhood_init`, `robinhood_get_account`, `robinhood_get_positions`, `robinhood_place_order`, `robinhood_get_quote` |
+| Reports | `lib/html_report.sh` | Bash | `generate_html_report JSON OUTPUT_FILE` |
+| Backend API | `backend/server.js` | Node.js/Express | `/api/health`, `/api/portfolio`, `/api/quotes/:symbol`, `/api/signals/:symbol`, `/api/indicators/:symbol`, `/api/trades`, `/api/stats`, `GET`/`POST /api/settings`, `/api/backtest` |
+| Frontend UI | `frontend/src/` | React + TypeScript | Pages: `Dashboard`, `Analysis`, `TradeHistory`, `Watchlist`, `Settings`, `NotFound` |
 
 ---
 
 ## Data Flow & Pipeline
 
-### Complete Analysis Pipeline
+### What the CLI actually runs today (`--symbols`)
 
 ```
-Input: Symbol List (e.g., AAPL,MSFT,GOOGL)
+Input: --symbols AAPL,MSFT  (or --top-10, --watchlist FILE, or DEFAULT_WATCHLIST)
    │
-   ├─▶ [RATE LIMIT CHECK]
-   │   └─ Alpha Vantage: 5 req/min
-   │   └─ Finnhub: 60 req/min
-   │
-   ├─▶ [FETCH PRICE DATA]
-   │   ├─ Intraday (5-min candles)
-   │   ├─ Daily candles (90 days)
-   │   └─ Store in cache
-   │
-   ├─▶ [KALMAN FILTER]
-   │   ├─ Input: Raw price data
-   │   ├─ Parameters: q=0.01, r=0.1
-   │   └─ Output: Smoothed prices, volatility estimate
-   │
-   ├─▶ [REGIME DETECTION]
-   │   ├─ Input: Smoothed prices (Kalman output)
-   │   ├─ Detect: sideways / trending_bull / trending_bear / volatile
-   │   └─ Thresholds: ADX > 25 (trending), volatility metrics
-   │
-   ├─▶ [CALCULATE INDICATORS] (Parallel for all indicators)
-   │   ├─ RSI(14), MACD(12,26,9), Bollinger(20,2)
-   │   ├─ ATR(14), OBV, Stochastic(14,3,3)
-   │   ├─ Williams %R, EMA(20), EMA(50)
-   │   └─ Output: JSON with all values
-   │
-   ├─▶ [STRATEGY SIGNALS]
-   │   ├─ Mean Reversion Strategy
-   │   │  └─ Scores: Buy (RSI<30, Price<BB_Lower), Sell (RSI>70)
-   │   └─ Trend Following Strategy
-   │      └─ Scores: Buy (Price>EMA50, MACD>0), Sell (Price<EMA20)
-   │
-   ├─▶ [SENTIMENT ANALYSIS]
-   │   ├─ Twitter/Social: -100 to +100
-   │   ├─ StockTwits: Sentiment score
-   │   ├─ News: Positive/negative keywords
-   │   └─ Combined: Weighted average
-   │
-   ├─▶ [ML PREDICTION] (if --ml flag)
-   │   ├─ Features: RSI, MACD, Bollinger, ATR, Stochastic, EMA(20), EMA(50), Volume
-   │   ├─ Model: XGBoost binary classifier (up/down next 5 periods)
-   │   ├─ Output: {direction: "up"/"down", confidence: 0-100}
-   │   └─ Weight in scoring: 15%
-   │
-   ├─▶ [REGIME-ADAPTIVE WEIGHTING] (if --regime-adapt flag)
-   │   ├─ Sideways regime: 70% MeanReversion + 30% TrendFollow
-   │   ├─ Trending regime: 30% MeanReversion + 70% TrendFollow
-   │   ├─ Volatile regime: -20% score adjustment, +2% stop-loss
-   │   └─ Apply to confluence calculation
-   │
-   ├─▶ [CONFLUENCE SCORING]
-   │   ├─ Formula:
-   │   │  └─ Score = (Technical × 0.30) +
-   │   │            (ML × 0.15) +
-   │   │            (RegimeWeighted × 0.35) +
-   │   │            (VolumeTrend × 0.20)
-   │   ├─ Technical: 0-100 (confluence of multiple indicators)
-   │   ├─ ML: 0-100 (confidence from XGBoost, min=35 for signal)
-   │   ├─ Volume/Trend: 0-100 (OBV, volume relative to avg)
-   │   └─ Final Score: 0-100
-   │
-   ├─▶ [RISK MANAGEMENT]
-   │   ├─ Calculate stop-loss (based on ATR)
-   │   ├─ Calculate profit target (risk/reward ratio 1:2)
-   │   └─ Adjust for volatility
-   │
-   ├─▶ [SIGNAL CLASSIFICATION]
-   │   ├─ STRONG BUY: score ≥ 75 + multiple confirmations
-   │   ├─ BUY: score ≥ 60 + main trend aligned
-   │   ├─ HOLD: 45 ≤ score < 60
-   │   ├─ SELL: score < 45
-   │   └─ STRONG SELL: score ≤ 25 + multiple warnings
-   │
-   ├─▶ [SENTIMENT INTEGRATION]
-   │   ├─ Adjust score ±5 points based on sentiment
-   │   ├─ Sentiment > +50: +5 to score
-   │   ├─ Sentiment < -50: -5 to score
-   │   └─ Store sentiment breakdown
-   │
-   ├─▶ [OUTPUT GENERATION]
-   │   ├─ JSON: Complete analysis result
-   │   ├─ HTML Report: Visual with charts
-   │   ├─ CSV: For spreadsheet import
-   │   └─ Dashboard: Real-time display
-   │
-   └─▶ Output: Complete analysis with signals, scores, risk metrics
-
+   ├─▶ fetch_stock_ohlcv       generates 60 random demo bars (no API call)
+   ├─▶ calculate_all_indicators
+   │     needs ≥ 30 closes; RSI(14), MACD, Bollinger(20,2), Stochastic(14),
+   │     Williams %R(14), ATR(14), OBV
+   ├─▶ score_stock
+   │     score_rsi / score_macd / score_bollinger_bands / score_stochastic /
+   │     score_williams_r ; OBV fixed at 50 ; aggregate_sentiment (random)
+   │     fetch_current_price (Yahoo quoteSummary via curl, for Bollinger score)
+   ├─▶ calculate_confluence_score (legacy)
+   │     technical_avg = mean of 6 indicator scores
+   │     final = technical_avg × 0.8 + sentiment × 0.2
+   ├─▶ sleep 0.5 between symbols
+   └─▶ generate_report → generate_html_report (currently not loaded, issue 1)
 ```
 
-### JSON Output Format
+ML, regime and Kalman are **not** in this path (issues 1–3).
+
+### Library pipeline (`calculate_confluence_score_v2`, used by tests/examples)
+
+```
+Inputs: symbol, rsi_score, macd_score, bb_score, obv_score, regime,
+        [mr_score=50], [tf_score=50], [kalman_trend=-1|0|1, default 0]
+   │
+   ├─▶ ML (15%)         bash lib/ml_predictor.sh predict SYMBOL 5, killed after
+   │                    ML_TIMEOUT_SECONDS (default 5); on error/timeout
+   │                    confidence=50, direction=neutral, metadata.ml_error set
+   ├─▶ Regime (35%)     sideways: 0.7·MR + 0.3·TF
+   │                    trending_bull / trending_bear: 0.3·MR + 0.7·TF
+   │                    volatile: (0.5·MR + 0.5·TF) × 0.8
+   │                    other: 0.5·MR + 0.5·TF
+   ├─▶ Technical (30%)  (rsi + macd + bb) / 3
+   ├─▶ Volume/Trend (20%)
+   │                    kalman_trend=1:  0.8·OBV + 0.2·75
+   │                    kalman_trend=-1: 0.8·OBV + 0.2·25
+   │                    kalman_trend=0:  OBV
+   ├─▶ confluence = 0.15·ML + 0.35·Regime + 0.30·Technical + 0.20·VolumeTrend
+   └─▶ recommendation (see Signal Classification)
+```
+
+The library pipeline has no sentiment adjustment, no stop-loss/target output and no risk-management step. Stop/target helpers exist separately in `lib/scoring.sh` (`calc_stop_loss_atr`, default multiplier 2; `calc_stop_loss_percent`, default 5%; `calc_take_profit`, default 8%; `calc_risk_reward_ratio`).
+
+### Signal Classification
+
+**Legacy `calculate_confluence_score` (used by the CLI):**
+
+| Final confidence | Signal |
+|---|---|
+| ≥ 75 | `STRONG_BUY` |
+| ≥ 60 | `BUY` |
+| ≥ 40 | `HOLD` |
+| ≥ 25 | `SELL` |
+| < 25 | `STRONG_SELL` |
+
+**`calculate_confluence_score_v2`:** each component votes bullish or bearish. ML votes when confidence > 60 (direction up/down). Regime, technical and volume/trend vote bullish when > 60 and bearish when < 40. `signal_strength` = number of voting components (0–4).
+
+- 3+ votes, ≥3 bullish and 0 bearish: `STRONG_BUY` if score > 70, `BUY` if > 55, otherwise `HOLD`.
+- 3+ votes, ≥3 bearish and 0 bullish: `STRONG_SELL` if score < 30, `SELL` if < 45, otherwise `HOLD`.
+- 3+ votes but mixed: `HOLD`.
+- Fewer than 3 votes: `BUY` if > 60, `SELL` if < 40, otherwise `HOLD`.
+
+The `CONFIDENCE_*` variables in `config.template.sh` are not read by either function (and `CONFIDENCE_STRONG_SELL=10` differs from the hard-coded 25).
+
+### JSON Output: legacy `calculate_confluence_score`
+
+```bash
+source lib/scoring.sh
+calculate_confluence_score 70 70 70 70 70 50 80
+# {"final_confidence":69,"signal":"BUY","reasoning":"Most indicators bullish; good entry opportunity","technical_avg":66,"sentiment_contribution":80}
+```
+
+### JSON Output: `calculate_confluence_score_v2`
+
+```bash
+source lib/scoring.sh
+calculate_confluence_score_v2 AAPL 65 70 55 60 trending_bull 60 72 1 </dev/null
+```
 
 ```json
 {
-  "symbol": "AAPL",
-  "timestamp": "2024-10-30T14:30:00Z",
-  "price": {
-    "current": 235.45,
-    "open": 234.10,
-    "high": 236.50,
-    "low": 234.05,
-    "change": 1.35,
-    "change_percent": 0.57
+  "confluence_score": 68,
+  "recommendation": "BUY",
+  "signal_strength": 4,
+  "components": {
+    "ml_confidence":      { "score": 82, "direction": "up", "weight_percent": 15 },
+    "regime_score":       { "score": 68, "regime": "trending_bull", "weight_percent": 35 },
+    "technical_score":    { "score": 63, "weight_percent": 30 },
+    "volume_trend_score": { "score": 63, "weight_percent": 20 }
   },
-  "indicators": {
-    "rsi": {
-      "value": 55.23,
-      "signal": "neutral",
-      "overbought_level": 70,
-      "oversold_level": 30
+  "breakdown": {
+    "symbol": "AAPL",
+    "individual_scores": {
+      "rsi": 65, "macd": 70, "bollinger_bands": 55, "obv": 60,
+      "mean_reversion": 60, "trend_following": 72, "kalman_trend": 1
     },
-    "macd": {
-      "macd_line": 0.85,
-      "signal_line": 0.62,
-      "histogram": 0.23,
-      "signal": "bullish"
-    },
-    "bollinger": {
-      "upper": 240.20,
-      "middle": 237.15,
-      "lower": 234.10,
-      "position": 0.68,
-      "signal": "above_middle"
-    },
-    "atr": {
-      "value": 2.35,
-      "stop_loss": 233.10,
-      "profit_target": 239.80
-    },
-    "stochastic": {
-      "k": 62.50,
-      "d": 58.30,
-      "signal": "bullish"
-    },
-    "ema": {
-      "ema_20": 236.40,
-      "ema_50": 234.80,
-      "signal": "bullish"
-    }
+    "signal_counts": { "bullish_signals": 4, "bearish_signals": 0, "total_agreement": 4 }
   },
-  "kalman_filter": {
-    "filtered_price": 235.43,
-    "state": [235.43, 0.02],
-    "covariance": [[1.2, 0.0], [0.0, 0.1]],
-    "residuals": 0.02,
-    "volatility_estimate": 1.85
-  },
-  "regime": {
-    "current": "trending_bull",
-    "adr": 0.68,
-    "volatility": "normal",
-    "trend_strength": "strong"
-  },
-  "ml_prediction": {
-    "direction": "up",
-    "confidence": 78,
-    "probability": 0.78,
-    "model_version": "xgboost_v2.0",
-    "features_used": ["rsi", "macd", "bollinger", "atr", "stochastic", "ema_20", "ema_50", "volume"]
-  },
-  "strategies": {
-    "mean_reversion": {
-      "signal": "buy",
-      "score": 65,
-      "reasoning": "RSI below 40, price above BB lower"
-    },
-    "trend_following": {
-      "signal": "buy",
-      "score": 72,
-      "reasoning": "Price above EMA50, MACD positive"
-    }
-  },
-  "regime_weights": {
-    "mean_reversion_weight": 0.30,
-    "trend_follow_weight": 0.70,
-    "applied": true
-  },
-  "sentiment": {
-    "overall": 62,
-    "twitter": 58,
-    "stocktwits": 65,
-    "news": 63,
-    "signal": "bullish"
-  },
-  "confluence": {
-    "technical_score": 68,
-    "ml_score": 78,
-    "weighted_score": 72,
-    "final_score": 71,
-    "components": {
-      "technical": 0.30,
-      "ml": 0.15,
-      "regime_weighted": 0.35,
-      "volume_trend": 0.20
-    }
-  },
-  "signal": "BUY",
-  "confidence_level": "HIGH",
-  "risk_management": {
-    "entry_price": 235.45,
-    "stop_loss": 233.10,
-    "profit_target": 239.80,
-    "risk_reward_ratio": 2.0,
-    "stop_loss_percent": -0.99,
-    "profit_target_percent": 1.85,
-    "recommended_position_size": 100
-  },
-  "watchlist": {
-    "on_watchlist": true,
-    "days_on_list": 5,
-    "previous_signals": ["HOLD", "HOLD", "BUY"],
-    "action_items": ["Monitor for breakout"]
+  "metadata": {
+    "confidence_note": "Multiple bullish signals confirmed",
+    "ml_error": "",
+    "latency_ms": 0,
+    "timestamp": "2026-10-31T06:15:00Z"
   }
 }
 ```
+
+(`latency_ms` and `timestamp` vary. One ML prediction takes several seconds, so it can hit the 5 s default timeout; then `ml_confidence.score` is 50 and `metadata.ml_error` is `timeout_or_failure`. Raise `ML_TIMEOUT_SECONDS` if that happens.)
 
 ---
 
@@ -365,585 +265,386 @@ Input: Symbol List (e.g., AAPL,MSFT,GOOGL)
 
 ### Enhancement 1: XGBoost ML Predictor
 
-**Purpose:** Binary classification of stock direction for next 5 periods (+5-10% accuracy improvement)
+**Purpose:** Binary up/down prediction for the next 5 periods. No accuracy improvement has been measured on real data; the model is trained on synthetic data.
 
 **Files:**
-- `lib/ml_predictor.sh` - Bash wrapper for inference
-- `lib/ml_inference.py` - Inference engine
-- `lib/train_ml_model.py` - Training pipeline
-- `lib/models/xgboost_predictor.pkl` - Trained model (binary)
+- `lib/ml_predictor.sh`: Bash wrapper and CLI
+- `lib/ml_inference.py`: inference
+- `lib/train_ml_model.py`: training
+- `lib/models/xgboost_predictor.pkl`: trained model (git-ignored via `*.pkl`; present locally)
 
-**Features:**
-- Input: 8 technical indicators (RSI, MACD, Bollinger, ATR, Stochastic, EMA20, EMA50, Volume)
-- Target: Binary classification (up=1, down=0) for next 5 trading periods
-- Model: XGBoost with gradient boosting
-- Output: Direction, confidence (0-100), probability (0.0-1.0)
+**Features (14, order must match training):** `rsi_14`, `macd`, `macd_signal`, `macd_hist`, `bb_position`, `bb_width`, `atr`, `stochastic_k`, `stochastic_d`, `ema_20`, `ema_50`, `volume_ratio`, `close_price`, `price_range`.
+
+**Data source:** `ml_inference.py` uses the `--data-file` CSV if given, else JSON on stdin, else yfinance (`period='3mo'`, skipped when `SST_OFFLINE=1` or yfinance is missing). With fewer than 20 rows it falls back to synthetic features seeded per symbol (`zlib.crc32`), so results are deterministic per symbol. When `ml_predictor.sh` is run from a terminal with no stdin, it pipes a one-row placeholder record, which always triggers the synthetic fallback.
 
 **How to Use:**
 
 ```bash
-# Run inference on a symbol
-./lib/ml_predictor.sh AAPL 5
+bash lib/ml_predictor.sh status
+# {"status": "ready", "model_file": ".../lib/models/xgboost_predictor.pkl", "size_bytes": 271672, "modified": "..."}
 
-# Expected output:
-# {
-#   "direction": "up",
-#   "confidence": 78,
-#   "probability": 0.78,
-#   "model_version": "xgboost_v2.0"
-# }
+bash lib/ml_predictor.sh predict AAPL 5 </dev/null
+# {"symbol": "AAPL", "direction": "up", "confidence": 82, "probability": 0.825, "period": 5, "timestamp": "..."}
+
+python3 lib/ml_inference.py --symbol AAPL --period 5 --data-file prices.csv
+# CSV needs High, Low, Close, Volume columns (case-insensitive) and ≥ 50 rows for real features
+
+source lib/ml_predictor.sh
+ml_predict_direction AAPL 5 </dev/null
 ```
 
-**How to Enhance:**
+Running the script with no sub-command (e.g. `ml_predictor.sh AAPL 5`) prints usage and exits 1. `batch` currently returns only the first symbol (issue 9); loop over `predict` instead.
 
-1. **Retrain with new symbols:**
-   ```bash
-   python lib/train_ml_model.py --symbols AAPL,MSFT,GOOGL --train-days 252 --test-days 60
-   ```
+**Output schema:**
 
-2. **Adjust hyperparameters** in `lib/train_ml_model.py`:
-   - `max_depth`: 3-7 (lower = simpler model, less overfitting)
-   - `learning_rate`: 0.01-0.3 (lower = slower training, better generalization)
-   - `n_estimators`: 100-500 (more trees = better but slower)
-   - `subsample`: 0.6-1.0 (ratio of training instances)
-
-3. **Add more features:**
-   - Modify `engineer_features()` in `lib/ml_inference.py`
-   - Add features like: Fibonacci levels, Ichimoku, ADX, CMF
-   - Retrain model with new feature set
-
-4. **Testing:**
-   ```bash
-   # Test inference output format
-   bash lib/ml_predictor.sh AAPL 5 | jq .
-   
-   # Verify confidence threshold
-   bash lib/ml_predictor.sh AAPL 5 | jq '.confidence >= 60'
-   ```
-
-**JSON Schema - Input (Features):**
-```json
-{
-  "symbol": "AAPL",
-  "timestamp": "2024-10-30T14:30:00Z",
-  "features": {
-    "rsi_14": 55.23,
-    "macd_diff": 0.23,
-    "bb_position": 0.68,
-    "atr_14": 2.35,
-    "stochastic_k": 62.50,
-    "ema_20": 236.40,
-    "ema_50": 234.80,
-    "volume_sma_ratio": 1.15
-  }
-}
-```
-
-**JSON Schema - Output:**
 ```json
 {
   "symbol": "AAPL",
   "direction": "up|down",
-  "confidence": 0-100,
-  "probability": 0.0-1.0,
-  "model_version": "xgboost_v2.0",
-  "training_accuracy": 0.58,
-  "features_used": ["rsi_14", "macd_diff", ...],
-  "timestamp": "2024-10-30T14:30:00Z"
+  "confidence": 50-100,
+  "probability": 0.5-1.0,
+  "period": 5,
+  "timestamp": "2026-10-31T06:15:38Z"
 }
 ```
+
+`confidence` = `int(probability × 100)` where `probability` is that of the predicted class, so it is never below 50. There is no `model_version`, `training_accuracy` or `features_used` field. Errors: `{"error": "..."}`.
+
+**Training (`lib/train_ml_model.py`):** no command-line options. It trains on 200 synthetic samples for each of `AAPL, MSFT, GOOGL, AMZN, TSLA, NVDA, META, JPM, BRK.B, V`, 80/20 split, hyperparameters `max_depth=6`, `learning_rate=0.1`, `n_estimators=100`, `random_state=42`. It overwrites `lib/models/xgboost_predictor.pkl` and writes a report to the hard-coded `/Users/P3291917/Builds/6/.agents/tasks/ml-training-report.md`.
+
+```bash
+python3 lib/train_ml_model.py     # overwrites the existing model
+```
+
+**How to Enhance:**
+1. Add argparse (symbols, days, report path) and real data loading to `train_ml_model.py`.
+2. Tune `XGBOOST_PARAMS` in `train_ml_model.py` (e.g. `max_depth` 3–7, `learning_rate` 0.01–0.3, `n_estimators` 100–500, add `subsample`).
+3. Add features in both `extract_features_from_data()` and `generate_synthetic_features_for_symbol()` in `ml_inference.py`, update `feature_names` in `predict()`, and match the training script; then retrain.
+4. Test: `bash tests/test_ml_predictor.sh`.
 
 ---
 
 ### Enhancement 2: Regime-Adaptive Weighting
 
-**Purpose:** Dynamically weight trading strategies based on market regime (+3-5% win rate improvement)
+**Purpose:** Weight mean-reversion vs trend-following scores by market regime. No win-rate improvement has been measured.
 
 **Files:**
-- `lib/regime_detector.sh` - Market regime classification
-- `lib/regime_weighting.sh` - Apply adaptive weights
+- `lib/regime_detector.sh`: regime classification (15-minute cache in `REGIME_CACHE_DIR`, default `~/.stockswingtrader/regime_cache`)
+- `lib/regime_weighting.sh`: weights, confidence multiplier, stop-loss adjustment
 
-**Regimes:**
-1. **Sideways:** ADX < 20, low volatility
-   - Weights: 70% MeanReversion + 30% TrendFollow
-   - Rationale: Mean reversion works better in range-bound markets
+**Detection (`detect_market_regime SYMBOL [lookback]`):** currently runs on a hard-coded 30-price mock series, not market data. It computes EMA20, EMA50 (falls back to the mean when < 50 prices), Bollinger(20,2), an ADX approximation `min(100, |EMA20 − EMA50| × 10)`, and volatility = BB width % (capped at 100). Rules, in order:
+1. volatility > 20 → `volatile`
+2. ADX > 25 and EMA20 > EMA50 → `trending_bull`; ADX > 25 and EMA20 < EMA50 → `trending_bear`
+3. otherwise → `sideways`
 
-2. **Trending (Bullish):** ADX > 25, uptrend
-   - Weights: 30% MeanReversion + 70% TrendFollow
-   - Rationale: Follow the trend in strong uptrends
+`detect_market_regime_kalman SYMBOL PRICES...` does the same on Kalman-filtered prices you pass in.
 
-3. **Trending (Bearish):** ADX > 25, downtrend
-   - Weights: 30% MeanReversion + 70% TrendFollow
-   - Rationale: Follow the trend down
+**Weights (`get_regime_weights REGIME`):**
 
-4. **Volatile:** High volatility, ADX neutral
-   - Adjustment: -20% to overall score
-   - Stop-loss adjustment: +2% (wider stops)
-   - Rationale: Reduce position sizing in uncertainty
+| Regime | MR % | TF % | `confidence_multiplier` | `stop_loss_adjustment` |
+|---|---|---|---|---|
+| `sideways` | 70 | 30 | 1.0 | 0 |
+| `trending_bull` / `trending_bear` | 30 | 70 | 1.1 | 0 |
+| `volatile` | 50 | 50 | 0.8 | 2 |
+| other | 50 | 50 | 1.0 | 0 |
+
+`apply_regime_weights` multiplies the weighted score by `apply_confidence_multiplier`: sideways 1.0, trending_bull 1.1, trending_bear 1.05, volatile 0.8 (0.7 when measured volatility > 25). `calculate_confluence_score_v2` uses its own weights and does not apply this multiplier.
 
 **How to Use:**
 
 ```bash
-# Detect market regime
+export REGIME_CACHE_DIR=$(mktemp -d)   # optional: isolate the cache
 source lib/regime_detector.sh
-detect_regime "AAPL"
+detect_market_regime AAPL
+# {"regime":"sideways","adx":16.30,"trend":"up","volatility":7.56,"ema_20":106.68,"ema_50":105.05,
+#  "bb_upper":110.63,"bb_middle":106.60,"bb_lower":102.57,"symbol":"AAPL","timestamp":"..."}
 
-# Expected output:
-# {
-#   "regime": "trending_bull",
-#   "adr": 0.75,
-#   "volatility": "normal",
-#   "trend_strength": "strong"
-# }
-
-# Apply adaptive weights
 source lib/regime_weighting.sh
-apply_regime_weights "trending_bull" 65 72
+apply_regime_weights AAPL 65 72 trending_bull     # SYMBOL MR_SCORE TF_SCORE [REGIME]
+```
 
-# Output: {"weighted_score": 71.4, "mr_weight": 0.30, "tf_weight": 0.70}
+```json
+{
+  "symbol": "AAPL",
+  "regime": "trending_bull",
+  "combined_score": 76.89,
+  "original_mr_score": 65.00,
+  "original_tf_score": 72.00,
+  "weights": {
+    "mr_weight_pct": 30,
+    "tf_weight_pct": 70,
+    "weighted_mr_contribution": 19.50,
+    "weighted_tf_contribution": 50.40
+  },
+  "volatility_pct": 0.00,
+  "confidence_adjustment": 1.10,
+  "stop_loss_adjustment_pct": 0,
+  "recommendation": "trend_follow_buy",
+  "regime_analysis": { "favors_strategy": "trend_following", "risk_level": "moderate" },
+  "timestamp": "..."
+}
+```
+
+When REGIME is omitted, `detect_market_regime` is called. `recommendation` values: `mean_reversion_buy`, `trend_follow_buy`, `trend_follow_short`, `hold_wait`, `selective_entry`, `hold_high_risk`, `hold`.
+
+```bash
+get_regime_weights volatile
+# {"mr_weight": 50, "tf_weight": 50, "confidence_multiplier": 0.8, "stop_loss_adjustment": 2}
+calculate_adjusted_stop_loss volatile 3 50     # REGIME BASE_STOP_PCT VOLATILITY → 5.00
 ```
 
 **How to Enhance:**
-
-1. **Adjust regime thresholds** in `lib/regime_detector.sh`:
-   ```bash
-   ADX_TRENDING=25        # Adjust trend strength threshold
-   ADX_STRONG=40          # Strong trend threshold
-   VOLATILITY_THRESHOLD=2.5  # Volatility cutoff
-   ```
-
-2. **Modify weight distribution** in `lib/regime_weighting.sh`:
-   ```bash
-   # Current: sideways = 70/30, trending = 30/70
-   # Try: sideways = 75/25, trending = 25/75 (more aggressive)
-   ```
-
-3. **Add new regimes:**
-   - Add regime classification logic in `detect_regime()`
-   - Define new weight distributions
-   - Test on historical data
-
-4. **Testing:**
-   ```bash
-   # Mock market conditions
-   bash tests/test_regime_detector.sh
-   bash tests/test_regime_weighting.sh
-   
-   # Verify weight application
-   source lib/regime_weighting.sh
-   apply_regime_weights "sideways" 60 60  # Should favor MR
-   apply_regime_weights "trending_bull" 60 60  # Should favor TF
-   ```
-
-**JSON Schema:**
-```json
-{
-  "regime": {
-    "current": "trending_bull|trending_bear|sideways|volatile",
-    "adr": 0.75,
-    "volatility": "normal|high|low",
-    "trend_strength": "weak|normal|strong",
-    "adx": 32.5,
-    "volatility_index": 18.5
-  },
-  "weights": {
-    "mean_reversion_weight": 0.30,
-    "trend_follow_weight": 0.70,
-    "applied": true,
-    "score_adjustment": 0
-  }
-}
-```
+1. Replace the mock closes in `detect_market_regime` with real OHLC data (e.g. `alpaca_get_bars` or yfinance).
+2. Replace the ADX approximation with `calc_adx` on real high/low/close.
+3. Thresholds are literals in `detect_market_regime` (volatility `20`, ADX `25`); there are no `ADX_TRENDING`/`VOLATILITY_THRESHOLD` variables yet.
+4. Change weights in `get_regime_weights` **and** in the `case "$regime"` block of `calculate_confluence_score_v2` (they are duplicated).
+5. Test: `bash tests/test_regime_detector.sh` and `bash tests/test_regime_weighting.sh`.
 
 ---
 
 ### Enhancement 3: React Dashboard
 
-**Purpose:** Professional UI for real-time analysis and trade management
+**Frontend stack (`frontend/package.json`):** React 18, TypeScript, Vite 5, react-router-dom 6, Recharts, Tailwind CSS, axios, lucide-react. Data fetching uses a custom polling hook (`frontend/src/hooks/usePolling.ts`), not TanStack Query.
 
-**Frontend Stack:**
-- React 18+ with TypeScript
-- Vite for bundling
-- Recharts for data visualization
-- Tailwind CSS for styling
-- TanStack Query for data fetching
+**Backend stack (`backend/package.json`):** Node.js + Express, cors. Routes run lib scripts with `execFile` (no shell interpolation). `dotenv`, `axios`, `ws`, `bull`, `redis` are listed as dependencies but not used by `server.js`.
 
-**Backend Stack:**
-- Node.js + Express
-- RESTful API endpoints
-- 5-second polling interval
+**Ports:**
+- Backend: `PORT` env var, default **3000** (`server.js`, `backend/start.sh`).
+- Frontend dev server: **5173**, `strictPort: true`; Vite proxies `/api` → `http://localhost:3000` (`frontend/vite.config.ts`). The frontend calls `/api` by default, or `VITE_API_BASE_URL`.
 
-**Files:**
-- `frontend/src/` - React components
-- `backend/server.js` - Express API server
-- `backend/package.json` - Dependencies
+**Polling:** default 5000 ms (`DEFAULT_POLLING_INTERVAL_MS` in `frontend/src/utils/preferences.ts`), minimum 1000 ms, changeable on the Settings page and stored in browser localStorage.
 
-**Pages:**
+**Pages (`frontend/src/App.tsx`):**
 
-1. **Dashboard** (`/`)
-   - Real-time watchlist with scores
-   - Heat map of buy/sell signals
-   - Portfolio overview
-   - Quick stats (signals count, avg confidence)
+| Route | Page | Content |
+|---|---|---|
+| `/` | Dashboard | Stat cards (symbols, buy/sell/hold counts, average score), signal-score bar chart, watchlist signals table, portfolio, statistics |
+| `/analysis?symbol=AAPL` | Analysis | Signals, indicators and quote for one symbol, indicator bar chart |
+| `/trades` | TradeHistory | Trades, win rate, total P&L, per-trade Sharpe, filters (symbol, outcome, from date), cumulative P&L chart, backtest results |
+| `/watchlist` | Watchlist | Add/remove symbols, alerts (price above/below, score at least); stored in the browser |
+| `/settings` | Settings | Polling interval; editable `RISK_PER_TRADE`, `MAX_POSITION_SIZE`, `MIN_CONFLUENCE_SCORE`, `TRADING_ENABLED`; other `config.sh` values read-only (secrets masked) |
+| `*` | NotFound | 404 page |
 
-2. **Analysis** (`/analysis`)
-   - Deep dive into single symbol
-   - Full indicator breakdown
-   - Historical signals
-   - Regime & ML prediction details
+**API endpoints (`backend/server.js`):**
 
-3. **TradeHistory** (`/trades`)
-   - Past trades with P&L
-   - Win rate, Sharpe ratio
-   - Filter by date, symbol, outcome
+| Method & Path | Backed by | Status at `532828e` |
+|---|---|---|
+| `GET /api/health` | — | `{"status":"healthy","timestamp":...}` |
+| `GET /api/portfolio` | `lib/alpaca_broker.sh get-portfolio` | `{"raw":""}` (no such sub-command) |
+| `GET /api/quotes/:symbol` | `lib/alpaca_broker.sh get-quote SYMBOL` | `{"symbol":...,"raw":""}` |
+| `GET /api/signals/:symbol` | `lib/scoring.sh SYMBOL` | `{"symbol":...,"raw":""}` (scoring.sh has no CLI) |
+| `GET /api/indicators/:symbol` | `lib/indicators_new.sh SYMBOL` | `{"symbol":...,"raw":""}` |
+| `GET /api/trades` | `.trades/trade_log.json` | `{"trades":[],"message":"No trade history available"}` when missing |
+| `GET /api/stats` | `lib/risk_management.sh calculate-stats` | `{"raw":""}` |
+| `GET /api/settings` | `config.sh` | values with secrets masked |
+| `POST /api/settings` | `config.sh` | whitelist above; 400 for other keys/invalid values; 404 if the key is not already in `config.sh` (`RISK_PER_TRADE`, `MIN_CONFLUENCE_SCORE`, `TRADING_ENABLED` are not in the template) |
+| `GET /api/backtest` | `BACKTEST_OUTPUT_DIR/*.json` | list of `{file, data}` |
 
-4. **Watchlist** (`/watchlist`)
-   - Manage symbol watchlist
-   - Add/remove symbols
-   - Set alerts (price, score thresholds)
-
-5. **Settings** (`/settings`)
-   - Configure polling interval
-   - Indicator weights
-   - Risk management parameters
-   - API credentials
+Invalid symbols return 400. There are no `/api/analysis` or `/api/watchlist` endpoints (404).
 
 **How to Use:**
 
 ```bash
-# Start backend server
-cd backend && npm install && npm start
-# Server runs on http://localhost:3001
-
-# Start frontend (in another terminal)
-cd frontend && npm install && npm run dev
-# Frontend runs on http://localhost:5173
-
-# Access dashboard at http://localhost:5173
+cd backend && npm install && npm start      # http://localhost:3000
+cd frontend && npm install && npm run dev   # http://localhost:5173
+cd frontend && npm run build                # tsc --noEmit + vite build → frontend/dist
 ```
+
+`./StockSwingTrader_Agent.sh --dashboard` does **not** start these servers (issue 2).
 
 **How to Enhance:**
-
-1. **Add new page:**
-   ```bash
-   # Create component in frontend/src/pages/NewPage.tsx
-   # Add route in frontend/src/App.tsx
-   # Add API endpoint in backend/server.js
-   ```
-
-2. **Add new API endpoint:**
-   ```javascript
-   // In backend/server.js
-   app.get('/api/new-endpoint', async (req, res) => {
-     // Call trading system via shell
-     // Return JSON response
-   });
-   ```
-
-3. **Update polling interval:**
-   ```typescript
-   // In frontend/src/utils/api.ts
-   const POLLING_INTERVAL = 5000;  // Change from 5s to desired value
-   ```
-
-4. **Add chart visualization:**
-   - Use Recharts components
-   - Reference existing charts for style consistency
-   - Test data flow from backend
-
-**Testing:**
-```bash
-# Backend API tests
-npm test --prefix backend
-
-# Frontend component tests
-npm test --prefix frontend
-
-# E2E tests (if configured)
-npm run e2e --prefix frontend
-```
-
-**JSON Schema - Dashboard API:**
-```json
-{
-  "watchlist": [
-    {
-      "symbol": "AAPL",
-      "price": 235.45,
-      "score": 71,
-      "signal": "BUY",
-      "confidence": "HIGH",
-      "timestamp": "2024-10-30T14:30:00Z"
-    }
-  ],
-  "stats": {
-    "total_signals": 15,
-    "buy_signals": 7,
-    "sell_signals": 3,
-    "hold_signals": 5,
-    "avg_confidence": 72.5
-  }
-}
-```
+1. New page: add `frontend/src/pages/NewPage.tsx`, a `<Route>` and `NavLink` in `frontend/src/App.tsx`, an API function in `frontend/src/utils/api.ts`.
+2. New endpoint: follow the existing routes in `backend/server.js` (validate input, call `runScript(scriptPath, args, timeout)`, return JSON).
+3. Fix the `{"raw":""}` endpoints by adding CLI dispatchers to the lib scripts or pointing routes at functions that exist.
+4. Tests: `npm test --prefix backend` (runs `tests/test_backend.js`), `npm test --prefix frontend` (runs `tests/test_dashboard.js`). There is no e2e script.
 
 ---
 
-### Enhancement 4: Complete Backtesting Module
-
-**Purpose:** Validate strategies with parameter optimization and performance analysis
+### Enhancement 4: Backtesting Module
 
 **Files:**
-- `lib/backtest.sh` - Bash backtesting framework
-- `lib/backtest_engine.py` - Python backtesting engine
-- Output: `.agents/tasks/backtest_results/` directory
+- `lib/backtest.sh`: Bash library (no CLI; running it directly does nothing)
+- `lib/backtest_engine.py`: engine, called as `python3 lib/backtest_engine.py CONFIG_JSON`
 
-**Features:**
-- Train/test split: 80/20 by default
-- Grid search optimization for:
-  - RSI thresholds: 20-40 (oversold), 60-80 (overbought)
-  - Bollinger Band periods: 15-25
-  - Stop-loss: 1-3% of ATR
-  - Profit target: 1-3x risk
-- Performance metrics:
-  - Win rate (%)
-  - Sharpe ratio
-  - Max drawdown
-  - Payoff ratio (avg win / avg loss)
-  - Profit factor (gross profit / gross loss)
-  - Total return (%)
+**What it really does:**
+- Data: yfinance daily bars; synthetic data when `SST_OFFLINE=1`, yfinance is missing or returns nothing.
+- Split: `train_pct` (default 80). Strategies run on the **test** portion only; the train portion is unused.
+- Strategies with fixed parameters: mean reversion (RSI(14) < 30 and close < lower BB(20, 2.0) → buy; RSI > 70 and close > upper BB → sell) and trend follow (EMA12/EMA26 crossover). The better total P&L is reported.
+- Long-only, buys with 95% of cash, exits only on a sell signal (no stops or targets). Slippage 0.1%, commission 0.01%, initial capital 100,000.
+- The parameter grid in `backtest.sh` (`RSI_MIN..RSI_MAX`, `BB_STD_*`, `STOP_LOSS_*`, `PROFIT_TARGET_*`) is written to the config but **ignored** by the engine. No grid search or `--optimize` exists.
+- Metrics: `total_pnl`, `win_rate` (%), `sharpe_ratio`, `max_drawdown` (%), `profit_factor` (0 when there are no losses), `payoff_ratio` (divides by 1 when there are no losses), `num_trades`.
 
 **How to Use:**
 
 ```bash
-# Run backtest on historical data
-./lib/backtest.sh --symbol AAPL --start 2022-01-01 --end 2024-01-01
+export BACKTEST_OUTPUT_DIR=$PWD/output/backtests   # default is a hard-coded /Users/P3291917/... path
+source lib/backtest.sh
+backtest_strategy AAPL 2023-01-01 2023-12-31 80            # SYMBOL START END [TRAIN_PCT]
+backtest_multi_symbol "AAPL,MSFT" 2022-01-01 2024-01-01 80 # + portfolio_summary_<ts>.json
 
-# Run with parameter optimization
-./lib/backtest.sh --symbol AAPL --start 2022-01-01 --end 2024-01-01 --optimize
-
-# Expected output files:
-# .agents/tasks/backtest_results/AAPL_backtest_results.json
-# .agents/tasks/backtest_results/AAPL_backtest_report.html
-# .agents/tasks/backtest_results/AAPL_trades.csv
+# Offline (synthetic data):
+SST_OFFLINE=1 bash -c 'source lib/backtest.sh; backtest_strategy AAPL 2023-01-01 2023-12-31 80'
 ```
 
-**How to Enhance:**
+`./StockSwingTrader_Agent.sh --backtest AAPL --start 2023-01-01 --end 2023-12-31` is the intended CLI form but currently fails (issue 1).
 
-1. **Add new parameter ranges:**
-   ```python
-   # In lib/backtest_engine.py
-   PARAM_GRID = {
-       'rsi_oversold': [20, 25, 30, 35, 40],
-       'rsi_overbought': [60, 65, 70, 75, 80],
-       'bb_period': [15, 20, 25],
-       'stop_loss_pct': [0.01, 0.02, 0.03],
-       'profit_target_mult': [1.0, 1.5, 2.0, 2.5, 3.0]
-   }
-   ```
+**Output files** (in `BACKTEST_OUTPUT_DIR`):
+- `backtest_<SYMBOL>_<YYYYmmdd_HHMMSS>.json`
+- `backtest_<SYMBOL>_<YYYYmmdd_HHMMSS>.html`
+- `backtest_<SYMBOL>_<YYYYmmdd_HHMMSS>.csv` (only when there are trades)
+- `portfolio_summary_<timestamp>.json` (from `backtest_multi_symbol`)
 
-2. **Add new metrics:**
-   ```python
-   def calculate_custom_metric(trades):
-       """Custom performance metric"""
-       return metric_value
-   
-   results['custom_metric'] = calculate_custom_metric(trades)
-   ```
+**Output schema (results JSON):**
 
-3. **Modify backtest engine:**
-   - Change order execution logic
-   - Add slippage/commission modeling
-   - Implement position sizing rules
-
-4. **Testing:**
-   ```bash
-   # Test on known historical periods
-   ./lib/backtest.sh --symbol AAPL --start 2023-01-01 --end 2023-12-31
-   
-   # Verify results match manual calculations
-   jq . .agents/tasks/backtest_results/AAPL_backtest_results.json
-   ```
-
-**Output Schema:**
 ```json
 {
   "symbol": "AAPL",
-  "period": {
-    "start": "2022-01-01",
-    "end": "2024-01-01",
-    "days": 730
-  },
-  "parameters": {
-    "rsi_oversold": 30,
-    "rsi_overbought": 70,
-    "bb_period": 20,
-    "stop_loss_pct": 0.02,
-    "profit_target_mult": 2.0
-  },
-  "performance": {
-    "total_trades": 45,
-    "winning_trades": 28,
-    "losing_trades": 17,
-    "win_rate": 0.622,
-    "avg_win": 245.50,
-    "avg_loss": -152.30,
-    "profit_factor": 1.85,
-    "payoff_ratio": 1.61,
-    "sharpe_ratio": 1.42,
-    "max_drawdown": -0.157,
-    "total_return_pct": 24.5,
-    "annual_return_pct": 11.2
-  },
-  "optimization": {
-    "best_parameters": {...},
-    "optimization_iterations": 125,
-    "best_sharpe": 1.68
-  }
+  "strategy": "mean_reversion|trend_follow",
+  "period": "2023-01-01 to 2023-12-31",
+  "data_points": 52,
+  "initial_capital": 100000,
+  "final_capital": 100000,
+  "total_pnl": 0,
+  "win_rate": 0,
+  "sharpe_ratio": 0,
+  "max_drawdown": 0,
+  "profit_factor": 0,
+  "payoff_ratio": 0,
+  "num_trades": 0,
+  "equity_curve": [ ... ],
+  "trade_journal": [ ... ]
 }
 ```
+
+(Values from an `SST_OFFLINE=1` run.)
+
+**How to Enhance:**
+1. Make the engine read `parameter_grid` and search it on the train split, then evaluate on the test split.
+2. Add stop-loss/take-profit exits and position sizing (`lib/risk_management.sh` has helpers).
+3. Add metrics in `Strategy.calculate_metrics()` in `backtest_engine.py`.
+4. Add a CLI dispatcher to `lib/backtest.sh`.
+5. Test: `bash tests/test_backtest.sh`.
 
 ---
 
 ### Enhancement 5: Kalman Filter
 
-**Purpose:** Smooth price data to reduce false signals and estimate volatility
+**Files:** `lib/kalman_filter.sh` (Bash wrapper with a Bash fallback), `lib/kalman_inference.py` (`KalmanFilter1D`).
 
-**Files:**
-- `lib/kalman_filter.sh` - Bash wrapper
-- `lib/kalman_inference.py` - Kalman filter implementation
-
-**Parameters:**
-- `q` (process noise): 0.01 (lower = smoother but slower to react)
-- `r` (measurement noise): 0.1 (lower = trusts observed price more)
-- Output: Filtered prices, state estimate, covariance, residuals, volatility
+**Model:** 1-D filter. `q` = process noise (default 0.01), `r` = measurement noise (default 0.1). Higher `q` or lower `r` follows prices more closely; lower `q` or higher `r` smooths more.
 
 **How to Use:**
 
 ```bash
-# Apply Kalman filter to price data
 source lib/kalman_filter.sh
-apply_kalman_filter "AAPL" "prices.json"
-
-# Expected output:
-# {
-#   "filtered_prices": [234.10, 234.15, 234.25, ...],
-#   "state": [235.43, 0.02],
-#   "covariance": [[1.2, 0.0], [0.0, 0.1]],
-#   "residuals": 0.02,
-#   "volatility_estimate": 1.85
-# }
+apply_kalman_filter 100 101 99 102 103 -q 0.01 -r 0.1     # prices as arguments
+apply_kalman_filter_fast '[100,101,99,102,103]' 0.01 0.1   # JSON array, q, r
+echo '[100,101,99,102]' | python3 lib/kalman_inference.py 0.05 0.05
 ```
 
-**How to Enhance:**
+**Output schema (Python path):**
 
-1. **Tune parameters for different market conditions:**
-   ```bash
-   # High volatility markets: increase q, decrease r
-   q=0.05  # More responsive to price changes
-   r=0.05  # Trust observed prices more
-   
-   # Stable markets: decrease q, increase r
-   q=0.005  # Smoother filtering
-   r=0.2    # Less sensitive to noise
-   ```
-
-2. **Add multi-scale Kalman (multi-timeframe):**
-   - Apply separate Kalman filters for 5-min and daily candles
-   - Compare smoothed price trends across timeframes
-   - Improve signal confidence
-
-3. **Implement adaptive Kalman:**
-   - Adjust q/r based on market volatility
-   - Higher volatility → increase q (less smoothing)
-   - Lower volatility → decrease q (more smoothing)
-
-4. **Testing:**
-   ```bash
-   # Test on noisy data
-   python lib/kalman_inference.py test --noise 2.0
-   
-   # Measure whipsaw reduction
-   # Compare signals before/after Kalman filtering
-   ```
-
-**JSON Schema:**
 ```json
 {
-  "kalman_filter": {
-    "parameters": {
-      "q": 0.01,
-      "r": 0.1
-    },
-    "prices": {
-      "raw": [234.10, 234.50, 233.90, 235.20],
-      "filtered": [234.12, 234.35, 234.10, 234.80]
-    },
-    "state": [235.43, 0.02],
-    "covariance": [[1.2, 0.0], [0.0, 0.1]],
-    "residuals": 0.02,
-    "volatility_estimate": 1.85
-  }
+  "filtered_prices": [100.0, 100.502465, 99.937596, 100.602671, 101.314678],
+  "residuals": [0.0, 1.0, -1.502465, 2.062404, 2.397329],
+  "state": 101.314678,
+  "covariance": 0.0297,
+  "q": 0.01,
+  "r": 0.1,
+  "count": 5,
+  "volatility": 0.943883,
+  "smoothness_improvement": 65.08
 }
 ```
+
+`state` and `covariance` are scalars. The Bash fallback (no `python3`) omits `volatility` and `smoothness_improvement`. Errors include `"error": "empty_input"` or `"invalid_input: ..."`.
+
+**How to Enhance:**
+1. Feed real prices into `detect_market_regime_kalman` and pass its trend into `calculate_confluence_score_v2` as `kalman_trend`.
+2. Adaptive q/r based on residual volatility (future idea).
+3. Multi-timeframe filtering (future idea).
+4. Test: `bash tests/test_kalman_filter.sh`.
 
 ---
 
 ## Scoring Pipeline Integration
 
-### Confluence Score Calculation
+See [Data Flow & Pipeline](#data-flow--pipeline) for both formulas. Summary:
 
 ```
-Final Score = (Technical × 0.30) + (ML × 0.15) + (RegimeWeighted × 0.35) + (VolumeTrend × 0.20)
+Legacy (CLI):  final = mean(rsi, macd, bb, stoch, williams, obv) × 0.8 + sentiment × 0.2
 
-Where:
-  Technical Score (0-100):
-    - Confluence of RSI, MACD, Bollinger, Stochastic signals
-    - Example: 3 out of 4 indicators bullish = 75 points
-  
-  ML Score (0-100):
-    - XGBoost confidence (0-100)
-    - Minimum 35 to generate signal
-  
-  Regime-Weighted Score (0-100):
-    - Base scores from Mean Reversion & Trend Following strategies
-    - Weighted by detected market regime
-    - Sideways: 70% MR + 30% TF
-    - Trending: 30% MR + 70% TF
-  
-  Volume/Trend Score (0-100):
-    - OBV trend confirmation
-    - Volume relative to 20-day average
-    - EMA crossovers (20/50)
-
-Regime Adjustments:
-  - Volatile: -20 to final score, +2% to stop-loss
-  - Strong trend: +5 to confidence if aligned
+v2 (library):  confluence = ML × 0.15 + RegimeWeighted × 0.35 + Technical × 0.30 + VolumeTrend × 0.20
+  ML           ml_predictor confidence (50–100), or 50 on error/timeout
+  Regime       sideways 70/30, trending 30/70, volatile 50/50 × 0.8 (MR/TF)
+  Technical    (rsi + macd + bb) / 3
+  VolumeTrend  OBV blended with Kalman trend (75 up / 25 down, 20% weight)
 ```
 
-### Main Agent Flags
+To wire v2 into the CLI: fix `SCRIPT_DIR` in `lib/scoring.sh` (use a local variable), compute MR/TF scores, regime and Kalman trend in `analyze_stock`, then call `calculate_confluence_score_v2` instead of `calculate_confluence_score`.
+
+---
+
+## Main Agent Flags
+
+From the `case` parser in `main()` and `./StockSwingTrader_Agent.sh --help`:
+
+| Flag | Effect | Works at `532828e`? |
+|---|---|---|
+| `--symbols A,B` | Analyze listed symbols | Runs; demo data, no report (issues 1, 4) |
+| `--watchlist FILE` | Symbols from file | Needs bash 4 (issue 6) |
+| `--top-10` | Fixed list `AAPL MSFT GOOGL AMZN TSLA META NFLX CRM ADBE NVDA` | Same as `--symbols` |
+| `--output-dir DIR` | Report directory (default `output/reports`) | — |
+| `--debug` | `DEBUG_MODE=true` | Yes |
+| `--version` | Print version/features | Yes |
+| `--help` | Usage | Yes |
+| `--ml` | Source `lib/ml_predictor.sh` | Skipped (issue 1) |
+| `--regime-adapt` | Source `lib/regime_adaptive.sh` | Skipped, file missing (issue 2) |
+| `--kalman` | Source `lib/kalman_filter.sh` | Skipped (issue 1) |
+| `--dashboard` | Source `lib/dashboard.sh`, call `start_dashboard_servers` | Skipped, file missing (issue 2) |
+| `--full` | `--ml --regime-adapt --kalman --dashboard` | Same as above |
+| `--broker alpaca\|robinhood` | Broker choice (default `alpaca`) | — |
+| `--check-account`, `--view-positions` | Broker account/positions | Module not found (issue 1) |
+| `--buy SYMBOL QTY`, `--sell SYMBOL QTY` | Place order with confirmation | Module not found (issue 1) |
+| `--alpaca`, `--place-buy`, `--place-sell`, `--alpaca-status` | Deprecated Alpaca aliases | Same |
+| `--backtest SYMBOLS` | Run `backtest_multi_symbol` | Module not found (issue 1) |
+| `--start DATE`, `--end DATE` | Backtest dates (defaults: 2 years ago, today) | — |
+| `--train-pct PCT` | Train split (default 80) | — |
+
+Verified examples:
 
 ```bash
-# Basic analysis (technical + sentiment)
-./StockSwingTrader_Agent.sh --symbols AAPL,MSFT
-
-# Add ML predictions (15% weight)
-./StockSwingTrader_Agent.sh --symbols AAPL,MSFT --ml
-
-# Add regime-adaptive weighting (35% weight)
-./StockSwingTrader_Agent.sh --symbols AAPL,MSFT --regime-adapt
-
-# Add Kalman filter for smoothing
-./StockSwingTrader_Agent.sh --symbols AAPL,MSFT --kalman
-
-# Run backtesting
-./StockSwingTrader_Agent.sh --backtest AAPL 2022-01-01 2024-01-01
-
-# Start dashboard
-./StockSwingTrader_Agent.sh --dashboard
-
-# Enable ALL enhancements
-./StockSwingTrader_Agent.sh --symbols AAPL,MSFT --full
+./StockSwingTrader_Agent.sh --help
+./StockSwingTrader_Agent.sh --version
+./StockSwingTrader_Agent.sh --symbols AAPL,MSFT --output-dir /tmp/sst_reports
+./StockSwingTrader_Agent.sh --backtest AAPL --start 2023-01-01 --end 2023-12-31   # correct syntax; fails until issue 1 is fixed
 ```
+
+The agent logs to `LOG_FILE` (default `logs/agent.log`, relative to the current directory) and creates `logs/`.
+
+---
+
+## Setup & Configuration
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+pip install yfinance      # optional: real data for ML inference and backtests (not in requirements.txt)
+# requirements.txt pins numpy 1.24.3 / pandas 2.0.3, which only build on Python ≤ 3.11.
+# On Python 3.12+ install unpinned instead:
+pip install xgboost pandas numpy scikit-learn scipy joblib filterpy requests
+
+(cd backend && npm install)
+(cd frontend && npm install)
+```
+
+Configuration:
+- `config.template.sh` is tracked, has no secrets, and is the only config the agent sources. Its placeholder `API_KEY_ALPHA_VANTAGE`/`API_KEY_FINNHUB`/`API_KEY_NEWSAPI` values override anything exported earlier; Alpaca keys are read from the environment.
+- `config.sh` and `config.robinhood.sh` are untracked (in `.gitignore`). Create yours with `cp config.template.sh config.sh` and fill in keys. The backend Settings API and the helper scripts (`RUN_TRADING.sh`, `CHECK_ACCOUNT.sh`, `CHECK_ORDERS.sh`) read `config.sh`.
+- To edit `RISK_PER_TRADE`, `MIN_CONFLUENCE_SCORE` and `TRADING_ENABLED` from the dashboard, add `export` lines for them to `config.sh` first.
+
+Environment variables used by the code: `LOG_FILE`, `DEBUG_MODE`, `BROKER_CHOICE`, `ML_TIMEOUT_SECONDS`, `SST_OFFLINE`, `REGIME_CACHE_DIR`, `BACKTEST_OUTPUT_DIR`, `DEBUG_BACKTEST`, `PORT`, `SST_BASE_PATH`, `SST_LOG_FILE`, `VITE_API_BASE_URL`.
 
 ---
 
@@ -951,405 +652,172 @@ Regime Adjustments:
 
 ### Code Style & Conventions
 
-1. **Bash Scripts:**
-   - Use `#!/bin/bash` shebang
-   - Set `set -o pipefail` at top
-   - Use `UPPERCASE` for constants/globals
-   - Use `lowercase_with_underscores` for functions/variables
-   - Document functions with comment block:
-     ```bash
-     ##############################################################################
-     # Function: my_function
-     # Description: What this does
-     # Arguments: $1 - arg1 description, $2 - arg2 description
-     # Returns: JSON object or error message
-     # Example: my_function "value" "another"
-     ##############################################################################
-     ```
-
-2. **Python Scripts:**
-   - Follow PEP 8 style guide
-   - Type hints for function signatures
-   - Docstrings for all functions:
-     ```python
-     def my_function(arg1: str, arg2: int) -> dict:
-         """
-         Brief description.
-         
-         Args:
-             arg1: Description
-             arg2: Description
-         
-         Returns:
-             dict: Description of return value
-         """
-     ```
-
-3. **JSON Output:**
-   - Always return valid JSON or error JSON
-   - Success: `{"data": {...}, "status": "success"}`
-   - Error: `{"error": "message", "code": "ERROR_CODE"}`
-   - Use ISO 8601 timestamps: `2024-10-30T14:30:00Z`
+1. **Bash:** `#!/bin/bash`, `set -o pipefail` (agent and `backtest.sh`), `UPPERCASE` globals, `lowercase_with_underscores` functions. Library files are sourced, so do not reassign shared globals such as `SCRIPT_DIR` at file scope (that is the cause of issue 1); use a file-specific name. Document functions with a comment block (description, args, returns, example). Remember macOS ships bash 3.2: avoid `mapfile`, associative arrays and `${var,,}`, or require bash 4 explicitly.
+2. **Python:** PEP 8, type hints where practical, docstrings.
+3. **JSON output:** modules print a JSON object on success and `{"error": "..."}` on failure (there is no common `status`/`code` envelope). Timestamps are ISO 8601 UTC (`date -u +%Y-%m-%dT%H:%M:%SZ`).
+4. **Backend:** pass arguments as arrays to `execFile`; validate symbols and settings before use.
 
 ### Module Development Workflow
 
-1. **Create new module:**
-   ```bash
-   # Create file in lib/
-   touch lib/my_new_module.sh
-   chmod +x lib/my_new_module.sh
-   
-   # Add header documentation
-   # Implement functions
-   # Add to main agent
-   ```
+1. Create `lib/my_module.sh`, add a header and functions; if it should run as a script, add a `if [[ "${BASH_SOURCE[0]}" == "${0}" ]]` dispatcher like `lib/ml_predictor.sh`.
+2. Integrate: `source "$SCRIPT_DIR/lib/my_module.sh"` in the agent, add a flag in the `case` parser in `main()`, document it in `usage()`.
+3. Add a test script in `tests/` and register it in `tests/test_runner.sh` with `add_test "Name" "${SCRIPT_DIR}/test_my_module.sh"`.
 
-2. **Integration with main agent:**
-   ```bash
-   # Source the module
-   source "$SCRIPT_DIR/lib/my_new_module.sh"
-   
-   # Add command-line flag
-   # Call function in analysis pipeline
-   ```
+### Goals (not measured)
 
-3. **Error handling:**
-   - Always check for required files/dependencies
-   - Return JSON error format on failure
-   - Log errors to LOG_FILE
-   - Exit with code 1 on fatal errors
-
-### Performance Targets
-
-- **Latency:** < 5 seconds per symbol for full pipeline
-  - Data fetch: < 1s
-  - Indicators: < 1s
-  - ML prediction: < 0.5s
-  - Regime detection: < 0.5s
-  - Scoring: < 0.5s
-  - Report generation: < 1s
-
-- **Memory:** < 500MB for single symbol analysis
-- **Accuracy:** Track prediction accuracy in backtests
-
-### All Modules Must
-
-- [ ] Output valid JSON (success or error format)
-- [ ] Have proper error handling
-- [ ] Include timeout mechanisms
-- [ ] Log to LOG_FILE
-- [ ] Have documentation comments
-- [ ] Be testable independently
-- [ ] Support dry-run/demo mode
+These are targets, not verified benchmarks: under 5 s per symbol for the full pipeline, and modules that emit valid JSON, handle errors, time out external calls and are testable on their own.
 
 ---
 
-## Testing Checklist
+## Testing
 
-- [ ] **Unit Tests**
-  - Each module tests independently
-  - Test success and error paths
-  - Mock external API calls
-  - Run: `bash tests/test_indicators.sh`
+`bash tests/test_runner.sh` runs 9 suites and writes `.agents/tasks/test-report.md`. Last verified result: **9 suites, 229/229 passing**.
 
-- [ ] **Integration Tests**
-  - Full pipeline end-to-end
-  - Test with real market data (5-day history)
-  - Verify JSON schema compliance
-  - Run: `bash tests/test_ml_scoring_integration.sh`
+| Suite | File | Runner |
+|---|---|---|
+| ML Predictor | `tests/test_ml_predictor.sh` | bash |
+| Regime Weighting | `tests/test_regime_weighting.sh` | bash |
+| Kalman Filter | `tests/test_kalman_filter.sh` | bash |
+| Backtest | `tests/test_backtest.sh` | bash |
+| ML Scoring Integration | `tests/test_ml_scoring_integration.sh` | bash |
+| Regime Detector | `tests/test_regime_detector.sh` | bash |
+| Scoring Integration (Python) | `tests/test_scoring_integration.py` | python3 |
+| Dashboard Components | `tests/test_dashboard.js` | `node --test` |
+| Backend API | `tests/test_backend.js` | `node --test` |
 
-- [ ] **Backtesting Validation**
-  - Compare results against known outcomes
-  - Verify parameter optimization works
-  - Check performance metrics accuracy
-  - Run: `./lib/backtest.sh --symbol AAPL --start 2023-01-01 --end 2023-12-31`
+Other test scripts not in the runner: `tests/test_alpaca_broker.sh`, `tests/test_robinhood_broker.sh`, `tests/test_regime_simple.sh`.
 
-- [ ] **Dashboard UI Tests**
-  - All pages load without errors
-  - 5-second refresh works
-  - Data updates in real-time
-  - Run: `npm test --prefix frontend`
+```bash
+bash tests/test_runner.sh               # all 9 suites
+bash tests/test_ml_scoring_integration.sh
+npm test --prefix backend               # tests/test_backend.js
+npm test --prefix frontend              # tests/test_dashboard.js
+bash -n StockSwingTrader_Agent.sh lib/*.sh   # syntax check
+```
 
-- [ ] **Performance Benchmarks**
-  - Single symbol analysis < 5s
-  - Batch analysis (10 symbols) < 30s
-  - Dashboard refresh < 1s
-  - Run: `time ./StockSwingTrader_Agent.sh --symbols AAPL,MSFT,GOOGL --full`
-
-- [ ] **Deployment Package**
-  - All files present in DEPLOYMENT_PACKAGE/
-  - Configuration template complete
-  - README and guides updated
-  - Model files (.pkl) included
-  - Run: `bash DEPLOYMENT_PACKAGE/verify.sh`
-
-- [ ] **Data Validation**
-  - Price data sanity checks (OHLC relationships)
-  - Indicator calculations verified
-  - No NaN/Inf values in outputs
-  - Edge cases handled (gaps, limit down/up)
+There is no `tests/test_indicators.sh`, `tests/validate_config.sh`, `DEPLOYMENT_PACKAGE/verify.sh` or e2e script.
 
 ---
 
 ## Troubleshooting
 
-### Common Issues & Solutions
-
 | Issue | Root Cause | Solution |
 |-------|-----------|----------|
-| "Model file not found" | ML model not trained | Run `python lib/train_ml_model.py --symbols AAPL` |
-| "Rate limit exceeded" | Too many API calls | Add delay between requests or upgrade API tier |
-| "Invalid JSON output" | Module error not caught | Check module logs, add proper error handling |
-| "Dashboard not loading" | Backend not running | Start backend: `cd backend && npm start` |
-| "Score calculation NaN" | Missing indicator value | Check data fetch, verify OHLC validity |
-| "Kalman filter divergence" | q/r parameters wrong | Adjust q (process noise) and r (measurement noise) |
-| "Regime misclassification" | ADX thresholds too strict | Lower ADX threshold from 25 to 20 |
-| "Backtest hangs" | Too many parameter combinations | Reduce parameter ranges or grid size |
-| "Wrong broker messages" | Broker not selected | Use `--broker alpaca` or `--broker robinhood` flag |
-| "Configuration not loaded" | config.template.sh missing | Create from config.template.sh or config.sh |
+| `WARNING: html_report.sh not found`, `lib/lib/...` in errors | `SCRIPT_DIR` reset in `lib/scoring.sh` | Known issue 1; call modules directly until fixed |
+| `--regime-adapt` / `--dashboard` "module not found" | `regime_adaptive.sh` / `dashboard.sh` do not exist | Use `lib/regime_weighting.sh`; start backend/frontend with npm |
+| `Insufficient data points (N < 30)` | Agent uses generated demo data | Known issue 4 |
+| `Unknown option: 2022-01-01` | Positional backtest dates | Use `--start` / `--end` |
+| `mapfile: command not found` | bash 3.2 | Run with bash 4+ (`brew install bash`) or use `--symbols` |
+| `Model file not found` | `lib/models/xgboost_predictor.pkl` missing (git-ignored) | `python3 lib/train_ml_model.py` |
+| ML always returns the same value per symbol | Synthetic-feature fallback | Pass `--data-file` with ≥ 50 rows, or install yfinance and run with `</dev/null` |
+| `pip install -r requirements.txt` fails | numpy/pandas pins need Python ≤ 3.11 | Use Python 3.11 or install unpinned |
+| Dashboard panels empty / `{"raw":""}` | Backend calls unimplemented sub-commands | Known issue 7 |
+| Dashboard not loading | Backend not on 3000 or port 5173 taken (`strictPort`) | `cd backend && npm start`; free port 5173 |
+| Settings save returns 404 | Key not defined in `config.sh` | Add `export KEY=value` to `config.sh` |
+| Backtest files land in `/Users/P3291917/...` | Hard-coded default | Set `BACKTEST_OUTPUT_DIR` (backend reads it too) |
+| Stale regime result | 15-minute cache | `clear_regime_cache` or set `REGIME_CACHE_DIR` |
+| `ml_error: timeout_or_failure` in v2 output | Predictor took longer than `ML_TIMEOUT_SECONDS` (default 5) | Raise `ML_TIMEOUT_SECONDS`; check `ml_predictor.sh status` |
 
 ### Debug Mode
 
 ```bash
-# Enable debug logging
-export DEBUG_MODE=true
-./StockSwingTrader_Agent.sh --symbols AAPL
+./StockSwingTrader_Agent.sh --symbols AAPL --debug
+tail -f logs/agent.log
 
-# Check logs
-tail -f logs/trading_$(date +%Y%m%d).log
+DEBUG_BACKTEST=true bash -c 'source lib/backtest.sh; backtest_strategy AAPL 2023-01-01 2023-12-31'
 
-# Verbose output
-set -x
-source lib/ml_predictor.sh
-ml_predict_direction "AAPL" 5
-set +x
-```
-
-### Verification Scripts
-
-```bash
-# Verify all dependencies
-bash DEPLOYMENT_PACKAGE/verify_dependencies.sh
-
-# Test API connectivity
-bash tests/test_alpaca_broker.sh
-
-# Validate configuration
-bash tests/validate_config.sh
-
-# Check model integrity
-python -c "import joblib; m = joblib.load('lib/models/xgboost_predictor.pkl'); print(f'Model loaded: {type(m)}')"
+python3 -c "import joblib; m = joblib.load('lib/models/xgboost_predictor.pkl'); print(type(m))"
 ```
 
 ---
 
 ## Future Enhancement Ideas
 
-### Short-term (1-2 months)
+None of these exist in the code yet.
 
-1. **Real-time WebSocket Integration**
-   - Replace 5-second polling with WebSocket
-   - Live price updates
-   - Reduced latency, lower server load
-   - Use `ws` package in Node.js backend
+**Fix first:** the nine known issues above (path bug, missing `regime_adaptive.sh`/`dashboard.sh`, wire `calculate_confluence_score_v2` into the CLI, real price data, backend sub-commands, `--watchlist` on bash 3.2, configurable paths, ML batch parsing, `VERSION` file).
 
-2. **Deep Learning Models**
-   - LSTM (Long Short-Term Memory) for time series
-   - Train on multi-timeframe data
-   - Potential +10-15% accuracy improvement
-   - Use TensorFlow/PyTorch
+**Short-term:** real market data for the agent and regime detector; training on real data with a CLI; grid search and stops in the backtester; WebSocket updates instead of polling (`ws` is already a backend dependency but unused).
 
-3. **Advanced Risk Management**
-   - Portfolio-level hedging
-   - Correlation tracking across symbols
-   - Dynamic position sizing
-   - VaR (Value at Risk) calculations
+**Medium-term:** model ensembles or sequence models; walk-forward and Monte Carlo backtests; real sentiment sources; paper-trading auto-execution with P&L tracking; portfolio-level risk (correlation, VaR).
 
-4. **Multi-timeframe Analysis**
-   - Analyze 5-min, 15-min, hourly, daily, weekly
-   - Confluence across timeframes
-   - Filter noise at lower timeframes
-   - Higher confidence signals
-
-### Medium-term (2-6 months)
-
-5. **Machine Learning Ensemble**
-   - Combine multiple models (XGBoost, LSTM, Random Forest)
-   - Weighted voting for final prediction
-   - Reduce overfit, improve robustness
-
-6. **Live Broker Integration**
-   - Paper trading mode first
-   - Auto-execution on signals
-   - Position management
-   - P&L tracking in real-time
-
-7. **Advanced Backtesting**
-   - Walk-forward optimization
-   - Monte Carlo simulation
-   - Out-of-sample testing
-   - Stress testing
-
-8. **Natural Language Processing**
-   - Parse earnings transcripts
-   - Sector sentiment trends
-   - Key phrase extraction
-   - Fundamental + technical fusion
-
-### Long-term (6+ months)
-
-9. **Multi-market Support**
-   - Crypto (Bitcoin, Ethereum)
-   - Forex pairs
-   - Futures contracts
-   - Options strategies
-
-10. **Reinforcement Learning**
-    - Agent learns optimal trading strategy
-    - Adapts to market changes
-    - Continuous improvement
-    - Reward function optimization
-
-11. **Distributed System**
-    - Microservices architecture
-    - Horizontal scaling
-    - Fault tolerance
-    - Kubernetes deployment
-
-12. **Advanced Visualization**
-    - 3D charts for multi-dimensional data
-    - Interactive strategy backtester
-    - Heatmaps for correlation
-    - Real-time market scanner
-
-### Integration Ideas
-
-- **TradingView API:** Alerts and chart analysis
-- **Discord/Slack Bot:** Trade notifications
-- **Telegram Notifications:** Mobile alerts
-- **Email Reports:** Daily market summaries
-- **Google Sheets:** Portfolio sync
-- **Plotly Dashboards:** Advanced charting
+**Long-term:** other asset classes, reinforcement learning, service split/scaling, notification integrations (Slack/Telegram/email).
 
 ---
 
 ## Deployment & Versioning
 
-### Current Version: v6.3
+**v6.3 adds:** ML predictor, regime detection and weighting, React dashboard + Express backend, backtesting module, Kalman filter (all usable as modules; see known issues for CLI integration).
 
-**What's New:**
-- XGBoost ML predictor (Enhancement 1)
-- Regime-adaptive weighting (Enhancement 2)
-- React dashboard with Vite (Enhancement 3)
-- Complete backtesting module (Enhancement 4)
-- Kalman filter integration (Enhancement 5)
-
-**Previous Versions:**
-- v6.2: Added Robinhood integration
-- v6.1: Backend API + Node.js server
-- v6.0: Alpaca broker support
-- v5.0+: Initial feature set (indicators, sentiment, scoring)
+**Earlier versions (from project docs, not re-verified):** v6.2 Robinhood integration; v6.1 backend API; v6.0 Alpaca broker support.
 
 ### How to Check Version
 
 ```bash
-cat VERSION
-# Output: 6.3
-
-# Or programmatically
-source StockSwingTrader_Agent.sh
-echo $VERSION_STRING
+./StockSwingTrader_Agent.sh --version     # VERSION: 6.3
+grep '^VERSION=' StockSwingTrader_Agent.sh
+cat VERSION                               # still says v6.2 (not updated)
 ```
 
-### Deployment Package Contents
+### Deployment Package Contents (`DEPLOYMENT_PACKAGE/`)
 
 ```
 DEPLOYMENT_PACKAGE/
-├── StockSwingTrader_Agent.sh        (Main executable)
-├── config.template.sh                (Configuration template)
-├── setup-alpaca.sh                   (Alpaca setup guide)
-├── setup-robinhood.sh                (RH setup guide)
-├── lib/                              (All modules)
-├── backend/                          (API server)
-├── frontend/                         (React dashboard)
-├── docs/                             (Documentation)
-├── tests/                            (Test suite)
-└── README.md                         (Quick start)
+├── StockSwingTrader_Agent.sh        Main executable (same as repo root)
+├── config.template.sh               Configuration template
+├── requirements.txt
+├── setup-alpaca.sh, setup-robinhood.sh
+├── README.md, INSTALLATION.md, ARCHITECTURE.md, FEATURES.md,
+│   SETUP_WIZARDS.md, VERSION_HISTORY.md, PACKAGE_MANIFEST.txt, STEERING_GUIDE.md
+├── .kiro/steering/stockswingtrader-v6.3.md   (this guide)
+├── lib/                             18 core modules (no indicators_new.sh, trading_thresholds.sh,
+│                                    alpaca_wrappers.sh, trade_journal.sh, robinhood_oauth.sh,
+│                                    robinhood_mcp_direct.sh)
+├── backend/                         server.js, start.sh, package.json
+├── frontend/                        src/, vite.config.ts, package.json
+└── docs/                            KALMAN_FILTER_GUIDE.md, ROBINHOOD_SETUP.md,
+                                     ALPACA_SETUP_GUIDE.html, STEERING_GUIDE.md,
+                                     STEERING_DEPLOYMENT_SUMMARY.txt
 ```
+
+There is no `tests/` directory in the package. Because `trading_thresholds.sh` is missing there, regime and strategy modules in the package run without their threshold constants.
 
 ---
 
 ## Appendix: File Reference
 
-### Key File Locations
-
 ```
 StockSwingTrader-v6.3/
-│
-├── StockSwingTrader_Agent.sh         Main agent (orchestrator)
-├── config.template.sh                 Configuration template
-│
-├── lib/                               Core modules
-│   ├── indicators.sh                  Technical indicators
-│   ├── kalman_filter.sh              Price smoothing
-│   ├── kalman_inference.py           Kalman implementation
-│   ├── regime_detector.sh            Market regime detection
-│   ├── regime_weighting.sh           Adaptive strategy weights
-│   ├── ml_predictor.sh               ML inference wrapper
-│   ├── ml_inference.py               ML inference engine
-│   ├── train_ml_model.py             ML training pipeline
-│   ├── strategy_mean_reversion.sh    MR strategy signals
-│   ├── strategy_trend_follow.sh      TF strategy signals
-│   ├── scoring.sh                     Confluence scoring
-│   ├── sentiment.sh                   Sentiment analysis
-│   ├── risk_management.sh             Stop-loss, profit targets
-│   ├── backtest.sh                    Backtest framework
-│   ├── backtest_engine.py             Backtest engine
-│   ├── alpaca_broker.sh               Alpaca integration
-│   ├── robinhood_broker.sh            Robinhood integration
-│   ├── html_report.sh                 Report generation
-│   └── models/                        Trained ML models
-│       └── xgboost_predictor.pkl      XGBoost binary classifier
-│
-├── backend/                          API server (Node.js)
-│   ├── server.js                      Express API
-│   └── package.json                   Dependencies
-│
-├── frontend/                         React dashboard
-│   ├── src/                           React components
-│   ├── vite.config.ts                 Vite configuration
-│   └── package.json                   Dependencies
-│
-├── docs/                             Documentation
-│   ├── STEERING_GUIDE.md              This file
-│   ├── KALMAN_FILTER_GUIDE.md        Kalman filter details
-│   └── ROBINHOOD_SETUP.md            Robinhood setup
-│
-├── tests/                            Test suite
-│   ├── test_ml_scoring_integration.sh Integration tests
-│   ├── test_regime_detector.sh       Regime detection tests
-│   ├── test_kalman_filter.sh         Kalman filter tests
-│   └── ...
-│
-└── .agents/tasks/                    Output directory
-    └── backtest_results/              Backtest outputs
+├── StockSwingTrader_Agent.sh         Main agent
+├── config.template.sh                Configuration template (tracked)
+├── config.sh, config.robinhood.sh    Private configs (untracked)
+├── requirements.txt                  Python dependencies
+├── VERSION                           Says v6.2 (stale)
+├── lib/
+│   ├── indicators.sh, indicators_new.sh
+│   ├── kalman_filter.sh, kalman_inference.py
+│   ├── regime_detector.sh, regime_weighting.sh, trading_thresholds.sh
+│   ├── ml_predictor.sh, ml_inference.py, train_ml_model.py
+│   ├── models/xgboost_predictor.pkl  (git-ignored)
+│   ├── strategy_mean_reversion.sh, strategy_trend_follow.sh
+│   ├── scoring.sh, sentiment.sh, risk_management.sh, trade_journal.sh
+│   ├── backtest.sh, backtest_engine.py
+│   ├── alpaca_broker.sh, alpaca_wrappers.sh
+│   ├── robinhood_broker.sh, robinhood_oauth.sh, robinhood_mcp_direct.sh
+│   └── html_report.sh
+├── backend/      server.js, start.sh, package.json
+├── frontend/     src/{App.tsx,pages,hooks,utils,components}, vite.config.ts, package.json
+├── docs/         STEERING_GUIDE.md (this file), KALMAN_FILTER_GUIDE.md, ROBINHOOD_SETUP.md,
+│                 ALPACA_SETUP_GUIDE.html, STEERING_DEPLOYMENT_SUMMARY.txt
+├── examples/     ml_scoring_integration_example.sh
+├── tests/        test_runner.sh + 9 registered suites (see Testing), broker tests, mock_data.json
+├── logs/         agent.log and broker logs (git-ignored)
+└── .agents/tasks/test-report.md      Written by tests/test_runner.sh
 ```
 
----
-
-## Contact & Support
-
-For questions or issues with enhancement modules:
-
-1. **Check logs:** `tail -f logs/trading_$(date +%Y%m%d).log`
-2. **Run tests:** `bash tests/test_[module_name].sh`
-3. **Enable debug:** `export DEBUG_MODE=true`
-4. **Review documentation:** Check docs/ directory
-5. **Check GitHub issues:** Stock of errors and solutions
+Copies of this guide that must stay identical: `docs/STEERING_GUIDE.md` (canonical), `DEPLOYMENT_PACKAGE/docs/STEERING_GUIDE.md`, `DEPLOYMENT_PACKAGE/STEERING_GUIDE.md`, `DEPLOYMENT_PACKAGE/.kiro/steering/stockswingtrader-v6.3.md`, and the workspace steering file `.kiro/steering/stockswingtrader-v6.3.md`.
 
 ---
 
-**Document Last Updated:** October 30, 2024  
-**For:** StockSwingTrader v6.3  
-**Created for:** Future AI enhancement and maintenance
-
+**Document Last Updated:** 2026-10-30  
+**For:** StockSwingTrader v6.3 (commit `532828e`)
