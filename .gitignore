@@ -53,3 +53,6 @@ build/
 config.sh
 config.robinhood.sh
 config.alpaca.sh
+
+# Git worktrees
+.worktrees/
