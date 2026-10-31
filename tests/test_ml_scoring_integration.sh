@@ -4,8 +4,9 @@
 # ============================================================================
 # Tests all modules load, execute, and output correct JSON format
 # ============================================================================
-
-set -e
+# No `set -e`: a failing `((TESTS_FAILED++))` (status 1 when the counter is 0)
+# would abort the suite before its summary, and the runner could then not
+# count the remaining tests.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="${SCRIPT_DIR}/../lib"
@@ -17,7 +18,18 @@ RESULTS_FILE="${TEST_DIR}/.test_results.json"
 export SST_OFFLINE=1
 export ML_TIMEOUT_SECONDS="${ML_TIMEOUT_SECONDS:-20}"
 export REGIME_CACHE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sst_regime_test.XXXXXX")"
-trap 'rm -rf "$REGIME_CACHE_DIR"' EXIT
+# Stub predictor for the threshold tests: scoring.sh runs
+# "$SCRIPT_DIR/ml_predictor.sh", so a subshell pointing SCRIPT_DIR at this dir
+# gets a fixed ML result (STUB_ML_DIRECTION / STUB_ML_CONFIDENCE) that does not
+# depend on the locally trained model.
+ML_STUB_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sst_ml_stub.XXXXXX")"
+cat > "${ML_STUB_DIR}/ml_predictor.sh" <<'STUB'
+#!/bin/bash
+conf="${STUB_ML_CONFIDENCE:-85}"
+printf '{"symbol": "%s", "available": true, "direction": "%s", "confidence": %s, "probability": %s, "period": %s, "data_source": "stub"}\n' \
+    "$2" "${STUB_ML_DIRECTION:-up}" "$conf" "$(echo "scale=2; $conf / 100" | bc)" "${3:-5}"
+STUB
+trap 'rm -rf "$REGIME_CACHE_DIR" "$ML_STUB_DIR"' EXIT
 
 echo "=========================================="
 echo "ML Scoring Integration Test Suite"
@@ -280,21 +292,42 @@ else
     ((TESTS_FAILED++))
 fi
 
-# The ML component is a real model, so threshold tests pin symbols whose
-# offline prediction is known and check that precondition first.
-ml_fixture() {
-    local symbol=$1 want_dir=$2
+# Contract of the real predictor that holds for any correctly trained model
+# (a fresh clone trains its own model, so the direction itself is not fixed):
+# schema, available, direction, confidence in [50,100] = floor(probability*100),
+# data_source "synthetic" (SST_OFFLINE=1), and the same output for the same input.
+ml_contract() {
+    local symbol=$1
     ((TESTS_RUN++))
-    echo -n "Test $TESTS_RUN: ML fixture $symbol predicts $want_dir with confidence > 60 ... "
-    local r
-    r=$(bash "${LIB_DIR}/ml_predictor.sh" predict "$symbol" 5 </dev/null 2>/dev/null)
-    if echo "$r" | jq -e --arg d "$want_dir" '.direction == $d and .confidence > 60' >/dev/null 2>&1; then
-        echo -e "${GREEN}✓ PASS${NC} ($(echo "$r" | jq -c '{direction, confidence}'))"
+    echo -n "Test $TESTS_RUN: ML prediction contract for $symbol (schema, range, deterministic) ... "
+    local r1 r2
+    r1=$(bash "${LIB_DIR}/ml_predictor.sh" predict "$symbol" 5 </dev/null 2>/dev/null)
+    r2=$(bash "${LIB_DIR}/ml_predictor.sh" predict "$symbol" 5 </dev/null 2>/dev/null)
+    if echo "$r1" | jq -e --arg s "$symbol" '
+            .symbol == $s and .available == true and .period == 5
+            and (.direction == "up" or .direction == "down")
+            and (.confidence | type == "number" and . == floor and . >= 50 and . <= 100)
+            and (.probability | type == "number" and . >= 0.5 and . <= 1)
+            and .confidence == ((.probability * 100) | floor)
+            and .data_source == "synthetic" and .model_training_data == "synthetic"
+            and (.warning | type == "string")' >/dev/null 2>&1 &&
+       [[ "$(echo "$r1" | jq -c '{direction, confidence, probability}')" == \
+          "$(echo "$r2" | jq -c '{direction, confidence, probability}')" ]]; then
+        echo -e "${GREEN}✓ PASS${NC} ($(echo "$r1" | jq -c '{direction, confidence}'))"
         ((TESTS_PASSED++))
     else
-        echo -e "${RED}✗ FAIL${NC} (got $r)"
+        echo -e "${RED}✗ FAIL${NC} (got $r1 / $r2)"
         ((TESTS_FAILED++))
     fi
+}
+
+# calculate_confluence_score_v2 with the stubbed ML result
+# Args: direction, confidence, then the v2 arguments
+v2_with_stub_ml() {
+    local dir=$1 conf=$2
+    shift 2
+    ( SCRIPT_DIR="$ML_STUB_DIR" STUB_ML_DIRECTION="$dir" STUB_ML_CONFIDENCE="$conf" \
+        calculate_confluence_score_v2 "$@" </dev/null 2>/dev/null )
 }
 
 # ============================================================================
@@ -305,14 +338,16 @@ echo ""
 echo "--- Scoring Threshold Rules ---"
 
 # Test STRONG_BUY threshold (70+): all components bullish
-ml_fixture "TEST1" "up"
+# (ML is stubbed to "up" 85 so the result does not depend on the trained model.)
+ml_contract "TEST1"
 ((TESTS_RUN++))
 echo -n "Test $TESTS_RUN: STRONG_BUY threshold (score >= 70) ... "
-strong_buy_test=$(calculate_confluence_score_v2 "TEST1" 90 90 90 90 "trending_bull" 90 90 1 </dev/null 2>/dev/null)
+strong_buy_test=$(v2_with_stub_ml up 85 "TEST1" 90 90 90 90 "trending_bull" 90 90 1)
 strong_buy_rec=$(echo "$strong_buy_test" | jq -r '.recommendation // "error"' 2>/dev/null || echo "error")
 strong_buy_score=$(echo "$strong_buy_test" | jq -r '.confluence_score // 0' 2>/dev/null || echo "0")
 
-if [[ "$strong_buy_rec" == "STRONG_BUY" && $(echo "$strong_buy_score >= 70" | bc -l) -eq 1 ]]; then
+if [[ "$strong_buy_rec" == "STRONG_BUY" && $(echo "$strong_buy_score >= 70" | bc -l) -eq 1 ]] &&
+   echo "$strong_buy_test" | jq -e '.components.ml_confidence | .direction == "up" and .score == 85 and .data_source == "stub"' >/dev/null 2>&1; then
     echo -e "${GREEN}✓ PASS${NC} (recommendation=$strong_buy_rec, score=$strong_buy_score)"
     ((TESTS_PASSED++))
 else
@@ -336,15 +371,17 @@ else
 fi
 
 # Test STRONG_SELL threshold (score < 30): all components bearish.
-# (TEST3's model prediction is "up", which would dissent; TEST2 is "down".)
-ml_fixture "TEST2" "down"
+# ML is stubbed to "down" 85: checks the pipeline maps a bearish ML result
+# into a STRONG_SELL, independent of what the trained model predicts.
+ml_contract "TEST2"
 ((TESTS_RUN++))
 echo -n "Test $TESTS_RUN: STRONG_SELL threshold (score < 30) ... "
-strong_sell_test=$(calculate_confluence_score_v2 "TEST2" 10 10 10 10 "trending_bear" 10 10 -1 </dev/null 2>/dev/null)
+strong_sell_test=$(v2_with_stub_ml down 85 "TEST2" 10 10 10 10 "trending_bear" 10 10 -1)
 strong_sell_rec=$(echo "$strong_sell_test" | jq -r '.recommendation // "error"' 2>/dev/null || echo "error")
 strong_sell_score=$(echo "$strong_sell_test" | jq -r '.confluence_score // 100' 2>/dev/null || echo "100")
 
-if [[ "$strong_sell_rec" == "STRONG_SELL" && $(echo "$strong_sell_score < 30" | bc -l) -eq 1 ]]; then
+if [[ "$strong_sell_rec" == "STRONG_SELL" && $(echo "$strong_sell_score < 30" | bc -l) -eq 1 ]] &&
+   echo "$strong_sell_test" | jq -e '.components.ml_confidence | .direction == "down" and .score == 85 and .data_source == "stub"' >/dev/null 2>&1; then
     echo -e "${GREEN}✓ PASS${NC} (recommendation=$strong_sell_rec, score=$strong_sell_score)"
     ((TESTS_PASSED++))
 else
