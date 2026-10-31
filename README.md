@@ -9,7 +9,7 @@ A sophisticated shell-based swing trading analysis platform that combines 8+ tec
 ### Key Features
 
 - **8+ Technical Indicators**: RSI, MACD, Bollinger Bands, Stochastic, Williams %R, OBV, ATR, SMA/EMA
-- **Multi-Source Sentiment**: Twitter, Reddit, StockTwits, News API analysis
+- **News Sentiment**: Finnhub/NewsAPI headlines scored by a weighted keyword classifier when API keys are set (Twitter/Reddit/StockTwits have no integration and report "unavailable")
 - **Confidence Scoring**: 0-100 scale with BUY/SELL/HOLD recommendations
 - **Risk Management**: ATR-based stop-loss calculations, risk-reward ratios, position sizing
 - **Professional Reports**: Interactive HTML with real-time charts and metrics
@@ -423,7 +423,7 @@ The agent generates a professional interactive HTML report in `output/reports/`:
 - **Stock Summary**: Current price, change, market cap, volume
 - **Signal & Confidence**: BUY/SELL/HOLD with visual confidence meter
 - **Technical Indicators**: RSI, MACD, Bollinger Bands, Stochastic, Williams %R, OBV
-- **Sentiment Analysis**: Twitter, Reddit, StockTwits, News scores
+- **Sentiment Analysis**: News score when a news API key is configured, otherwise "unavailable" (0 weight)
 - **Risk Metrics**: Entry, stop-loss, take-profit, risk-reward ratio, ATR
 - **Trade Summary**: Analysis reasoning and key levels
 
@@ -507,34 +507,21 @@ All activity is logged to `logs/agent.log`:
 
 ## Sentiment Analysis
 
-The agent aggregates sentiment from multiple sources:
+`lib/sentiment.sh` has one deterministic path, `aggregate_sentiment SYMBOL`:
 
-### Twitter
+### News (Finnhub or NewsAPI)
 
-- Tracks mention volume and sentiment (bullish/bearish keywords)
-- Uses public API or lightweight scraping
-- **Confidence**: 30-minute cache
+- Finnhub `company-news` (last 7 days) when `API_KEY_FINNHUB` is a real key, otherwise NewsAPI `everything` when `API_KEY_NEWSAPI` is a real key. Keys are sent in request headers.
+- Each article (headline + summary) is classified with the weighted bullish/bearish keyword tables ported from v6.2 Phase 1. A negation word ("not", "won't", "cannot", ...) multiplies both weights by `SENTIMENT_NEGATION_DISCOUNT` (0.7).
+- Score = round(50 + 50 × (bullish − bearish) / articles).
+- Successful results are cached for 30 minutes in `SENTIMENT_CACHE_DIR`. Failures are never cached.
+- `SST_OFFLINE=1`, placeholder keys (`YOUR_*`, `demo`) or no key: no network call, source is "unavailable".
 
-### Reddit
+### Twitter, Reddit, StockTwits
 
-- Analyzes r/stocks, r/investing, r/wallstreetbets
-- Mentions and sentiment tone
-- **Confidence**: 30-minute cache
+No API client is configured, so these always report `status: "unavailable"` with a null score. Earlier versions returned random numbers here.
 
-### StockTwits
-
-- Fetches bullish/bearish percentages
-- Tracks sentiment shifts
-- **Confidence**: 30-minute cache
-
-### News API
-
-- Scans recent financial news
-- Keyword-based sentiment analysis
-- Aggregates positive/negative tone
-- **Confidence**: 24-hour cache
-
-**Aggregate Score**: 0-100 (0=very bearish, 50=neutral, 100=very bullish)
+**Aggregate Score**: 0-100 (0=very bearish, 50=neutral, 100=very bullish), the average of the available sources only. With no source available the score is `null`, the label is `unavailable` and sentiment gets 0 weight.
 
 ## Confidence Scoring Algorithm
 
@@ -550,9 +537,11 @@ The final confidence score combines:
    - Average = (RSI + MACD + BB + Stoch + Williams + OBV) / 6
 
 2. **Sentiment** (20% weight):
-   - Aggregate of Twitter, Reddit, StockTwits, News
+   - Aggregate of the available sentiment sources (news today)
 
 **Final Confidence** = (Technical Average × 0.8) + (Sentiment × 0.2)
+
+When sentiment is unavailable, **Final Confidence** = Technical Average (100% technical) and the confluence JSON has `"sentiment_available": false`. With `--mirofish` and a fresh MiroFish cache, the score is then blended as `final × (1 − MIROFISH_WEIGHT) + mirofish_score × MIROFISH_WEIGHT` (see Phase 1 components).
 
 ### Signal Interpretation
 
@@ -593,6 +582,72 @@ Displayed as X:Y ratio (e.g., 1:2 = risk $1 to make $2)
 ```
 Ratio = (TP - Entry) / (Entry - SL)
 ```
+
+## Phase 1 components (ported from v6.2)
+
+The v6.2 Phase 1 modules were ported, merged or skipped as follows. All are off by default.
+
+### Flags
+
+| Flag | Effect |
+|---|---|
+| `--kelly` | Fractional Kelly position sizing with daily risk budget (`KELLY_SIZING_ENABLED=true`) |
+| `--mirofish` | Read the MiroFish scan cache (`MIROFISH_ENABLED=true`); no network calls |
+| `--phase1` | `--kelly --mirofish` |
+
+`--full` is unchanged and does not include these flags, so existing `--full` users see no change in position sizes.
+
+```bash
+./StockSwingTrader_Agent.sh --symbols AAPL,MSFT --phase1
+MIROFISH_ENABLED=true ./StockSwingTrader_Agent.sh --symbols AAPL
+```
+
+### Kelly position sizing and daily risk budget (`lib/kelly_sizing.sh`)
+
+- f* = (b·p − (1 − p)) / b with `KELLY_WIN_RATE` (p, 0.55) and `KELLY_WIN_LOSS_RATIO` (b, 1.5). f* ≤ 0 gives size 0 (`NO_EDGE`).
+- Fraction = f* / `KELLY_CRITERION_DIVISOR` (4 = quarter Kelly, never below 2) × regime multiplier (volatile 0.5, others 1.0; never above 1.0) × confidence multiplier (0.2 + 0.7·confidence, clamped to 0.6..0.9).
+- Position = min(equity × fraction, equity × `KELLY_MAX_POSITION_PCT`%, `MAX_POSITION_SIZE`). Shares are capped by `ALPACA_MAX_POSITION_SIZE`, then by the remaining daily risk budget (risk = qty × (entry − stop)). Positions below `MIN_POSITION_SIZE_DOLLARS` are skipped, not rounded up.
+- Daily risk budget = equity × min(`DAILY_RISK_BUDGET_PCT`, daily loss limit of `DEFAULT_RISK_LEVEL`: 2/5/10%). If the day's drawdown has reached the loss limit, size is 0 (`DRAWDOWN_LIMIT`).
+- Ledger: `RISK_BUDGET_DIR/ledger_YYYY-MM-DD.txt` (default `~/.stockswingtrader/risk_budget`), one line per reserved trade, guarded by an `mkdir` lock. A new file each day resets the budget.
+- In analysis runs, `--kelly` adds a `position_sizing` block (entry = last close, stop = `STOP_LOSS_PERCENT` below) and never reserves budget. In the strategies (`mean_reversion_enter`, `trend_follow_enter`) it caps the quantity and reserves the budget before the order is placed; it can only reduce size.
+
+### MiroFish cache signal (`lib/mirofish_adapter.sh`)
+
+Real MiroFish is a multi-agent social simulator and has no `/predict` endpoint, so the v6.2 HTTP client always fell back to NEUTRAL. The adapter is therefore a cache reader: at scan time it reads `MIROFISH_CACHE_DIR/<SYMBOL>.json` (default `cache/mirofish/`) and makes no network calls, so a missing cache costs nothing per symbol. The overnight producer that would write these files is not implemented yet.
+
+Provisional cache schema (unverified against real MiroFish output):
+
+```json
+{
+  "symbol": "AAPL",
+  "generated_at": "2026-10-31T02:00:00Z",
+  "prediction": "BULLISH",
+  "confidence": 0.8,
+  "agent_votes": {"bullish": 7, "bearish": 2, "neutral": 1},
+  "status": "OK"
+}
+```
+
+`as_of` is accepted instead of `generated_at`; `agent_votes`, `status`, `simulation_id`, `model` and `n_agents` are optional.
+
+| Status | Meaning | Effect |
+|---|---|---|
+| `DISABLED` | `MIROFISH_ENABLED` is not `true` | none (no `mirofish` key in output) |
+| `MISSING` | no cache file | none |
+| `INVALID` | bad symbol, bad JSON, bad prediction/confidence, timestamp > 5 min in the future, or file status not OK | none |
+| `STALE` | older than `MIROFISH_MAX_AGE_HOURS` (36) | none |
+| `LOW_CONFIDENCE` | confidence < `MIROFISH_MIN_CONFIDENCE` (0.4) | none |
+| `OK` | usable; score = 50 ± 50 × confidence (NEUTRAL 50) | weighted by `MIROFISH_WEIGHT` |
+
+With status `OK` the legacy score becomes `final × (1 − w) + score × w` and the v2 engine (`calculate_confluence_score_v2`) scales its 15/35/30/20 weights by (1 − w) and adds a `components.mirofish` entry. `MIROFISH_WEIGHT` defaults to 0.10, is clamped to 0..0.5, and 0 is shadow mode (block shown, score unchanged).
+
+### Regime detection
+
+v6.3 keeps its own `lib/regime_detector.sh`; the Phase 1 detector was not ported. It classified on VIX, which v6.3 has no data source for; its 2-candle hysteresis needs a per-candle loop, while v6.3 evaluates once per symbol behind a 15-minute cache; and its per-regime risk limits (3% in strong trends) are looser than v6.3's 2% moderate per-trade risk. Only its regime-to-size idea was kept, as the Kelly regime multiplier above.
+
+### Skipped
+
+`enhanced_trading_loop.sh` (infinite polling loop with a stub technical signal, needs `md5sum`), `json_utils.sh` / `math_utils.sh` / `logger.sh` (v6.3 already uses jq, awk/bc and the agent's `log_*` functions), `config_phase1.sh` (only the settings the new code reads were added to `config.template.sh`; no `MIROFISH_AGENT_COUNT`, retry, timeout or VIX settings) and the Phase 1 test runner (replaced by v6.3-style suites in `tests/`).
 
 ## Rate Limiting
 
@@ -673,9 +728,7 @@ Check internet connectivity if sentiment data is critical.
 | Alpha Vantage | Intraday, technical data | Real-time | Free tier (limited) |
 | Finnhub | Real-time quotes, news | Real-time | Free tier (limited) |
 | NewsAPI | Financial news articles | Real-time | Free tier (100/day) |
-| Twitter | Social sentiment, mentions | Real-time | Free (lightweight scraping) |
-| Reddit | Forum sentiment, discussions | Real-time | Free (API available) |
-| StockTwits | Community sentiment, bullish% | Real-time | Free (lightweight scraping) |
+| Twitter / Reddit / StockTwits | Not integrated (reported as "unavailable") | n/a | n/a |
 
 ## Disclaimer & Legal
 

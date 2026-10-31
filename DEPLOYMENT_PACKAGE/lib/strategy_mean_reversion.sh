@@ -210,7 +210,21 @@ mean_reversion_enter() {
     if [[ $qty -gt $max_qty ]]; then
         qty=$max_qty
     fi
-    
+
+    # Phase 1 Kelly cap + daily risk budget (no-op unless KELLY_SIZING_ENABLED=true;
+    # never increases qty). The budget is reserved before the order is placed so
+    # a trade that would exceed today's risk budget is never sent.
+    if [[ "${KELLY_SIZING_ENABLED:-false}" == "true" ]] && declare -f kelly_cap_qty >/dev/null; then
+        qty=$(kelly_cap_qty "$qty" "$entry_price" "$stop_loss_price" "$capital")
+        if [[ -z "$qty" || "$qty" -le 0 ]]; then
+            return 1
+        fi
+        local budget_risk=$(echo "scale=2; ($entry_price - $stop_loss_price) * $qty" | bc -l)
+        if ! risk_budget_allocate "${symbol}_$(date +%s)_$$" "$budget_risk" "$capital"; then
+            return 1
+        fi
+    fi
+
     # Place order
     local order_id=$(alpaca_place_order "$symbol" "$qty" "buy" 2>/dev/null)
     

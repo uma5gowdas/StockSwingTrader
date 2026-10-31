@@ -101,13 +101,16 @@ CORE MODULES CHECKLIST
     [✓] lib/backtest_engine.py (17,886 bytes)
 
 [✓] Core Analysis Modules:
-    [✓] lib/indicators.sh (15,095 bytes)
-    [✓] lib/strategy_mean_reversion.sh (10,246 bytes)
-    [✓] lib/strategy_trend_follow.sh (10,134 bytes)
-    [✓] lib/scoring.sh (21,236 bytes)
-    [✓] lib/sentiment.sh (10,473 bytes)
-    [✓] lib/risk_management.sh (14,414 bytes)
+    [✓] lib/indicators.sh (15,107 bytes)
+    [✓] lib/strategy_mean_reversion.sh (10,965 bytes)
+    [✓] lib/strategy_trend_follow.sh (10,853 bytes)
+    [✓] lib/scoring.sh (27,155 bytes)
+    [✓] lib/sentiment.sh (14,935 bytes)
+    [✓] lib/risk_management.sh (14,760 bytes)
 
+[✓] Phase 1 Modules (ported from v6.2, off by default):
+    [✓] lib/kelly_sizing.sh (15,850 bytes)
+    [✓] lib/mirofish_adapter.sh (8,675 bytes)
 [✓] Broker Integration Modules:
     [✓] lib/alpaca_broker.sh (19,242 bytes)
     [✓] lib/robinhood_broker.sh (33,537 bytes)
@@ -116,7 +119,7 @@ CORE MODULES CHECKLIST
     [✓] lib/html_report.sh (18,048 bytes)
 
 [✓] Main Orchestrator:
-    [✓] StockSwingTrader_Agent.sh (42,003 bytes)
+    [✓] StockSwingTrader_Agent.sh (45,905 bytes)
 
 ================================================================================
 DEPENDENCIES

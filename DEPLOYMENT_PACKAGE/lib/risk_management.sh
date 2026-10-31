@@ -4,12 +4,18 @@
 # ============================================================================
 # Purpose: Position sizing (Kelly Criterion), stop-loss/take-profit enforcement,
 #          portfolio limits, daily drawdown monitoring, and position tracking
+#
+# Phase 1 (ported from v6.2): lib/kelly_sizing.sh adds fractional (quarter)
+# Kelly sizing with hard caps and a daily risk budget ledger. Strategies use
+# it through kelly_cap_qty / risk_budget_allocate only when
+# KELLY_SIZING_ENABLED=true; it can only reduce position size.
 # ============================================================================
 
 # Source dependencies
 source "$(dirname "${BASH_SOURCE[0]}")/trading_thresholds.sh" 2>/dev/null
 source "$(dirname "${BASH_SOURCE[0]}")/alpaca_wrappers.sh" 2>/dev/null
 source "$(dirname "${BASH_SOURCE[0]}")/trade_journal.sh" 2>/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/kelly_sizing.sh" 2>/dev/null
 
 # ============================================================================
 # Broker Selection Support

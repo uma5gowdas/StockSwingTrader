@@ -91,7 +91,7 @@
 
 **Usage:**
 ```bash
-./StockSwingTrader_Agent.sh --backtest AAPL 2022-01-01 2024-01-01
+./StockSwingTrader_Agent.sh --backtest AAPL --start 2022-01-01 --end 2024-01-01
 ```
 
 ### 5. Kalman Filter - Better Price Smoothing
@@ -103,6 +103,17 @@
 **Usage:**
 ```bash
 ./StockSwingTrader_Agent.sh --symbols AAPL,MSFT --kalman
+```
+
+### 6. Phase 1 Components (ported from v6.2, off by default)
+- `--kelly`: fractional (quarter) Kelly position sizing with a daily risk budget ledger. It only ever reduces size and never exceeds `MAX_POSITION_SIZE`, `KELLY_MAX_POSITION_PCT`, `ALPACA_MAX_POSITION_SIZE` or the daily loss limit (`lib/kelly_sizing.sh`).
+- `--mirofish`: reads the MiroFish scan cache `cache/mirofish/<SYMBOL>.json` with no network calls; a missing, stale or invalid cache is skipped instantly and scoring is unchanged. The cache schema is provisional and unverified against real MiroFish (`lib/mirofish_adapter.sh`).
+- `--phase1`: both of the above. `--full` does not include them.
+- Sentiment is deterministic: news (Finnhub/NewsAPI, when keys are set) is scored with the Phase 1 keyword classifier; Twitter/Reddit/StockTwits report "unavailable"; unavailable sentiment gets 0 weight.
+
+**Usage:**
+```bash
+./StockSwingTrader_Agent.sh --symbols AAPL,MSFT --phase1
 ```
 
 ---
@@ -239,7 +250,7 @@ cd frontend && npm run dev
 ### 5. Run Backtesting
 
 ```bash
-./StockSwingTrader_Agent.sh --backtest AAPL 2022-01-01 2024-01-01 --optimize
+./StockSwingTrader_Agent.sh --backtest AAPL --start 2022-01-01 --end 2024-01-01
 ```
 
 Results saved to: `.agents/tasks/backtest_results/AAPL_backtest_results.json`
@@ -258,8 +269,12 @@ Options:
   --ml                         Enable XGBoost ML predictions (+15% weight)
   --regime-adapt              Enable regime-adaptive weighting (+35% weight)
   --kalman                    Enable Kalman filter smoothing
-  --backtest SYMBOL START END  Run backtesting (format: YYYY-MM-DD)
-  --optimize                  Run parameter grid search optimization
+  --backtest SYMBOLS           Run backtesting (comma-separated)
+  --start / --end YYYY-MM-DD   Backtest date range (default: 2 years ago .. today)
+  --train-pct PCT              Train/test split percentage (default: 80)
+  --kelly                      Fractional Kelly sizing + daily risk budget (Phase 1)
+  --mirofish                   Use the MiroFish scan cache, no network (Phase 1)
+  --phase1                     --kelly and --mirofish
   --dashboard                 Start API dashboard server
   --broker alpaca|robinhood   Select trading broker
   --live                      Use live trading (default: paper trading)
@@ -284,9 +299,9 @@ Options:
 ./StockSwingTrader_Agent.sh --symbols AAPL,MSFT,GOOGL --ml --regime-adapt --kalman
 ```
 
-**Backtesting with Optimization:**
+**Backtesting:**
 ```bash
-./StockSwingTrader_Agent.sh --backtest AAPL 2023-01-01 2024-01-01 --optimize
+./StockSwingTrader_Agent.sh --backtest AAPL --start 2023-01-01 --end 2024-01-01
 ```
 
 **Live Trading (Alpaca):**
@@ -644,10 +659,10 @@ bash tests/test_integration.sh AAPL
 
 ```bash
 # Quick backtest (1 symbol, 1 month)
-./StockSwingTrader_Agent.sh --backtest AAPL 2024-09-01 2024-10-01
+./StockSwingTrader_Agent.sh --backtest AAPL --start 2024-09-01 --end 2024-10-01
 
-# Full backtest with optimization
-./StockSwingTrader_Agent.sh --backtest AAPL 2022-01-01 2024-01-01 --optimize
+# Full backtest (2 years)
+./StockSwingTrader_Agent.sh --backtest AAPL --start 2022-01-01 --end 2024-01-01
 
 # Verify results
 jq . .agents/tasks/backtest_results/AAPL_backtest_results.json

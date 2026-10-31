@@ -57,6 +57,26 @@ export TARGET_PROFIT_PERCENT=8           # Exit at 8% gain
 export MAX_POSITION_SIZE=2500            # Max investment per trade (demo)
 
 # ============================================================================
+# Phase 1: Kelly position sizing & daily risk budget (ported from v6.2)
+# ============================================================================
+# Used by lib/kelly_sizing.sh (--kelly / --phase1). Sizing is fractional Kelly
+# (f*/KELLY_CRITERION_DIVISOR, divisor floored at 2) and only ever REDUCES
+# the size the strategies would otherwise use. Hard caps that are never
+# exceeded: MAX_POSITION_SIZE ($ per trade), KELLY_MAX_POSITION_PCT (% of
+# equity), ALPACA_MAX_POSITION_SIZE (shares per trade), the daily risk budget
+# and the daily loss limit of DEFAULT_RISK_LEVEL.
+export KELLY_SIZING_ENABLED="${KELLY_SIZING_ENABLED:-false}"
+export ACCOUNT_EQUITY="${ACCOUNT_EQUITY:-10000}"               # Equity used by the agent's sizing block
+export KELLY_WIN_RATE="${KELLY_WIN_RATE:-0.55}"                # Historical win rate p
+export KELLY_WIN_LOSS_RATIO="${KELLY_WIN_LOSS_RATIO:-1.5}"     # Avg win / avg loss b
+export KELLY_CRITERION_DIVISOR="${KELLY_CRITERION_DIVISOR:-4}" # 4 = quarter Kelly (min 2)
+export KELLY_MAX_POSITION_PCT="${KELLY_MAX_POSITION_PCT:-10}"  # Max % of equity per position
+export MIN_POSITION_SIZE_DOLLARS="${MIN_POSITION_SIZE_DOLLARS:-100}"  # Smaller positions are skipped
+export DAILY_RISK_BUDGET_PCT="${DAILY_RISK_BUDGET_PCT:-2}"     # Max % of equity at risk per day
+export DEFAULT_RISK_LEVEL="${DEFAULT_RISK_LEVEL:-moderate}"    # conservative|moderate|aggressive (loss limit 2/5/10%)
+export RISK_BUDGET_DIR="${RISK_BUDGET_DIR:-${HOME}/.stockswingtrader/risk_budget}"  # Daily ledger files
+
+# ============================================================================
 # Data Freshness & Caching
 # ============================================================================
 export CACHE_MAX_AGE_MINUTES=60          # Refresh if older than 60 min
@@ -67,6 +87,30 @@ export INTRADAY_DATA_POINTS=60           # Use last 60 5-min candles for recent 
 # ============================================================================
 export SENTIMENT_WEIGHT=0.2              # 20% of confidence score
 export TECHNICAL_WEIGHT=0.8              # 80% of confidence score
+# When no sentiment source is available (no API keys, offline), sentiment gets
+# 0 weight and the legacy score is 100% technical. Twitter/Reddit/StockTwits
+# have no API integration and always report "unavailable".
+export SENTIMENT_NEWS_COUNT="${SENTIMENT_NEWS_COUNT:-10}"              # Articles per symbol
+export SENTIMENT_TIMEOUT_SECONDS="${SENTIMENT_TIMEOUT_SECONDS:-5}"     # curl --max-time for news
+export SENTIMENT_NEGATION_DISCOUNT="${SENTIMENT_NEGATION_DISCOUNT:-0.7}"  # Keyword weight factor when negated
+export SENTIMENT_CACHE_DIR="${SENTIMENT_CACHE_DIR:-cache/data}"        # 30-min cache of successful news results
+
+# ============================================================================
+# Phase 1: MiroFish (optional, cache-reading, default OFF)
+# ============================================================================
+# lib/mirofish_adapter.sh reads cache/mirofish/<SYMBOL>.json only. There is
+# NO network call at scan time, so a missing cache costs nothing per symbol.
+# The overnight producer that writes the cache (lib/mirofish_bridge.py) is not
+# implemented yet, and the cache schema is provisional: it is unverified
+# against real MiroFish output. MIROFISH_API_URL belongs to that future bridge
+# and is deliberately not defined here. MIROFISH_WEIGHT=0 is shadow mode (the
+# mirofish block is shown, the score is unchanged). When applied, the other
+# weights scale by (1 - MIROFISH_WEIGHT).
+export MIROFISH_ENABLED="${MIROFISH_ENABLED:-false}"
+export MIROFISH_WEIGHT="${MIROFISH_WEIGHT:-0.10}"              # 0..0.5
+export MIROFISH_CACHE_DIR="${MIROFISH_CACHE_DIR:-cache/mirofish}"
+export MIROFISH_MAX_AGE_HOURS="${MIROFISH_MAX_AGE_HOURS:-36}"  # Older cache = STALE (ignored)
+export MIROFISH_MIN_CONFIDENCE="${MIROFISH_MIN_CONFIDENCE:-0.4}"  # Lower = LOW_CONFIDENCE (ignored)
 
 # ============================================================================
 # Data Fetch Preferences

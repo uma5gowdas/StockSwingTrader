@@ -315,8 +315,8 @@ calc_atr() {
         local tr3=$(echo "($l - $prev_close)" | bc -l)
         
         # TR = max(high-low, |high-close_prev|, |low-close_prev|)
-        if (( $(echo "$tr2 < 0" | bc -l) )); then tr2=$(echo "-$tr2" | bc -l); fi
-        if (( $(echo "$tr3 < 0" | bc -l) )); then tr3=$(echo "-$tr3" | bc -l); fi
+        if (( $(echo "$tr2 < 0" | bc -l) )); then tr2=$(echo "0 - ($tr2)" | bc -l); fi
+        if (( $(echo "$tr3 < 0" | bc -l) )); then tr3=$(echo "0 - ($tr3)" | bc -l); fi
         
         local tr=$(calc_max "$tr1" "$tr2" "$tr3")
         tr_values+=($tr)

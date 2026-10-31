@@ -10,7 +10,8 @@
 # Usage:
 #   ./StockSwingTrader_Agent.sh --symbols AAPL,MSFT,GOOGL
 #   ./StockSwingTrader_Agent.sh --symbols AAPL,MSFT --ml --regime-adapt
-#   ./StockSwingTrader_Agent.sh --backtest AAPL 2022-01-01 2024-01-01
+#   ./StockSwingTrader_Agent.sh --backtest AAPL --start 2022-01-01 --end 2024-01-01
+#   ./StockSwingTrader_Agent.sh --symbols AAPL,MSFT --phase1
 #   ./StockSwingTrader_Agent.sh --dashboard
 #   ./StockSwingTrader_Agent.sh --full
 #
@@ -44,6 +45,10 @@ set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
+# Project root, captured before any library is sourced: lib/scoring.sh,
+# lib/ml_predictor.sh and lib/backtest.sh reassign SCRIPT_DIR to lib/ when
+# sourced, so new code uses AGENT_DIR instead.
+AGENT_DIR="$SCRIPT_DIR"
 
 # Load configuration template
 if [[ -f "$SCRIPT_DIR/config.template.sh" ]]; then
@@ -58,6 +63,9 @@ source "$SCRIPT_DIR/lib/indicators.sh" 2>/dev/null || echo "WARNING: indicators.
 source "$SCRIPT_DIR/lib/sentiment.sh" 2>/dev/null || echo "WARNING: sentiment.sh not found"
 source "$SCRIPT_DIR/lib/scoring.sh" 2>/dev/null || echo "WARNING: scoring.sh not found"
 source "$SCRIPT_DIR/lib/html_report.sh" 2>/dev/null || echo "WARNING: html_report.sh not found"
+# Phase 1 (v6.2 port): Kelly sizing + daily risk budget. The MiroFish cache
+# adapter is loaded by lib/scoring.sh.
+source "$AGENT_DIR/lib/kelly_sizing.sh" 2>/dev/null || echo "WARNING: kelly_sizing.sh not found"
 
 # Broker selection (default: Alpaca for backward compatibility)
 BROKER_CHOICE="${BROKER_CHOICE:-alpaca}"
@@ -75,6 +83,7 @@ ENABLE_REGIME_ADAPT=false
 ENABLE_KALMAN_FILTER=false
 ENABLE_DASHBOARD=false
 ENABLE_ALL_ENHANCEMENTS=false
+ENABLE_KELLY_SIZING="${KELLY_SIZING_ENABLED:-false}"
 
 # Version info
 VERSION="6.3"
@@ -422,8 +431,10 @@ fetch_stock_ohlcv() {
     # Generate sample prices around $150 with realistic variation
     local base_price=150
     for ((i=0; i<60; i++)); do
-        local variation=$(echo "scale=2; ($RANDOM % 40) - 20" | bc)
-        local open=$(echo "$base_price + $variation" | bc)
+        # Integer step of -3..+3 (bc with scale=2 made "%" a non-integer
+        # remainder, so prices drifted ~-19 per bar and went negative)
+        local variation=$(( (RANDOM % 7) - 3 ))
+local open=$(echo "$base_price + $variation" | bc)
         local high=$(echo "$open + 3" | bc)
         local low=$(echo "$open - 3" | bc)
         local close=$(echo "$open + (($RANDOM % 5) - 2)" | bc)
@@ -451,7 +462,13 @@ fetch_current_price() {
     local symbol=$1
     
     log_debug "Fetching current price for $symbol"
-    
+
+    # Offline/test runs: no network call (callers already handle "0")
+    if [[ "${SST_OFFLINE:-0}" == "1" ]]; then
+        echo "0"
+        return 1
+    fi
+
     # Try Yahoo Finance quote endpoint first
     local url="https://query1.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=price"
     local response=$(curl -s --max-time 10 "$url" 2>/dev/null)
@@ -580,21 +597,29 @@ score_stock() {
     local k_line=$(echo "$stoch" | grep -o '"k_line":[0-9.]*' | grep -o '[0-9.]*')
     local stoch_score=$(score_stochastic "$k_line")
     
-    local williams=$(echo "$indicators_json" | grep -o '"williams_r":[0-9.]*' | grep -o '[0-9.]*')
+    local williams=$(echo "$indicators_json" | grep -o '"williams_r": *-\{0,1\}[0-9.]*' | grep -o -- '-\{0,1\}[0-9.]*$')
     local williams_score=$(score_williams_r "$williams")
     
     local atr=$(echo "$indicators_json" | grep -o '"atr":"[0-9.]*' | grep -o '[0-9.]*')
     
     # Sentiment score
     local sentiment=$(aggregate_sentiment "$symbol")
-    local sentiment_score=$(echo "$sentiment" | grep -o '"aggregate_sentiment_score":[0-9]*' | grep -o '[0-9]*')
-    
+    # "na" when no source is available: sentiment then gets 0 weight
+    local sentiment_score=$(echo "$sentiment" | jq -r '.aggregate_sentiment_score // "na"' 2>/dev/null)
+    [[ -z "$sentiment_score" || "$sentiment_score" == "null" ]] && sentiment_score="na"
+
     # OBV score (simplified)
     local obv_score=50
     
     # Calculate confluence
     local confluence=$(calculate_confluence_score "$rsi_score" "$macd_score" "$bb_score" "$stoch_score" "$williams_score" "$obv_score" "$sentiment_score")
-    
+    # Optional MiroFish cache blend (no-op unless MIROFISH_ENABLED=true; no network)
+    if declare -f apply_mirofish_to_confluence >/dev/null; then
+        confluence=$(apply_mirofish_to_confluence "$confluence" "$symbol")
+    fi
+    local sentiment_json="$sentiment_score"
+    [[ "$sentiment_score" == "na" ]] && sentiment_json="null"
+
     # Generate output
     echo "{
         \"symbol\": \"${symbol}\",
@@ -605,7 +630,7 @@ score_stock() {
             \"stochastic\": $stoch_score,
             \"williams_r\": $williams_score,
             \"obv\": $obv_score,
-            \"sentiment\": $sentiment_score
+            \"sentiment\": $sentiment_json
         },
         \"confluence\": $confluence,
         \"indicators\": $indicators_json
@@ -637,7 +662,20 @@ analyze_stock() {
     
     # Score and calculate confluence
     local analysis=$(score_stock "$symbol" "$indicators")
-    
+
+    # Phase 1 Kelly position plan (analysis only; never allocates budget).
+    # Entry = last close of the fetched series, stop = STOP_LOSS_PERCENT below.
+    if [[ "${KELLY_SIZING_ENABLED:-false}" == "true" ]] && declare -f kelly_position_plan >/dev/null; then
+        local entry stop conf plan
+        entry=$(extract_closes "$ohlcv" | tail -1)
+        stop=$(calc_stop_loss_percent "$entry" "${STOP_LOSS_PERCENT:-5}")
+        conf=$(echo "$analysis" | jq -r '.confluence.final_confidence // 50' 2>/dev/null)
+        plan=$(kelly_position_plan "${ACCOUNT_EQUITY:-10000}" "$entry" "$stop" "${conf:-50}" unknown)
+        if [[ -n "$plan" ]]; then
+            analysis=$(echo "$analysis" | jq --argjson p "$plan" '. + {position_sizing:$p}' 2>/dev/null || echo "$analysis")
+        fi
+    fi
+
     echo "$analysis"
     log_info "Completed analysis for $symbol"
     return 0
@@ -812,6 +850,11 @@ FEATURES:
     • Complete Backtesting Module (parameter tuning, performance analysis)
     • React Dashboard (professional UI, real-time updates)
 
+  Phase 1 (from v6.2):
+    • Fractional (quarter) Kelly position sizing with daily risk budget (--kelly)
+    • Deterministic news sentiment (Finnhub/NewsAPI keyword classifier)
+    • Optional MiroFish scan-cache signal, default off, no network (--mirofish)
+
   Broker Integration:
     • Alpaca Securities and Robinhood Markets
     • Account management, position tracking, order placement
@@ -822,7 +865,7 @@ STATUS: Production-ready with optional enhancements
 
 Use --help for usage information
 Use --full to enable all enhancements
-Use individual flags: --ml, --regime-adapt, --kalman, --dashboard
+Use individual flags: --ml, --regime-adapt, --kalman, --dashboard, --kelly, --mirofish, --phase1
 
 ============================================
 
@@ -875,6 +918,13 @@ Usage: ./StockSwingTrader_Agent.sh [OPTIONS]
     --full                           Enable ALL v6.3 enhancements (equivalent to:
                                      --ml --regime-adapt --kalman --dashboard)
 
+=== PHASE 1 FLAGS (ported from v6.2) ===
+    --kelly                          Fractional (quarter) Kelly position sizing with daily risk budget;
+                                     never exceeds MAX_POSITION_SIZE / KELLY_MAX_POSITION_PCT / daily loss limit
+    --mirofish                       Use MiroFish scan cache (cache/mirofish/<SYMBOL>.json) if fresh (<36h);
+                                     no network calls; skipped instantly when absent (also: MIROFISH_ENABLED=true)
+    --phase1                         Enable --kelly and --mirofish (--full does not include them)
+
 === BROKER & TRADING OPTIONS ===
 
     --broker {alpaca|robinhood}      Choose broker for trading (default: alpaca)
@@ -888,8 +938,8 @@ Usage: ./StockSwingTrader_Agent.sh [OPTIONS]
 
 === BACKTESTING OPTIONS ===
 
-    --backtest SYMBOLS               Run backtest on stocks (comma-separated)
-    --start START_DATE               Backtest start date (YYYY-MM-DD, default: 2 years ago)
+    --backtest SYMBOLS               Run backtest (comma-separated); use with --start/--end/--train-pct
+--start START_DATE               Backtest start date (YYYY-MM-DD, default: 2 years ago)
     --end END_DATE                   Backtest end date (YYYY-MM-DD, default: today)
     --train-pct PCT                  Train/test split percentage (default: 80)
 
@@ -909,10 +959,11 @@ With Enhancements:
     ./StockSwingTrader_Agent.sh --symbols AAPL --kalman
     ./StockSwingTrader_Agent.sh --symbols AAPL,MSFT,GOOGL --full
     ./StockSwingTrader_Agent.sh --top-10 --full --debug
+    ./StockSwingTrader_Agent.sh --symbols AAPL,MSFT --phase1
 
 Backtesting:
-    ./StockSwingTrader_Agent.sh --backtest AAPL 2022-01-01 2024-01-01
-    ./StockSwingTrader_Agent.sh --backtest AAPL,MSFT,GOOGL --train-pct 80
+    ./StockSwingTrader_Agent.sh --backtest AAPL --start 2022-01-01 --end 2024-01-01
+./StockSwingTrader_Agent.sh --backtest AAPL,MSFT,GOOGL --train-pct 80
 
 Dashboard:
     ./StockSwingTrader_Agent.sh --dashboard
@@ -974,6 +1025,27 @@ main() {
             --dashboard)
                 ENABLE_DASHBOARD=true
                 log_info "Dashboard enhancement enabled (--dashboard)"
+                shift
+                ;;
+            --kelly)
+                KELLY_SIZING_ENABLED=true
+                ENABLE_KELLY_SIZING=true
+                export KELLY_SIZING_ENABLED
+                log_info "Kelly position sizing enabled (--kelly)"
+                shift
+                ;;
+            --mirofish)
+                MIROFISH_ENABLED=true
+                export MIROFISH_ENABLED
+                log_info "MiroFish cache signal enabled (--mirofish; cache only, no network)"
+                shift
+                ;;
+            --phase1)
+                KELLY_SIZING_ENABLED=true
+                ENABLE_KELLY_SIZING=true
+                MIROFISH_ENABLED=true
+                export KELLY_SIZING_ENABLED MIROFISH_ENABLED
+                log_info "Phase 1 enabled (--phase1: Kelly sizing, MiroFish cache)"
                 shift
                 ;;
             --full)
@@ -1110,11 +1182,11 @@ main() {
         log_info "Backtest mode enabled"
         
         # Load backtest module
-        if [[ ! -f "$SCRIPT_DIR/lib/backtest.sh" ]]; then
-            log_error "Backtest module not found: $SCRIPT_DIR/lib/backtest.sh"
+        if [[ ! -f "$AGENT_DIR/lib/backtest.sh" ]]; then
+            log_error "Backtest module not found: $AGENT_DIR/lib/backtest.sh"
             exit 1
         fi
-        source "$SCRIPT_DIR/lib/backtest.sh"
+        source "$AGENT_DIR/lib/backtest.sh"
         
         # Set default dates if not provided
         if [[ -z "$backtest_start_date" ]]; then

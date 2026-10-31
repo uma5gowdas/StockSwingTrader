@@ -58,6 +58,10 @@ add_test "Regime Detector" "${SCRIPT_DIR}/test_regime_detector.sh"
 add_test "Scoring Integration (Python)" "${SCRIPT_DIR}/test_scoring_integration.py"
 add_test "Dashboard Components" "${SCRIPT_DIR}/test_dashboard.js"
 add_test "Backend API" "${SCRIPT_DIR}/test_backend.js"
+add_test "Kelly Sizing & Risk Budget" "${SCRIPT_DIR}/test_kelly_sizing.sh"
+add_test "Sentiment (deterministic)" "${SCRIPT_DIR}/test_sentiment.sh"
+add_test "MiroFish Cache Adapter" "${SCRIPT_DIR}/test_mirofish_adapter.sh"
+add_test "Phase 1 Integration (CLI)" "${SCRIPT_DIR}/test_phase1_integration.sh"
 
 # ============================================================================
 # Utility Functions
@@ -229,6 +233,10 @@ when it exits 0 with at least one passed test and zero failures.
 | Scoring Integration (Python) | tests/test_scoring_integration.py | python3 | Confluence weighting formula and signal thresholds |
 | Dashboard Components | tests/test_dashboard.js | node --test | frontend/src utils, usePolling hook, all App routes, tsc --noEmit |
 | Backend API | tests/test_backend.js | node --test | backend/server.js routes on an ephemeral port |
+| Kelly Sizing & Risk Budget | tests/test_kelly_sizing.sh | bash | lib/kelly_sizing.sh (fractional Kelly, caps, daily risk budget ledger), risk_management/strategy wiring |
+| Sentiment (deterministic) | tests/test_sentiment.sh | bash | lib/sentiment.sh (news keyword classifier, unavailable sources, local Finnhub stub), legacy sentiment sentinel |
+| MiroFish Cache Adapter | tests/test_mirofish_adapter.sh | bash | lib/mirofish_adapter.sh cache statuses, legacy and v2 blending, no network calls |
+| Phase 1 Integration (CLI) | tests/test_phase1_integration.sh | bash | StockSwingTrader_Agent.sh --kelly/--mirofish/--phase1, help, --backtest syntax, MiroFish-enabled timing |
 
 ## Environment
 

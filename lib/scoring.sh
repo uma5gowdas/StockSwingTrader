@@ -17,6 +17,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/ml_predictor.sh" 2>/dev/null || true
 source "${SCRIPT_DIR}/regime_weighting.sh" 2>/dev/null || true
 source "${SCRIPT_DIR}/kalman_filter.sh" 2>/dev/null || true
+# Optional MiroFish cache adapter (Phase 1 port). Uses its own dir variable so
+# the SCRIPT_DIR semantics above are left unchanged.
+SCORING_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCORING_LIB_DIR}/mirofish_adapter.sh" 2>/dev/null || true
 
 # ============================================================================
 # Score Individual Technical Indicators
@@ -187,8 +191,27 @@ score_obv() {
 # Confluence Engine: Multi-Source Scoring
 # ============================================================================
 
+# Map a legacy confluence score to signal and reasoning (75/60/40/25 thresholds)
+# Args: score
+# Returns: "SIGNAL|reasoning"
+_confluence_signal_for() {
+    local final_confidence=$1
+    if (( $(echo "$final_confidence >= 75" | bc -l) )); then
+        echo "STRONG_BUY|Multiple indicators aligned bullish; high confidence entry point"
+    elif (( $(echo "$final_confidence >= 60" | bc -l) )); then
+        echo "BUY|Most indicators bullish; good entry opportunity"
+    elif (( $(echo "$final_confidence >= 40" | bc -l) )); then
+        echo "HOLD|Mixed signals; monitor for clearer direction"
+    elif (( $(echo "$final_confidence >= 25" | bc -l) )); then
+        echo "SELL|Most indicators bearish; consider exiting positions"
+    else
+        echo "STRONG_SELL|Multiple indicators aligned bearish; high conviction short"
+    fi
+}
 # Calculate final confidence score from all signals (Legacy - use calculate_confluence_score_v2)
 # Args: rsi_score, macd_score, bb_score, stochastic_score, williams_r_score, obv_score, sentiment_score
+#   sentiment_score may be "na", "null" or "unavailable": sentiment then gets
+#   0 weight (final = technical average) and sentiment_contribution is null.
 # Returns: JSON with final_confidence, signal (BUY/SELL/HOLD), reasoning
 calculate_confluence_score() {
     local rsi_score=${1:-50}
@@ -199,34 +222,71 @@ calculate_confluence_score() {
     local obv_score=${6:-50}
     local sentiment_score=${7:-50}
     
-    # Weighted confluence (sentiment is 20% of total, technical is 80%)
+    local sentiment_available=true
+    case "$sentiment_score" in
+        na|null|unavailable) sentiment_available=false ;;
+    esac
+    # Weighted confluence (sentiment is 20% of total, technical is 80%;
+    # technical is 100% when sentiment is unavailable)
     local technical_avg=$(( (rsi_score + macd_score + bb_score + stoch_score + williams_score + obv_score) / 6 ))
-    local final_confidence=$(echo "(${technical_avg} * 0.8) + (${sentiment_score} * 0.2)" | bc)
-    
-    # Determine signal based on confluence thresholds
-    local signal="HOLD"
-    local reasoning=""
-    
-    if (( $(echo "$final_confidence >= 75" | bc -l) )); then
-        signal="STRONG_BUY"
-        reasoning="Multiple indicators aligned bullish; high confidence entry point"
-    elif (( $(echo "$final_confidence >= 60" | bc -l) )); then
-        signal="BUY"
-        reasoning="Most indicators bullish; good entry opportunity"
-    elif (( $(echo "$final_confidence >= 40" | bc -l) )); then
-        signal="HOLD"
-        reasoning="Mixed signals; monitor for clearer direction"
-    elif (( $(echo "$final_confidence >= 25" | bc -l) )); then
-        signal="SELL"
-        reasoning="Most indicators bearish; consider exiting positions"
+    local final_confidence
+    if [[ "$sentiment_available" == "true" ]]; then
+        final_confidence=$(echo "(${technical_avg} * 0.8) + (${sentiment_score} * 0.2)" | bc)
     else
-        signal="STRONG_SELL"
-        reasoning="Multiple indicators aligned bearish; high conviction short"
+        final_confidence=$technical_avg
     fi
-    
+
+    # Determine signal based on confluence thresholds
+    local signal_and_reason signal reasoning
+    signal_and_reason=$(_confluence_signal_for "$final_confidence")
+    signal="${signal_and_reason%%|*}"
+    reasoning="${signal_and_reason#*|}"
+
     final_confidence=$(printf "%.0f" "$final_confidence")
-    
-    echo "{\"final_confidence\":${final_confidence},\"signal\":\"${signal}\",\"reasoning\":\"${reasoning}\",\"technical_avg\":${technical_avg},\"sentiment_contribution\":${sentiment_score}}"
+
+    if [[ "$sentiment_available" == "true" ]]; then
+        echo "{\"final_confidence\":${final_confidence},\"signal\":\"${signal}\",\"reasoning\":\"${reasoning}\",\"technical_avg\":${technical_avg},\"sentiment_contribution\":${sentiment_score},\"sentiment_available\":true}"
+    else
+        echo "{\"final_confidence\":${final_confidence},\"signal\":\"${signal}\",\"reasoning\":\"${reasoning}\",\"technical_avg\":${technical_avg},\"sentiment_contribution\":null,\"sentiment_available\":false}"
+    fi
+}
+
+# Blend the optional MiroFish cache signal into a legacy confluence JSON
+# Args: confluence_json (from calculate_confluence_score), symbol
+# Returns: the input unchanged when MiroFish is disabled (or on jq failure);
+#   otherwise the input plus a "mirofish" block. When the cache status is OK
+#   and MIROFISH_WEIGHT > 0, final_confidence = round(final*(1-w) + mf*w)
+#   and signal/reasoning are recomputed with the same thresholds.
+apply_mirofish_to_confluence() {
+    local confluence=$1
+    local symbol=$2
+    if [[ "${MIROFISH_ENABLED:-false}" != "true" ]] || ! declare -f mirofish_get_prediction >/dev/null; then
+        echo "$confluence"
+        return 0
+    fi
+    local mf mf_status mf_score w final new_final sr out
+    mf=$(mirofish_get_prediction "$symbol")
+    mf_status=$(echo "$mf" | jq -r '.status' 2>/dev/null)
+    mf_score=$(echo "$mf" | jq -r '.score // "null"' 2>/dev/null)
+    w=$(mirofish_effective_weight)
+    final=$(echo "$confluence" | jq -r '.final_confidence' 2>/dev/null)
+    if [[ "$mf_status" == "OK" && "$mf_score" != "null" && "$final" =~ ^-?[0-9]+$ ]] \
+        && awk -v w="$w" 'BEGIN { exit !(w > 0) }'; then
+        new_final=$(mirofish_blend_score "$final" "$mf_score" "$w")
+        sr=$(_confluence_signal_for "$new_final")
+        out=$(echo "$confluence" | jq -c --argjson mf "$mf" --argjson w "$w" --argjson f "$new_final" \
+            --arg sig "${sr%%|*}" --arg rsn "${sr#*|}" \
+            '. + {final_confidence:$f, signal:$sig, reasoning:$rsn,
+                  mirofish:{status:$mf.status, prediction:$mf.prediction, score:$mf.score, weight:$w, applied:true}}' 2>/dev/null)
+    else
+        out=$(echo "$confluence" | jq -c --argjson mf "$mf" --argjson w "$w" \
+            '. + {mirofish:{status:$mf.status, prediction:$mf.prediction, score:$mf.score, weight:$w, applied:false}}' 2>/dev/null)
+    fi
+    if [[ -z "$out" ]]; then
+        echo "$confluence"
+    else
+        echo "$out"
+    fi
 }
 
 # ============================================================================
@@ -358,14 +418,54 @@ calculate_confluence_score_v2() {
     # ========================================================================
     # Calculate Composite Confluence Score
     # ========================================================================
+    # Optional MiroFish cache component (Phase 1 port; cache read only, no
+    # network). Applied only when enabled, status OK and weight > 0; then the
+    # four weights above scale by (1 - w).
+    local mf_json="" mf_status="" mf_score="null" mf_pred="null" mf_w=0 mf_applied=false
+    if [[ "${MIROFISH_ENABLED:-false}" == "true" ]] && declare -f mirofish_get_prediction >/dev/null; then
+        mf_json=$(mirofish_get_prediction "$symbol")
+        mf_status=$(echo "$mf_json" | jq -r '.status' 2>/dev/null)
+        mf_score=$(echo "$mf_json" | jq -r '.score // "null"' 2>/dev/null)
+        mf_pred=$(echo "$mf_json" | jq -c '.prediction' 2>/dev/null)
+        mf_w=$(mirofish_effective_weight)
+        if [[ "$mf_status" == "OK" && "$mf_score" != "null" ]] && awk -v w="$mf_w" 'BEGIN { exit !(w > 0) }'; then
+            mf_applied=true
+        fi
+    fi
     local confluence_score
-    confluence_score=$(echo "scale=2; \
-        ($ml_confidence * 0.15) + \
-        ($regime_score * 0.35) + \
-        ($technical_score * 0.30) + \
-        ($volume_trend_score * 0.20)" | bc)
-    
+    if [[ "$mf_applied" == "true" ]]; then
+        confluence_score=$(echo "scale=4; \
+            (($ml_confidence * 0.15) + \
+            ($regime_score * 0.35) + \
+            ($technical_score * 0.30) + \
+            ($volume_trend_score * 0.20)) * (1 - $mf_w) + \
+            ($mf_score * $mf_w)" | bc)
+    else
+        confluence_score=$(echo "scale=2; \
+            ($ml_confidence * 0.15) + \
+            ($regime_score * 0.35) + \
+            ($technical_score * 0.30) + \
+            ($volume_trend_score * 0.20)" | bc)
+    fi
     confluence_score=$(printf "%.0f" "$confluence_score")
+    local wp_ml=15 wp_regime=35 wp_tech=30 wp_vt=20 mirofish_component=""
+    if [[ "$mf_applied" == "true" ]]; then
+        wp_ml=$(awk -v w="$mf_w" 'BEGIN { printf "%.1f", 15 * (1 - w) }')
+        wp_regime=$(awk -v w="$mf_w" 'BEGIN { printf "%.1f", 35 * (1 - w) }')
+        wp_tech=$(awk -v w="$mf_w" 'BEGIN { printf "%.1f", 30 * (1 - w) }')
+        wp_vt=$(awk -v w="$mf_w" 'BEGIN { printf "%.1f", 20 * (1 - w) }')
+    fi
+    if [[ -n "$mf_json" ]]; then
+        local mf_wp="0"
+        [[ "$mf_applied" == "true" ]] && mf_wp=$(awk -v w="$mf_w" 'BEGIN { printf "%.1f", 100 * w }')
+        mirofish_component=",
+    \"mirofish\": {
+      \"score\": ${mf_score},
+      \"status\": \"${mf_status}\",
+      \"prediction\": ${mf_pred:-null},
+      \"weight_percent\": ${mf_wp}
+    }"
+    fi
     
     # ========================================================================
     # Determine Signal Strength (agreement level)
@@ -461,21 +561,21 @@ calculate_confluence_score_v2() {
     "ml_confidence": {
       "score": ${ml_confidence},
       "direction": "${ml_direction}",
-      "weight_percent": 15
+      "weight_percent": ${wp_ml}
     },
     "regime_score": {
       "score": ${regime_score},
       "regime": "${regime}",
-      "weight_percent": 35
+      "weight_percent": ${wp_regime}
     },
     "technical_score": {
       "score": ${technical_score},
-      "weight_percent": 30
+      "weight_percent": ${wp_tech}
     },
     "volume_trend_score": {
       "score": ${volume_trend_score},
-      "weight_percent": 20
-    }
+      "weight_percent": ${wp_vt}
+    }${mirofish_component}
   },
   "breakdown": {
     "symbol": "${symbol}",
@@ -596,5 +696,6 @@ generate_score_summary() {
 # Export all functions
 export -f score_rsi score_macd score_bollinger_bands score_stochastic
 export -f score_williams_r score_obv calculate_confluence_score calculate_confluence_score_v2
+export -f _confluence_signal_for apply_mirofish_to_confluence
 export -f calc_stop_loss_atr calc_stop_loss_percent calc_take_profit
 export -f calc_risk_reward_ratio generate_score_summary

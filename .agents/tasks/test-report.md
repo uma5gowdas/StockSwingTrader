@@ -1,6 +1,6 @@
 # StockSwingTrader v6.3 - Test Report
 
-**Generated:** 2026-10-30 17:36:59  
+**Generated:** 2026-10-31 01:18:47  
 **Command:** `bash tests/test_runner.sh`  
 **Result:** ✅ All suites passed
 
@@ -8,9 +8,9 @@
 
 | Metric | Value |
 |--------|-------|
-| Suites | 9 (9 passed, 0 failed) |
-| Total Tests | 229 |
-| Tests Passed | **229** |
+| Suites | 13 (13 passed, 0 failed) |
+| Total Tests | 390 |
+| Tests Passed | **390** |
 | Tests Failed | **0** |
 | Success Rate | 100% |
 
@@ -18,15 +18,19 @@
 
 | Suite | Status | Time | Details |
 |-------|--------|------|---------|
-| ML Predictor | ✅ PASS | 32969ms | 29 passed, 0 failed |
-| Regime Weighting | ✅ PASS | 31878ms | 30 passed, 0 failed |
-| Kalman Filter | ✅ PASS | 3524ms | 18 passed, 0 failed |
-| Backtest | ✅ PASS | 7955ms | 34 passed, 0 failed |
-| ML Scoring Integration | ✅ PASS | 36485ms | 29 passed, 0 failed |
-| Regime Detector | ✅ PASS | 33381ms | 20 passed, 0 failed |
-| Scoring Integration (Python) | ✅ PASS | 397ms | 32 passed, 0 failed |
-| Dashboard Components | ✅ PASS | 2138ms | 21 passed, 0 failed |
-| Backend API | ✅ PASS | 1004ms | 16 passed, 0 failed |
+| ML Predictor | ✅ PASS | 27717ms | 29 passed, 0 failed |
+| Regime Weighting | ✅ PASS | 32426ms | 30 passed, 0 failed |
+| Kalman Filter | ✅ PASS | 3651ms | 18 passed, 0 failed |
+| Backtest | ✅ PASS | 9471ms | 34 passed, 0 failed |
+| ML Scoring Integration | ✅ PASS | 40794ms | 29 passed, 0 failed |
+| Regime Detector | ✅ PASS | 34869ms | 20 passed, 0 failed |
+| Scoring Integration (Python) | ✅ PASS | 136ms | 32 passed, 0 failed |
+| Dashboard Components | ✅ PASS | 2118ms | 21 passed, 0 failed |
+| Backend API | ✅ PASS | 757ms | 16 passed, 0 failed |
+| Kelly Sizing & Risk Budget | ✅ PASS | 6729ms | 51 passed, 0 failed |
+| Sentiment (deterministic) | ✅ PASS | 4155ms | 36 passed, 0 failed |
+| MiroFish Cache Adapter | ✅ PASS | 14243ms | 42 passed, 0 failed |
+| Phase 1 Integration (CLI) | ✅ PASS | 128150ms | 32 passed, 0 failed |
 
 Counts are taken from each suite's own summary output. A suite passes only
 when it exits 0 with at least one passed test and zero failures.
@@ -44,6 +48,10 @@ when it exits 0 with at least one passed test and zero failures.
 | Scoring Integration (Python) | tests/test_scoring_integration.py | python3 | Confluence weighting formula and signal thresholds |
 | Dashboard Components | tests/test_dashboard.js | node --test | frontend/src utils, usePolling hook, all App routes, tsc --noEmit |
 | Backend API | tests/test_backend.js | node --test | backend/server.js routes on an ephemeral port |
+| Kelly Sizing & Risk Budget | tests/test_kelly_sizing.sh | bash | lib/kelly_sizing.sh (fractional Kelly, caps, daily risk budget ledger), risk_management/strategy wiring |
+| Sentiment (deterministic) | tests/test_sentiment.sh | bash | lib/sentiment.sh (news keyword classifier, unavailable sources, local Finnhub stub), legacy sentiment sentinel |
+| MiroFish Cache Adapter | tests/test_mirofish_adapter.sh | bash | lib/mirofish_adapter.sh cache statuses, legacy and v2 blending, no network calls |
+| Phase 1 Integration (CLI) | tests/test_phase1_integration.sh | bash | StockSwingTrader_Agent.sh --kelly/--mirofish/--phase1, help, --backtest syntax, MiroFish-enabled timing |
 
 ## Environment
 

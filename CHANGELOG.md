@@ -2,6 +2,21 @@
 
 All notable changes to StockSwingTrader are documented in this file.
 
+## [6.3] - Phase 1 port from v6.2
+
+### Added
+- `lib/kelly_sizing.sh`: fractional (quarter) Kelly position sizing with hard caps (`MAX_POSITION_SIZE`, `KELLY_MAX_POSITION_PCT`, `ALPACA_MAX_POSITION_SIZE`), drawdown stop and a date-keyed daily risk budget ledger with an `mkdir` lock. Wired into `mean_reversion_enter` / `trend_follow_enter` (only reduces quantity, reserves budget before the order) and into analysis output as `position_sizing`.
+- `lib/mirofish_adapter.sh`: optional MiroFish signal read from `cache/mirofish/<SYMBOL>.json`, no network calls, statuses DISABLED/MISSING/INVALID/STALE/LOW_CONFIDENCE/OK. Blends into the legacy score and `calculate_confluence_score_v2` with `MIROFISH_WEIGHT` (other weights scale by 1 − w). Cache schema is provisional and unverified against real MiroFish.
+- CLI flags `--kelly`, `--mirofish`, `--phase1`; Phase 1 settings in `config.template.sh` (all `${VAR:-default}`, `MIROFISH_ENABLED=false`, `KELLY_SIZING_ENABLED=false`).
+- Test suites: `test_kelly_sizing.sh`, `test_sentiment.sh`, `test_mirofish_adapter.sh`, `test_phase1_integration.sh` (+ `tests/http_stub.py`), registered in `tests/test_runner.sh`.
+
+### Changed
+- `lib/sentiment.sh`: removed the random Twitter/Reddit/StockTwits scores (they now report "unavailable"); news comes from Finnhub or NewsAPI when keys are set and is scored with the Phase 1 weighted keyword classifier with negation discount. Unavailable sentiment gets 0 weight in `calculate_confluence_score` (`sentiment_available` added to its JSON).
+
+### Fixed
+- `--backtest` examples in `--help`, the script header and `DEPLOYMENT_PACKAGE/README.md` used positional dates; they now use `--start`/`--end`. The backtest branch now finds `lib/backtest.sh` (it resolved to `lib/lib/backtest.sh`).
+- Demo OHLCV generator drifted negative (bc `%` with `scale=2`), so analysis always stopped at "Insufficient data points". ATR absolute value and Williams %R extraction no longer break on negative numbers.
+
 ## [6.1] - 2025-10-28
 
 ### Added (v6.1)
