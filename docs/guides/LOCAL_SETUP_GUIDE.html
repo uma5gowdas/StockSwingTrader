@@ -1,0 +1,969 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StockSwingTrader v6.3: Local Setup Guide for macOS</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #222;
+        }
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #5a67d8 0%, #764ba2 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+        .header h1 { font-size: 2.3em; margin-bottom: 10px; }
+        .header p { font-size: 1.05em; opacity: 0.95; }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 20px;
+            padding: 30px;
+            background: #f8f9fa;
+            border-bottom: 2px solid #e0e0e0;
+        }
+        .stat-box {
+            background: white;
+            padding: 18px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        .stat-box .number { font-size: 1.6em; font-weight: bold; color: #4c51bf; margin-bottom: 5px; }
+        .stat-box .label { color: #555; font-size: 0.9em; }
+        .toc { padding: 25px 40px; background: #f8f9fa; border-bottom: 2px solid #e0e0e0; }
+        .toc h2 { font-size: 1.3em; color: #4c51bf; margin-bottom: 10px; }
+        .toc ol { columns: 2; column-gap: 40px; padding-left: 22px; line-height: 1.9; }
+        .toc a { color: #1a1f71; }
+        .content { padding: 40px; }
+        .section { margin-bottom: 44px; }
+        .section h2 {
+            font-size: 1.7em;
+            color: #4c51bf;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #4c51bf;
+        }
+        .section h3 { font-size: 1.2em; color: #333; margin-top: 24px; margin-bottom: 10px; }
+        .content p, .content li { line-height: 1.7; color: #333; }
+        .content p { margin-bottom: 12px; }
+        .content ul, .content ol { margin: 0 0 14px 24px; }
+        .code-block {
+            background: #1e1e1e;
+            color: #e6e6e6;
+            padding: 15px;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            margin: 12px 0 16px;
+            border-left: 4px solid #667eea;
+        }
+        pre.code-block { white-space: pre; line-height: 1.5; }
+        pre.code-block code { font-family: inherit; color: inherit; background: none; padding: 0; }
+        pre.output { background: #f4f5fb; color: #1d1d3a; border-left-color: #28a745; }
+        .see { font-weight: 600; color: #155724; margin-top: 4px; }
+        .highlight-box, .success-box, .info-box, .danger-box {
+            padding: 15px; border-radius: 4px; margin: 18px 0; line-height: 1.7;
+        }
+        .highlight-box { background: #fff3cd; border-left: 4px solid #b38600; }
+        .success-box { background: #d4edda; border-left: 4px solid #28a745; }
+        .info-box { background: #d1ecf1; border-left: 4px solid #17a2b8; }
+        .danger-box { background: #f8d7da; border-left: 4px solid #c82333; }
+        table { width: 100%; border-collapse: collapse; margin: 16px 0 20px; }
+        table th { background: #4c51bf; color: white; padding: 10px 12px; text-align: left; font-weight: 600; }
+        table th[scope="row"] { background: #eef0fb; color: #1a1f71; }
+        table td { padding: 10px 12px; border-bottom: 1px solid #e0e0e0; vertical-align: top; line-height: 1.6; }
+        .badge { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 0.8em; font-weight: 600; }
+        .badge-success { background: #d4edda; color: #155724; }
+        .badge-warning { background: #fff3cd; color: #6b4f00; }
+        .badge-danger { background: #f8d7da; color: #721c24; }
+        .content p code, .content li code, .content td code, .content th code, .box code {
+            font-family: 'Courier New', monospace;
+            background: #eef0fb;
+            color: #1a1f71;
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-size: 0.92em;
+        }
+        .content a { color: #1a1f71; }
+        .toc a:focus-visible, .content a:focus-visible { outline: 3px solid #1a1f71; outline-offset: 2px; }
+        .card {
+            border: 3px solid #4c51bf;
+            border-radius: 10px;
+            padding: 20px;
+            background: #fbfbff;
+        }
+        .footer {
+            background: #f8f9fa;
+            padding: 25px;
+            text-align: center;
+            color: #555;
+            border-top: 2px solid #e0e0e0;
+            line-height: 1.7;
+        }
+        @media (max-width: 700px) { .toc ol { columns: 1; } .content { padding: 20px; } }
+        @media print { body { background: white; padding: 0; } .container { box-shadow: none; } }
+    </style>
+</head>
+<body>
+<div class="container">
+    <header class="header">
+        <h1>StockSwingTrader v6.3: Local Setup on a Mac</h1>
+        <p>From the private GitHub repo to a working CLI, tests and dashboard, step by step.</p>
+        <p>Every command below was run on a fresh clone of <code>main</code> at <code>813f7dd</code> on 2026-10-31. The broker commands (<a href="#cli-broker">Step 7.6</a>), <code>--ml</code>/<code>--kalman</code> and the test counts were re-checked after the broker/path fix. Step 5, Step 7, the new <a href="#step-7-safety">order safety section</a>, the test counts and Troubleshooting were updated for live-safety Step 1 (<code>5a7abc0</code>). The <a href="#step-8-agents">agent layer section</a> was added for Phase 0-1 (<code>d626d6b</code>, 2026-11-01) and extended with the <a href="#agents-quant">Quant Research agent</a> for Phase 2 (<code>75ea040</code>, 2026-11-01); the agent test counts are from the Phase 2 runner.</p>
+    </header>
+
+    <div class="stats-grid">
+        <div class="stat-box"><div class="number">macOS</div><div class="label">bash 3.2 · Homebrew</div></div>
+        <div class="stat-box"><div class="number">Python 3.13</div><div class="label">venv, unpinned deps</div></div>
+        <div class="stat-box"><div class="number">Node 25</div><div class="label">npm 11</div></div>
+        <div class="stat-box"><div class="number">:3000 / :5173</div><div class="label">backend / dashboard</div></div>
+        <div class="stat-box"><div class="number">1580 / 1580</div><div class="label">tests passed (26 suites, with agent venv)</div></div>
+    </div>
+
+    <nav class="toc" aria-labelledby="toc-heading">
+        <h2 id="toc-heading">Contents</h2>
+        <ol start="0">
+            <li><a href="#step-0">What this is (read first)</a></li>
+            <li><a href="#step-1">Check prerequisites</a></li>
+            <li><a href="#step-2">GitHub access to the private repo</a></li>
+            <li><a href="#step-3">Clone the repository</a></li>
+            <li><a href="#step-4">Python environment and dependencies</a></li>
+            <li><a href="#step-5">Configure (config.sh)</a></li>
+            <li><a href="#step-6">Train the ML model</a></li>
+            <li><a href="#step-7">Run the CLI</a>
+                <ul>
+                    <li><a href="#step-7-safety">Order safety and v2 scoring (live safety, Step 1)</a></li>
+                    <li><a href="#step-8-agents">Agent layer, Phase 0-2 (Technical, Validation and Quant agents)</a>
+                        <ul>
+                            <li><a href="#agents-venv">Agent venv (Python 3.12)</a></li>
+                            <li><a href="#agents-status">agents status</a></li>
+                            <li><a href="#agents-technical">Technical agent</a></li>
+                            <li><a href="#agents-validate">Validation agent: gate, parity, offline demo</a></li>
+                            <li><a href="#agents-gate-report">Reading the gate report</a></li>
+                            <li><a href="#agents-quant">Quant Research agent (Phase 2, Qlib)</a>
+                                <ul>
+                                    <li><a href="#agents-quant-ingest">Download the data</a></li>
+                                    <li><a href="#agents-quant-train">Train</a></li>
+                                    <li><a href="#agents-quant-predict">Nightly ranking</a></li>
+                                    <li><a href="#agents-quant-evaluate">Evaluate</a></li>
+                                    <li><a href="#agents-quant-report">Reading the quant report</a></li>
+                                </ul>
+                            </li>
+                            <li><a href="#agents-tests">Tests with and without the venv</a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </li>
+            <li><a href="#step-8">Run the tests</a></li>
+            <li><a href="#step-9">Run the dashboard</a></li>
+            <li><a href="#step-10">Updating later</a></li>
+            <li><a href="#step-11">Troubleshooting</a></li>
+            <li><a href="#quick-ref">Quick-reference card</a></li>
+        </ol>
+    </nav>
+
+    <main class="content">
+
+        <!-- ================= STEP 0 ================= -->
+        <section class="section" id="step-0" aria-labelledby="h-step-0">
+            <h2 id="h-step-0">Step 0. What this is (read first)</h2>
+            <p>StockSwingTrader is a set of Bash, Python and Node tools for swing-trading analysis: technical indicators, a confluence score, an XGBoost direction predictor, regime detection, a Kalman filter, a backtester and a React dashboard. This guide takes you from the private GitHub repo to a working local install.</p>
+            <div class="danger-box box">
+                <p><strong>Disclaimer.</strong> Not financial advice. Use paper trading only. The XGBoost model is trained on <em>synthetic</em> data (every prediction says <code>"model_training_data": "synthetic"</code>), so its output is not evidence of anything about real markets.</p>
+            </div>
+            <div class="info-box box">
+                <p><strong>How this guide was verified.</strong> The repo was cloned fresh into <code>/tmp/sst-fresh</code> and every step was run there. The guide uses <code>~/Projects/StockSwingTrader</code> as the folder; the commands are the same. Steps that could not be run on the test Mac (Homebrew installs, <code>gh</code>/SSH login, the Python 3.11 path, pressing Ctrl+C) are tagged <span class="badge badge-warning">not run</span>. Commands that ran and worked are tagged <span class="badge badge-success">verified</span>. Known failures are tagged <span class="badge badge-danger">known issue</span>, each with a workaround that does work.</p>
+            </div>
+        </section>
+
+        <!-- ================= STEP 1 ================= -->
+        <section class="section" id="step-1" aria-labelledby="h-step-1">
+            <h2 id="h-step-1">Step 1. Check prerequisites</h2>
+            <p>Open Terminal and run: <span class="badge badge-success">verified</span></p>
+<pre class="code-block"><code>which git bash python3 node npm jq bc curl brew
+/bin/bash --version | head -1
+python3 --version
+node --version
+npm --version</code></pre>
+            <p class="see">What you should see (test Mac):</p>
+<pre class="code-block output"><code>/usr/bin/git
+/bin/bash
+/opt/homebrew/bin/python3
+/opt/homebrew/bin/node
+/opt/homebrew/bin/npm
+/opt/homebrew/bin/jq
+/usr/bin/bc
+/usr/bin/curl
+/opt/homebrew/bin/brew
+GNU bash, version 3.2.57(1)-release (arm64-apple-darwin25)
+Python 3.13.12
+v25.6.1
+11.9.0</code></pre>
+            <p>Every tool should print a path. <code>bc</code> and <code>curl</code> ship with macOS. If one is missing, install it with Homebrew: <span class="badge badge-warning">not run</span> (everything was already installed on the test Mac)</p>
+<pre class="code-block"><code># Homebrew itself, if `which brew` prints nothing: see https://brew.sh
+brew install git        # newer git (macOS also ships /usr/bin/git)
+brew install python@3.13
+brew install node       # includes npm
+brew install jq</code></pre>
+            <table>
+                <caption class="see" style="text-align:left">What each tool is used for</caption>
+                <thead><tr><th scope="col">Tool</th><th scope="col">Needed for</th><th scope="col">Note</th></tr></thead>
+                <tbody>
+                    <tr><th scope="row"><code>bash</code></th><td>The agent and all <code>lib/*.sh</code> modules</td><td>macOS <code>/bin/bash</code> is 3.2. Everything below works on it except <code>--watchlist</code> (see <a href="#step-11">Troubleshooting</a>).</td></tr>
+                    <tr><th scope="row"><code>python3</code></th><td>ML, Kalman, backtester, yfinance data</td><td>3.13 works with unpinned packages (<a href="#step-4">Step 4</a>).</td></tr>
+                    <tr><th scope="row"><code>node</code>/<code>npm</code></th><td>Dashboard backend and frontend, two test suites</td><td>Node 18+ is fine; 25.6 was used.</td></tr>
+                    <tr><th scope="row"><code>jq</code></th><td>JSON handling in the agent (Kelly plan) and examples here</td><td></td></tr>
+                    <tr><th scope="row"><code>bc</code></th><td>Floating-point math in indicators and scoring</td><td>Built in.</td></tr>
+                    <tr><th scope="row"><code>curl</code></th><td>Quotes and news requests</td><td>Built in.</td></tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- ================= STEP 2 ================= -->
+        <section class="section" id="step-2" aria-labelledby="h-step-2">
+            <h2 id="h-step-2">Step 2. GitHub access to the private repo</h2>
+            <p><code>https://github.com/uma5gowdas/StockSwingTrader</code> is private, so GitHub must know who you are. Pick one option. Never paste a token into a file, a script or this guide.</p>
+
+            <h3 id="auth-https">Option A: HTTPS with a personal access token (used for this guide)</h3>
+            <ol>
+                <li>On GitHub: Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token. Give it access to the <code>StockSwingTrader</code> repository with <em>Contents: Read-only</em> (or a classic token with the <code>repo</code> scope).</li>
+                <li>Make sure git stores it in the macOS Keychain:</li>
+            </ol>
+<pre class="code-block"><code>git config --get credential.helper</code></pre>
+            <p class="see">What you should see: <span class="badge badge-success">verified</span></p>
+<pre class="code-block output"><code>osxkeychain</code></pre>
+            <p>If it prints nothing, run <code>git config --global credential.helper osxkeychain</code> <span class="badge badge-warning">not run</span>. The first time you clone, git asks for a username (your GitHub login) and a password: paste the <strong>token</strong>, not your GitHub password. The Keychain remembers it.</p>
+            <p>Check access without cloning: <span class="badge badge-success">verified</span></p>
+<pre class="code-block"><code>git ls-remote --heads https://github.com/uma5gowdas/StockSwingTrader.git main</code></pre>
+<pre class="code-block output"><code>813f7ddefacdb95886bb5381eb6b922403fa3eeb	refs/heads/main</code></pre>
+
+            <h3 id="auth-gh">Option B: GitHub CLI</h3>
+            <p><span class="badge badge-warning">not run</span> (<code>gh</code> is not installed on the test Mac)</p>
+<pre class="code-block"><code>brew install gh
+gh auth login            # GitHub.com → HTTPS → Login with a web browser
+gh auth setup-git        # lets plain `git clone https://...` use the gh login
+gh repo clone uma5gowdas/StockSwingTrader ~/Projects/StockSwingTrader</code></pre>
+
+            <h3 id="auth-ssh">Option C: SSH key</h3>
+            <p><span class="badge badge-warning">not run</span></p>
+<pre class="code-block"><code>ssh-keygen -t ed25519 -C "you@example.com"     # accept the default path, set a passphrase
+eval "$(ssh-agent -s)"
+ssh-add --apple-use-keychain ~/.ssh/id_ed25519
+pbcopy &lt; ~/.ssh/id_ed25519.pub                  # then GitHub → Settings → SSH and GPG keys → New SSH key
+ssh -T git@github.com                           # "Hi &lt;user&gt;! You've successfully authenticated..."</code></pre>
+            <p>With SSH, clone from <code>git@github.com:uma5gowdas/StockSwingTrader.git</code> in Step 3.</p>
+        </section>
+
+        <!-- ================= STEP 3 ================= -->
+        <section class="section" id="step-3" aria-labelledby="h-step-3">
+            <h2 id="h-step-3">Step 3. Clone the repository</h2>
+            <p><span class="badge badge-success">verified</span> (cloned into <code>/tmp/sst-fresh</code> for the test)</p>
+<pre class="code-block"><code>mkdir -p ~/Projects
+cd ~/Projects
+git clone https://github.com/uma5gowdas/StockSwingTrader.git StockSwingTrader
+cd StockSwingTrader
+git log -1 --oneline</code></pre>
+            <p class="see">What you should see:</p>
+<pre class="code-block output"><code>Cloning into 'StockSwingTrader'...
+813f7dd (HEAD -&gt; main, origin/main, origin/HEAD) fix: load local config.sh after template; restore env-overridable data API key placeholders</code></pre>
+            <p>A newer commit hash is fine if <code>main</code> has moved on. <strong>All later commands run from this folder</strong> (the repo root, where <code>StockSwingTrader_Agent.sh</code> is).</p>
+        </section>
+
+        <!-- ================= STEP 4 ================= -->
+        <section class="section" id="step-4" aria-labelledby="h-step-4">
+            <h2 id="h-step-4">Step 4. Python environment and dependencies</h2>
+            <div class="highlight-box box">
+                <p><strong>Why not <code>pip install -r requirements.txt</code>?</strong> It pins <code>numpy==1.24.3</code> and <code>pandas==2.0.3</code>, which have no Python 3.13 wheels and fail to build. Tested on the fresh clone:</p>
+<pre class="code-block output"><code>      ModuleNotFoundError: No module named 'pkg_resources'
+ERROR: Failed to build 'pandas' when getting requirements to build wheel</code></pre>
+                <p>Also, <code>yfinance</code> (real market data) is not in <code>requirements.txt</code>, so install it separately.</p>
+            </div>
+
+            <h3 id="py313">Path that works on Python 3.13 (recommended)</h3>
+            <p><span class="badge badge-success">verified</span></p>
+<pre class="code-block"><code>python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install --upgrade pip
+pip install xgboost pandas numpy scikit-learn scipy joblib filterpy requests yfinance
+python3 -c "import xgboost, pandas, numpy, sklearn, yfinance; print('xgboost', xgboost.__version__, 'pandas', pandas.__version__, 'numpy', numpy.__version__, 'sklearn', sklearn.__version__, 'yfinance', yfinance.__version__)"</code></pre>
+            <p class="see">What you should see (versions at the time of testing):</p>
+<pre class="code-block output"><code>Successfully installed ... numpy-2.5.4 pandas-3.1.0 scikit-learn-1.9.1 ... xgboost-3.4.1 yfinance-1.7.0
+xgboost 3.4.1 pandas 3.1.0 numpy 2.5.4 sklearn 1.9.1 yfinance 1.7.0</code></pre>
+            <p>Your prompt now starts with <code>(.venv)</code>. <strong>Activate the venv in every new Terminal window</strong> before running the project: <code>cd ~/Projects/StockSwingTrader &amp;&amp; source .venv/bin/activate</code>. The folder <code>.venv/</code> is git-ignored.</p>
+            <p>This skips the dev/optional packages in <code>requirements.txt</code> (alpaca-trade-api, plotly, pytest, black, flake8, pylint); nothing in the steps below needs them.</p>
+
+            <h3 id="py311">Alternative: Python 3.11 with the exact pins</h3>
+            <p><span class="badge badge-warning">not run</span> (no Python 3.11 on the test Mac)</p>
+<pre class="code-block"><code>brew install python@3.11
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+pip install yfinance</code></pre>
+        </section>
+
+        <!-- ================= STEP 5 ================= -->
+        <section class="section" id="step-5" aria-labelledby="h-step-5">
+            <h2 id="h-step-5">Step 5. Configure (config.sh)</h2>
+            <p><span class="badge badge-success">verified</span> (at <code>5a7abc0</code>)</p>
+            <p><code>config.sh</code> comes with the clone. It is <strong>tracked in git</strong> in this private repository (since commit <code>52516c3</code>) and already holds the Alpaca <em>paper</em> keys, <code>ALPACA_BASE_URL="https://paper-api.alpaca.markets"</code>, and the Finnhub and NewsAPI keys. There is nothing to copy. <code>config.robinhood.sh</code> and <code>config.live.sh</code> stay untracked (<code>.gitignore</code>).</p>
+<pre class="code-block"><code>git ls-files config.sh
+chmod 600 config.sh
+bash -c 'source ./config.template.sh; source ./config.sh; echo "ALPACA_BASE_URL=$ALPACA_BASE_URL ALPACA_KEY=${ALPACA_API_KEY:+set} ALPACA_SECRET=${ALPACA_SECRET_KEY:+set} FINNHUB=${API_KEY_FINNHUB:+set} NEWSAPI=${API_KEY_NEWSAPI:+set}"'</code></pre>
+            <p class="see">What you should see (the check prints <code>set</code>, never the key values):</p>
+<pre class="code-block output"><code>config.sh
+ALPACA_BASE_URL=https://paper-api.alpaca.markets ALPACA_KEY=set ALPACA_SECRET=set FINNHUB=set NEWSAPI=set</code></pre>
+            <p>How configuration loads: the agent sources <code>config.template.sh</code> first, then <code>config.sh</code> (or the file named in <code>SST_CONFIG_FILE</code>), so the values in <code>config.sh</code> win. Never put keys in <code>config.template.sh</code>.</p>
+            <table>
+                <thead><tr><th scope="col">Variable</th><th scope="col">What it does</th><th scope="col">Required?</th></tr></thead>
+                <tbody>
+                    <tr><th scope="row"><code>API_KEY_FINNHUB</code></th><td>News for the sentiment score (tried first)</td><td>Optional. Free key at finnhub.io.</td></tr>
+                    <tr><th scope="row"><code>API_KEY_NEWSAPI</code></th><td>News fallback when Finnhub is not configured</td><td>Optional. newsapi.org.</td></tr>
+                    <tr><th scope="row"><code>API_KEY_ALPHA_VANTAGE</code></th><td>Listed in config; not used by the analysis path</td><td>No.</td></tr>
+                    <tr><th scope="row"><code>ALPACA_API_KEY</code>, <code>ALPACA_SECRET_KEY</code></th><td>Alpaca <em>paper</em> account (broker commands)</td><td>Only for the broker commands (<a href="#cli-broker">Step 7.6</a>). Paper keys only.</td></tr>
+                    <tr><th scope="row"><code>ALPACA_BASE_URL</code></th><td>Set to <code>https://paper-api.alpaca.markets</code> in <code>config.sh</code></td><td>Keep the paper URL. While <code>config.sh</code> is the active config, an exported <code>ALPACA_BASE_URL</code> has no effect (the file sets it).</td></tr>
+                    <tr><th scope="row"><code>ROBINHOOD_CLIENT_ID</code>, <code>ROBINHOOD_CLIENT_SECRET</code></th><td>Robinhood OAuth app</td><td>Optional; real money, stub-tested only.</td></tr>
+                </tbody>
+            </table>
+            <p>The value <code>demo</code> (and empty values or <code>YOUR_...</code>) means "not configured": sentiment is then skipped and gets no weight. Market prices come from Yahoo Finance via yfinance and need no key.</p>
+
+            <h3 id="config-change-keys">Changing a key</h3>
+            <ol>
+                <li>Edit <code>config.sh</code> (<code>open -e config.sh</code> or any editor). Use a <strong>plain assignment</strong>, for example <code>export API_KEY_FINNHUB="new_key"</code>. Do not use the <code>${VAR:-...}</code> form: the template is loaded first and has already set <code>API_KEY_FINNHUB</code>/<code>API_KEY_NEWSAPI</code> to <code>demo</code>, so a <code>:-</code> default never applies.</li>
+                <li>Run the check above again, then <code>./StockSwingTrader_Agent.sh --check-account</code> for Alpaca keys.</li>
+                <li>Commit it to the private repo: <code>git add config.sh &amp;&amp; git commit -m "chore: rotate keys"</code>. <code>git status</code> shows <code>config.sh</code> as modified after every edit; that is expected now.</li>
+            </ol>
+            <p>If a key was ever shared outside the private repo (chat, email, screenshot, a public fork), regenerate it: Alpaca dashboard → Paper account → API Keys → Regenerate; finnhub.io dashboard; newsapi.org account. Then update <code>config.sh</code> as above.</p>
+
+            <div class="danger-box box">
+                <p><strong>Never put live keys or a live URL in <code>config.sh</code>.</strong> It is tracked in git. The agent refuses broker commands on a LIVE endpoint while the active config file is tracked (<code>LIVE endpoint refused: config.sh is tracked in git ...</code>). Live keys belong in an untracked <code>config.live.sh</code> (gitignored), selected per command with <code>SST_CONFIG_FILE</code> and confirmed with <code>--live</code>:</p>
+<pre class="code-block"><code>SST_CONFIG_FILE="$PWD/config.live.sh" ./StockSwingTrader_Agent.sh --buy AAPL 1 --live   # then type: AAPL 1</code></pre>
+                <p><span class="badge badge-warning">not run</span> against a live account (tested only against a local stand-in on 127.0.0.1). This guide is for paper trading.</p>
+            </div>
+        </section>
+
+        <!-- ================= STEP 6 ================= -->
+        <section class="section" id="step-6" aria-labelledby="h-step-6">
+            <h2 id="h-step-6">Step 6. Train the ML model</h2>
+            <p>The model file <code>lib/models/xgboost_predictor.pkl</code> is git-ignored (<code>*.pkl</code>), so a fresh clone has no model. Train it (about 5 seconds): <span class="badge badge-success">verified</span></p>
+<pre class="code-block"><code>python3 lib/train_ml_model.py
+ls -l lib/models/
+bash lib/ml_predictor.sh status
+bash lib/ml_predictor.sh predict AAPL 5 &lt;/dev/null</code></pre>
+            <p class="see">What you should see:</p>
+<pre class="code-block output"><code>... INFO - Total samples: 2000
+... INFO - Features per sample: 14
+... INFO - Saving model to .../lib/models/xgboost_predictor.pkl...
+... INFO - Report saved to /Users/P3291917/Builds/6/.agents/tasks/ml-training-report.md
+... INFO - Training complete!
+-rw-r--r--  1 you  staff  266445 Oct 31 11:11 xgboost_predictor.pkl
+{"status": "ready", "model_file": ".../lib/models/xgboost_predictor.pkl", "size_bytes": 266445, ...}
+{"symbol": "AAPL", "available": true, "direction": "up", "confidence": 70, "probability": 0.7027, "period": 5,
+ "data_source": "yfinance", "model_training_data": "synthetic", "timestamp": "..."}</code></pre>
+            <div class="highlight-box box">
+                <p><strong>Hard-coded report path.</strong> <code>train_ml_model.py</code> always writes its training report to <code>/Users/P3291917/Builds/6/.agents/tasks/ml-training-report.md</code> (there is no option to change it) and overwrites any file there. On a Mac with another user name, the model is saved first, so the model is fine even if writing the report fails. The file size changes from run to run (266–284 KB seen). The direction/confidence depends on the day's prices; with no network you get <code>"available": false</code>. Before training, <code>status</code> prints <code>{"status": "not_trained", "message": "Model not found. Run train_ml_model.py to train."}</code>.</p>
+            </div>
+        </section>
+
+        <!-- ================= STEP 7 ================= -->
+        <section class="section" id="step-7" aria-labelledby="h-step-7">
+            <h2 id="h-step-7">Step 7. Run the CLI</h2>
+
+            <h3 id="cli-help">7.1 Help and version</h3>
+            <p><span class="badge badge-success">verified</span></p>
+<pre class="code-block"><code>./StockSwingTrader_Agent.sh --help
+./StockSwingTrader_Agent.sh --version</code></pre>
+<pre class="code-block output"><code>StockSwingTrader Agent v6.3 - Advanced Swing Trading Analysis Platform
+Usage: ./StockSwingTrader_Agent.sh [OPTIONS]
+=== CORE ANALYSIS OPTIONS ===
+    --symbols SYMBOL1,SYMBOL2,...    Analyze specific stocks (comma-separated)
+...
+VERSION: 6.3
+...
+Use individual flags: --ml, --regime-adapt, --kalman, --dashboard, --kelly, --mirofish, --phase1</code></pre>
+            <p>The help text's accuracy claims ("+5-10% accuracy", "+3-5% win rate") were never measured; ignore them.</p>
+
+            <h3 id="cli-analyze">7.2 Analyze symbols (real Yahoo Finance data)</h3>
+            <p><span class="badge badge-success">verified</span> (about 20 s per symbol)</p>
+<pre class="code-block"><code>./StockSwingTrader_Agent.sh --symbols AAPL,MSFT
+./StockSwingTrader_Agent.sh --symbols AAPL --debug --output-dir /tmp/sst-reports</code></pre>
+<pre class="code-block output"><code>[INFO] [...] Analyzing 2 stock(s)
+[ERROR] [...] Failed to fetch current price for AAPL
+[ERROR] [...] Failed to fetch current price for MSFT
+[INFO] [...] Successfully analyzed 2 out of 2 stock(s)
+[INFO] [...] Report generated successfully: output/reports/swing_analysis_20261031_104629.html
+============================================
+Analysis Complete!
+Report: output/reports/swing_analysis_20261031_104629.html
+============================================
+# with --debug you also see:
+[DEBUG] [...] Fetched real OHLCV data for AAPL (yfinance)</code></pre>
+            <ul>
+                <li><span class="badge badge-danger">known issue</span> <code>Failed to fetch current price</code> is expected: the Yahoo quote endpoint the agent calls with curl refuses the request. The agent falls back to the last close of the 60 daily bars it already fetched, so the analysis still completes (exit code 0).</li>
+                <li>The score is the v2 confluence score by default (15% ML + 35% regime-weighted mean-reversion/trend-following + 30% technical + 20% OBV/Kalman volume-trend, plus 10% news sentiment when a news key works). Before <code>Analysis Complete!</code> the CLI prints a <code>SCORE BREAKDOWN</code> block with every component and its weight; <code>--legacy-score</code> uses the old formula (<a href="#step-7-safety">details</a>).</li>
+                <li>Each run writes <code>swing_analysis_&lt;timestamp&gt;.html</code> and <code>swing_analysis_&lt;timestamp&gt;.json</code> (all analyses). The HTML has a <strong>Score Breakdown</strong> table with the computed scores. <span class="badge badge-danger">known issue</span> The older template fields above it (indicator, signal, risk) are still printed as <code>--</code> and the price as <code>$0.00</code>; read the Score Breakdown table and the JSON.</li>
+                <li>Reports go to <code>output/reports/</code> (or <code>--output-dir</code>). Open the newest one with:</li>
+            </ul>
+<pre class="code-block"><code>open "$(ls -t output/reports/*.html | head -1)"</code></pre>
+            <p><span class="badge badge-warning">not run</span> (opens your browser; the file path was checked instead). The log is in <code>logs/agent.log</code>. <code>output/</code> is not git-ignored, so don't <code>git add</code> it.</p>
+            <p>Other symbol sources: <code>--top-10</code> (fixed list of 10 large caps) and <code>--watchlist FILE</code> (broken on macOS bash 3.2; workaround in <a href="#step-11">Troubleshooting</a>).</p>
+
+            <h3 id="cli-offline">7.3 Offline demo mode (no network, synthetic prices)</h3>
+            <p><span class="badge badge-success">verified</span></p>
+<pre class="code-block"><code>SST_OFFLINE=1 ./StockSwingTrader_Agent.sh --symbols AAPL --output-dir /tmp/sst-reports</code></pre>
+<pre class="code-block output"><code>[WARN] [...] Using SYNTHETIC demo prices for AAPL (SST_OFFLINE/SST_ALLOW_SYNTHETIC); results are not market analysis
+[INFO] [...] Successfully analyzed 1 out of 1 stock(s)
+Report: /tmp/sst-reports/swing_analysis_20261031_104755.html</code></pre>
+            <p>The report carries a banner: <em>SYNTHETIC DATA: this report was built from generated demo prices ... Do not trade on it.</em> <code>SST_ALLOW_SYNTHETIC=1</code> tries real data first and falls back to marked synthetic data. Without either variable, a symbol with no data is skipped and, if none succeed, the CLI exits 1.</p>
+
+            <h3 id="cli-flags">7.4 Enhancement flags: what really happens</h3>
+            <p>All of these flags exist in <code>StockSwingTrader_Agent.sh</code>. Several are accepted but do nothing yet. The <code>--ml</code>, <code>--kalman</code> and broker rows were re-checked after the path fix (commit noted in <a href="#step-8">Step 8</a>); the others are from the fresh clone:</p>
+            <table>
+                <thead><tr><th scope="col">Flag</th><th scope="col">Result on the fresh clone</th></tr></thead>
+                <tbody>
+                    <tr><th scope="row"><code>--legacy-score</code></th><td><span class="badge badge-success">verified</span> Uses the old score (80% technical average + 20% sentiment) instead of v2; same as <code>SCORING_MODE=legacy</code>.</td></tr>
+                    <tr><th scope="row"><code>--ml</code></th><td><span class="badge badge-warning">loads only</span> Logs <code>ML predictor module loaded</code>. Not needed: v2 scoring (the default) runs the ML predictor anyway (15% weight). For a single prediction run <code>bash lib/ml_predictor.sh predict SYMBOL 5</code> (<a href="#step-6">Step 6</a>).</td></tr>
+                    <tr><th scope="row"><code>--regime-adapt</code></th><td><span class="badge badge-danger">known issue</span> Looks for <code>lib/regime_adaptive.sh</code>, which does not exist; skipped. The real modules are <code>lib/regime_detector.sh</code> and <code>lib/regime_weighting.sh</code>.</td></tr>
+                    <tr><th scope="row"><code>--kalman</code></th><td><span class="badge badge-warning">loads only</span> Logs <code>Kalman filter module loaded</code>. Not needed: v2 scoring uses the Kalman trend anyway.</td></tr>
+                    <tr><th scope="row"><code>--dashboard</code></th><td><span class="badge badge-danger">known issue</span> Looks for <code>lib/dashboard.sh</code> (missing); does not start any server. Start the dashboard by hand (<a href="#step-9">Step 9</a>).</td></tr>
+                    <tr><th scope="row"><code>--full</code></th><td>Same as the four above: <code>--ml</code> and <code>--kalman</code> load, two "module not found" warnings (regime-adapt, dashboard), then a normal analysis.</td></tr>
+                    <tr><th scope="row"><code>--kelly</code></th><td><span class="badge badge-success">verified</span> Runs; adds a quarter-Kelly <code>position_sizing</code> plan to each analysis (analysis only, never places orders). It is not shown in the HTML report.</td></tr>
+                    <tr><th scope="row"><code>--mirofish</code></th><td><span class="badge badge-success">verified</span> Runs; blends in <code>cache/mirofish/&lt;SYMBOL&gt;.json</code> if present and fresh (&lt; 36 h). A fresh clone has no cache, so it is a silent no-op. No network calls.</td></tr>
+                    <tr><th scope="row"><code>--phase1</code></th><td><span class="badge badge-success">verified</span> <code>--kelly</code> + <code>--mirofish</code>. <code>--full</code> does not include them.</td></tr>
+                    <tr><th scope="row"><code>--check-account</code>, <code>--view-positions</code>, <code>--buy</code>, <code>--sell</code></th><td><span class="badge badge-success">verified</span> Work with Alpaca <strong>paper</strong> keys; see <a href="#cli-broker">Step 7.6</a>. Orders go through the safety checks in <a href="#step-7-safety">Order safety</a>.</td></tr>
+                    <tr><th scope="row"><code>--order-type</code>, <code>--limit-price</code>, <code>--no-bracket</code>, <code>--live</code>, <code>--allow-mismatch</code>, <code>--halt</code>, <code>--resume</code>, <code>--safety-status</code>, <code>--reconcile</code>, <code>--reconcile-accept</code></th><td><span class="badge badge-success">verified</span> Order safety flags (live safety, Step 1); see <a href="#safety-flags">the flag table</a>.</td></tr>
+                </tbody>
+            </table>
+            <p>Commands used to check the table: <span class="badge badge-success">verified</span></p>
+<pre class="code-block"><code>SST_OFFLINE=1 ./StockSwingTrader_Agent.sh --symbols AAPL --ml --regime-adapt --kalman --output-dir /tmp/sst-reports
+SST_OFFLINE=1 ./StockSwingTrader_Agent.sh --symbols AAPL --full --output-dir /tmp/sst-reports
+SST_OFFLINE=1 ./StockSwingTrader_Agent.sh --symbols AAPL --kelly --output-dir /tmp/sst-reports
+SST_OFFLINE=1 ./StockSwingTrader_Agent.sh --symbols AAPL --mirofish --output-dir /tmp/sst-reports
+SST_OFFLINE=1 ./StockSwingTrader_Agent.sh --symbols AAPL --phase1 --output-dir /tmp/sst-reports
+./StockSwingTrader_Agent.sh --ml --check-account
+./StockSwingTrader_Agent.sh --kalman --check-account</code></pre>
+
+            <h3 id="cli-backtest">7.5 Backtest</h3>
+            <p>The default output folder is a hard-coded path from the author's Mac, so set your own first. Dates go in <code>--start</code>/<code>--end</code> (positional dates fail with <code>Unknown option: 2022-01-01</code>). <span class="badge badge-success">verified</span></p>
+<pre class="code-block"><code>mkdir -p output/backtests
+export BACKTEST_OUTPUT_DIR="$PWD/output/backtests"
+./StockSwingTrader_Agent.sh --backtest AAPL --start 2023-01-01 --end 2023-12-31
+./StockSwingTrader_Agent.sh --backtest AAPL,MSFT --start 2022-01-01 --end 2024-01-01
+ls output/backtests
+jq '{symbol, strategy, period, data_source, data_points, total_pnl, num_trades}' output/backtests/backtest_AAPL_*.json</code></pre>
+<pre class="code-block output"><code>... INFO - Fetched 250 bars for AAPL
+... INFO - Train: 200 bars, Test: 50 bars
+... INFO - Results saved to .../output/backtests/backtest_AAPL_20261031_104931.json
+... INFO - Backtest complete. Total P&amp;L: $0.00
+[INFO] Portfolio backtest complete: 1 symbols processed, 0 failed
+backtest_AAPL_20261031_104931.html  backtest_AAPL_20261031_104931.json  portfolio_summary_20261031_104933.json
+{ "symbol": "AAPL", "strategy": "mean_reversion", "period": "2023-01-01 to 2023-12-31",
+  "data_source": "yfinance", "data_points": 50, "total_pnl": 0, "num_trades": 0 }</code></pre>
+            <p>Each run writes <code>backtest_&lt;SYMBOL&gt;_&lt;timestamp&gt;.json</code> and <code>.html</code> (plus <code>.csv</code> when there are trades) and a <code>portfolio_summary_*.json</code>. Open the HTML with <code>open output/backtests/backtest_AAPL_*.html</code> <span class="badge badge-warning">not run</span> (opens your browser; the files were listed instead). Expect zero trades on many periods: the strategies only run on the last 20% of the bars and use fixed entry rules (both test runs above made 0 trades). Pandas <code>Pandas4Warning</code> lines from yfinance are harmless. With no market data the backtest exits non-zero with <code>market_data_unavailable</code>; <code>SST_OFFLINE=1</code> gives a marked synthetic run.</p>
+
+            <h3 id="cli-broker">7.6 Broker commands (Alpaca paper trading only)</h3>
+            <p>These talk to your Alpaca account using the keys in <code>config.sh</code> (<a href="#step-5">Step 5</a>). Use a <strong>paper</strong> account only: check that the URL below contains <code>paper-api</code> before you run anything. Robinhood (<code>--broker robinhood</code>) trades real money and has only been tested with stubs; do not use it.</p>
+<pre class="code-block"><code>bash -c 'source ./config.template.sh; source ./config.sh; echo "$ALPACA_BASE_URL"'   # must print https://paper-api.alpaca.markets
+./StockSwingTrader_Agent.sh --check-account
+./StockSwingTrader_Agent.sh --view-positions</code></pre>
+            <p class="see">What you should see (live paper account; your numbers differ, the account number is never printed): <span class="badge badge-success">verified</span></p>
+<pre class="code-block output"><code>[INFO] ... Loaded Alpaca broker module
+Mode: PAPER (alpaca)
+✓ Alpaca API initialized (Paper Trading)
+RECONCILIATION (alpaca): NO BASELINE - the broker has positions or open orders and no baseline was accepted
+  broker: AAPL 11
+  Review with --reconcile; adopt the broker state with --reconcile-accept
+[WARN] [...] Reconciliation mismatch (warning only for this command); review with --reconcile
+============================================
+ALPACA ACCOUNT STATUS
+============================================
+Portfolio Value: $99940.81
+Cash Balance:    $96149.88
+Buying Power:    $395214.12
+Account Type:    ACTIVE
+============================================
+
+============================================
+OPEN POSITIONS (ALPACA)
+============================================
+AAPL: 11 shares @ $350.01
+============================================</code></pre>
+            <p>The <code>RECONCILIATION ... NO BASELINE</code> lines appear until you adopt the account's current positions once (read-only for Alpaca; writes <code>.state/positions_baseline.json</code>): <code>./StockSwingTrader_Agent.sh --reconcile-accept</code>. For account and position commands it is only a warning; orders are refused until the baseline matches (<a href="#step-7-safety">Order safety</a>).</p>
+            <p>Orders: <code>--buy SYMBOL QTY</code> sends a <em>limit</em> order (quote + 0.2%) with a bracket stop loss and take profit (time in force <code>gtc</code>) by default; <code>--sell SYMBOL QTY</code> sends a limit order (quote − 0.2%, <code>day</code>). Before the confirmation the agent runs the safety checks (kill switch, caps, market hours, reconciliation, daily loss halt, duplicates, PDT warning). The confirmation shows the price, estimated cost, order type, limit, stop loss, take profit, time in force, client order id and mode. Only the exact word <code>yes</code> sends the order; anything else (or Enter) prints <code>Order cancelled</code> and sends nothing. The symbol must be 1 to 5 uppercase letters and the quantity a positive number; otherwise the command exits 1 before contacting Alpaca.</p>
+<pre class="code-block"><code>./StockSwingTrader_Agent.sh --buy AAPL 1      # review, then type yes (or no)
+./StockSwingTrader_Agent.sh --sell AAPL 1
+./StockSwingTrader_Agent.sh --buy AAPL 1 --order-type market --no-bracket   # plain market order</code></pre>
+<pre class="code-block output"><code>============================================
+BUY ORDER CONFIRMATION (ALPACA)
+============================================
+Symbol:          AAPL
+Quantity:        1 shares
+Current Price:   $...
+Estimated Cost:  $...
+Order Type:      limit (bracket)
+Limit Price:     $...
+Stop Loss:       $... (5.00%, percent)
+Take Profit:     $...
+Time in Force:   gtc
+Client Order ID: sst-AAPL-b-...
+Mode:            PAPER
+============================================
+
+Proceed with order? (yes/no)</code></pre>
+            <p>Orders were tested only against a local stand-in for the Alpaca API on 127.0.0.1 (<code>tests/test_broker_commands.sh</code>, <code>tests/test_order_execution.sh</code>, <code>tests/test_live_safety.sh</code>), never against a real account <span class="badge badge-warning">not run live</span>. Outside market hours orders are refused by default (<code>OUTSIDE_HOURS_POLICY=refuse</code>). The old flags <code>--alpaca</code> (account + positions), <code>--alpaca-status</code>, <code>--place-buy</code> and <code>--place-sell</code> still work and go through the same checks.</p>
+        </section>
+
+        <!-- ================= STEP 7 (SAFETY) ================= -->
+        <section class="section" id="step-7-safety" aria-labelledby="h-step-7-safety">
+            <h2 id="h-step-7-safety">Order safety and v2 scoring (live safety, Step 1)</h2>
+            <p><span class="badge badge-success">verified</span> against <code>5a7abc0</code>. Every order path was tested only against a local Alpaca stand-in on 127.0.0.1; the read-only commands (<code>--check-account</code>, <code>--view-positions</code>, <code>--safety-status</code>) were also run against the paper account. No order was sent to a real broker.</p>
+
+            <h3 id="safety-scoring">v2 scoring (default) and <code>--legacy-score</code></h3>
+            <p>The CLI scores every symbol with the v2 confluence score: 15% ML prediction + 35% regime-weighted mean-reversion/trend-following + 30% technical (RSI, MACD, Bollinger) + 20% volume/trend (a real OBV trend score blended with the Kalman trend). All inputs come from the 60 daily bars already fetched. When news sentiment is available it gets 10% (<code>V2_SENTIMENT_WEIGHT</code>) and the other weights shrink to make room; without it, sentiment has 0 weight. <code>--legacy-score</code> (or <code>SCORING_MODE=legacy</code>) uses the old formula: 80% average of six indicators + 20% sentiment.</p>
+<pre class="code-block"><code>SST_OFFLINE=1 ./StockSwingTrader_Agent.sh --symbols AAPL --output-dir /tmp/sst-reports
+./StockSwingTrader_Agent.sh --symbols AAPL --legacy-score</code></pre>
+<pre class="code-block output"><code>SCORE BREAKDOWN (v2: 15% ML + 35% regime-weighted MR/TF + 30% technical + 20% OBV/Kalman volume-trend; sentiment 0.10 when available)
+AAPL  score 48 HOLD | ML 82 up (15%) | Regime 28 trending_bear (35%) | Technical 48 (30%) | Volume/Trend 57 (20%) | Sentiment n/a (0%) | OBV 65 | data synthetic</code></pre>
+            <p>(Offline run, so <code>data synthetic</code>; with real data you see <code>data yfinance</code>.)</p>
+
+            <h3 id="safety-flow">What happens on <code>--buy</code> / <code>--sell</code></h3>
+            <ol>
+                <li><strong>Before contacting the broker:</strong> symbol and quantity, <code>--limit-price</code>, kill switch, live guard, <code>MAX_ORDER_QTY</code>.</li>
+                <li><strong>Alpaca:</strong> market hours, reconciliation, daily loss halt.</li>
+                <li>Positions and caps (no short selling), duplicate guard, price, limit price, daily notional, bracket levels, PDT warning.</li>
+                <li>Confirmation: type <code>yes</code> (paper / local stub) or, on a LIVE endpoint, the symbol and quantity (e.g. <code>AAPL 2</code>).</li>
+                <li>The order is written to the order ledger (<code>.state/orders.jsonl</code>), sent with a client order id (<code>sst-...</code>), and an alert is written to <code>logs/alerts.log</code>.</li>
+            </ol>
+            <p>The first failed check stops the order with a message and exit code 1; nothing is sent.</p>
+
+            <h3 id="safety-flags">Flags</h3>
+            <table>
+                <thead><tr><th scope="col">Flag</th><th scope="col">What it does</th></tr></thead>
+                <tbody>
+                    <tr><th scope="row"><code>--order-type limit|market</code></th><td>Order type (default <code>ORDER_TYPE=limit</code>: quote ± <code>LIMIT_OFFSET_PCT</code> 0.2%)</td></tr>
+                    <tr><th scope="row"><code>--limit-price PRICE</code></th><td>Your own limit price (must be above 0)</td></tr>
+                    <tr><th scope="row"><code>--no-bracket</code></th><td>Buy without the bracket stop loss / take profit</td></tr>
+                    <tr><th scope="row"><code>--live</code></th><td>Required on a LIVE endpoint (anything but <code>paper-api.alpaca.markets</code> or 127.0.0.1; Robinhood is always live); then you type <code>SYMBOL QTY</code>. Refused when the active config file is tracked in git.</td></tr>
+                    <tr><th scope="row"><code>--allow-mismatch</code></th><td>Place one order despite a reconciliation mismatch (warning + alert)</td></tr>
+                    <tr><th scope="row"><code>--halt [REASON]</code></th><td>Kill switch on: every order is refused until <code>--resume</code> (no broker call)</td></tr>
+                    <tr><th scope="row"><code>--resume</code></th><td>Kill switch off</td></tr>
+                    <tr><th scope="row"><code>--safety-status</code></th><td>Mode, kill switch, caps, today's buys, ledger, baseline, alert channels (no broker call)</td></tr>
+                    <tr><th scope="row"><code>--reconcile</code></th><td>Compare broker positions / open orders with the baseline + order ledger (exit 0 match, 3 mismatch)</td></tr>
+                    <tr><th scope="row"><code>--reconcile-accept</code></th><td>Adopt the broker's current positions as the baseline</td></tr>
+                    <tr><th scope="row"><code>--legacy-score</code></th><td>Old score formula (see above)</td></tr>
+                </tbody>
+            </table>
+
+            <h3 id="safety-caps">Order defaults and caps (config.template.sh, "Live safety")</h3>
+            <p>Change a value by adding an <code>export NAME=value</code> line to <code>config.sh</code> (and committing it).</p>
+            <table>
+                <thead><tr><th scope="col">Variable</th><th scope="col">Default</th><th scope="col">Meaning</th></tr></thead>
+                <tbody>
+                    <tr><th scope="row"><code>ORDER_TYPE</code>, <code>LIMIT_OFFSET_PCT</code></th><td><code>limit</code>, <code>0.2</code></td><td>Limit orders at the quote ± 0.2%</td></tr>
+                    <tr><th scope="row"><code>ORDER_BRACKET</code></th><td><code>true</code></td><td>Buys get a stop loss (ATR + regime from real bars, else <code>STOP_LOSS_PERCENT</code> 5%, clamped to <code>ORDER_MIN_STOP_PCT</code> 1 .. <code>ORDER_MAX_STOP_PCT</code> 15) and a take profit (<code>TARGET_PROFIT_PERCENT</code> 8%)</td></tr>
+                    <tr><th scope="row"><code>BRACKET_TIME_IN_FORCE</code>, <code>ORDER_TIME_IN_FORCE</code></th><td><code>gtc</code>, <code>day</code></td><td>Bracket legs inherit the time in force; <code>day</code> legs would expire at the close and leave a swing position without a stop overnight</td></tr>
+                    <tr><th scope="row"><code>MAX_ORDER_QTY</code></th><td><code>100</code></td><td>Shares per order (buys and sells)</td></tr>
+                    <tr><th scope="row"><code>MAX_ORDER_NOTIONAL</code></th><td><code>2500</code></td><td>$ per buy</td></tr>
+                    <tr><th scope="row"><code>MAX_DAILY_NOTIONAL</code></th><td><code>10000</code></td><td>$ of agent buys per trading day</td></tr>
+                    <tr><th scope="row"><code>MAX_OPEN_POSITIONS</code></th><td><code>5</code></td><td>Buying a new symbol is refused at this count</td></tr>
+                    <tr><th scope="row"><code>DAILY_LOSS_LIMIT_PCT</code></th><td>empty</td><td>Empty = <code>DEFAULT_RISK_LEVEL</code> (2 / 5 / 10%). Equity down this much from the prior close blocks new buys for the day; sells stay allowed</td></tr>
+                    <tr><th scope="row"><code>DUPLICATE_ORDER_WINDOW_SECONDS</code></th><td><code>300</code></td><td>Same symbol and side again within 5 minutes (or an open order at the broker) is refused</td></tr>
+                    <tr><th scope="row"><code>RECONCILE_ON_STARTUP</code></th><td><code>true</code></td><td>Reconcile before every order</td></tr>
+                    <tr><th scope="row"><code>OUTSIDE_HOURS_POLICY</code></th><td><code>refuse</code></td><td><code>refuse</code> or <code>queue</code> (Alpaca holds the order until the next open)</td></tr>
+                    <tr><th scope="row"><code>PDT_EQUITY_THRESHOLD</code></th><td><code>25000</code></td><td>Pattern-day-trader warning below this equity (warning only)</td></tr>
+                    <tr><th scope="row"><code>SST_STATE_DIR</code>, <code>KILL_SWITCH_FILE</code></th><td><code>.state/</code></td><td>Order ledger, baseline, kill switch (gitignored)</td></tr>
+                    <tr><th scope="row"><code>ALERT_LOG_FILE</code></th><td><code>logs/alerts.log</code></td><td>One JSON line per alert</td></tr>
+                    <tr><th scope="row"><code>ALERTS_SLACK_ENABLED</code>, <code>ALERT_SLACK_WEBHOOK_URL</code></th><td><code>false</code>, empty</td><td>Slack incoming webhook</td></tr>
+                    <tr><th scope="row"><code>ALERTS_EMAIL_ENABLED</code>, <code>ALERT_EMAIL_TO</code>, <code>ALERT_SENDMAIL_CMD</code></th><td><code>false</code>, empty, <code>sendmail</code></td><td>Email via <code>sendmail -t</code></td></tr>
+                    <tr><th scope="row"><code>SCORING_MODE</code>, <code>V2_SENTIMENT_WEIGHT</code>, <code>OBV_LOOKBACK</code>, <code>KALMAN_TREND_THRESHOLD_PCT</code></th><td><code>v2</code>, <code>0.10</code>, <code>10</code>, <code>0.5</code></td><td>Scoring options</td></tr>
+                </tbody>
+            </table>
+
+            <h3 id="safety-kill">Kill switch</h3>
+<pre class="code-block"><code>./StockSwingTrader_Agent.sh --halt "news event"
+./StockSwingTrader_Agent.sh --buy AAPL 1
+./StockSwingTrader_Agent.sh --resume</code></pre>
+<pre class="code-block output"><code>KILL SWITCH ENGAGED: news event
+No new orders until --resume (.../.state/KILL_SWITCH)
+[ERROR] [...] KILL SWITCH ACTIVE since 2026-11-01T02:48:28Z: news event. No new orders. Run --resume to clear.
+Kill switch released; orders are allowed again</code></pre>
+
+            <h3 id="safety-reconcile">Reconciliation</h3>
+            <p>The agent keeps a baseline of your positions (<code>.state/positions_baseline.json</code>) and a ledger of its own orders. Before an order it checks that the broker's positions equal the baseline plus the agent's filled orders, and that there are no unknown open orders. Trades you make elsewhere (Alpaca website, app) show up as a mismatch and block orders until you review them with <code>--reconcile</code> and adopt them with <code>--reconcile-accept</code> (or use <code>--allow-mismatch</code> for one order).</p>
+
+            <h3 id="safety-hours">Market hours and PDT</h3>
+            <p>Outside market hours (Alpaca clock) or on a holiday (Alpaca calendar) orders are refused (<code>Order blocked: the market is closed ...</code>), unless <code>OUTSIDE_HOURS_POLICY=queue</code>. If the clock cannot be read the order is refused. Below $25,000 equity the agent prints a <code>PDT WARNING</code> when an order could create a same-day round trip (a sell of a symbol bought today, or any bracket buy); it does not block.</p>
+
+            <h3 id="safety-alerts">Alerts</h3>
+            <p>Order placed / filled / rejected, cap hits, duplicates, halts, resume, reconciliation mismatches, outside-hours refusals and PDT warnings are written to <code>logs/alerts.log</code>. Slack and email are off by default; set <code>ALERTS_SLACK_ENABLED=true</code> and the webhook URL (or the email variables) to turn them on. Keep the webhook URL out of tracked files if the repo is ever shared. Channel failures never stop the agent.</p>
+
+            <h3 id="safety-status">Status</h3>
+<pre class="code-block"><code>./StockSwingTrader_Agent.sh --safety-status</code></pre>
+<pre class="code-block output"><code>Mode:               PAPER (alpaca, https://paper-api.alpaca.markets)
+Kill switch:        off
+Caps:               MAX_ORDER_QTY=100 MAX_ORDER_NOTIONAL=2500 MAX_DAILY_NOTIONAL=10000 MAX_OPEN_POSITIONS=5
+Daily loss limit:   5% (DAILY_LOSS_LIMIT_PCT; empty = DEFAULT_RISK_LEVEL moderate)
+Today's buys:       $0 of $10000 (alpaca, trading day 2026-10-31)
+Order ledger:       0 orders (0 today) in .../.state/orders.jsonl
+Baseline:           none (run --reconcile-accept)
+Orders:             limit (offset 0.2%), bracket true (gtc), outside hours refuse, duplicate window 300 s
+Reconcile on start: true
+Alerts:             log .../logs/alerts.log; slack off; email off</code></pre>
+            <p>Not financial advice. The checks reduce mistakes; they do not make the signals profitable. Stay on paper.</p>
+        </section>
+
+        <!-- ================= STEP 8 (AGENTS) ================= -->
+        <section class="section" id="step-8-agents" aria-labelledby="h-step-8-agents">
+            <h2 id="h-step-8-agents">Agent layer, Phase 0-2 (Technical, Strategy Validation and Quant Research agents)</h2>
+            <p><span class="badge badge-success">verified</span> against <code>d626d6b</code> on 2026-11-01. The agent layer is a separate Python 3.12 package (<code>agents/</code>) with its own venv. It is <strong>off by default</strong>: the CLI's scores do not change until you turn it on, and even then every agent weight is 0. The bash scan never runs Python; you run the agents yourself and the scan only reads their files (<code>cache/agents/</code>). Costs nothing: no paid API, no LLM (<code>LLM_PROVIDER=none</code>). Nothing in the agent layer can place an order.</p>
+
+            <h3 id="agents-venv">Create the agent venv (Python 3.12)</h3>
+            <p>Use Python 3.12, not the Step 4 venv: the repo's <code>requirements.txt</code> does not install on 3.12, and the agent pins (vectorbt, numba, pandas 3, TA-Lib) need 3.12. TA-Lib installs from a wheel, no <code>brew install ta-lib</code> needed. <code>.venv-agents/</code> is gitignored.</p>
+<pre class="code-block"><code>cd ~/Projects/StockSwingTrader
+brew install python@3.12        # only if /opt/homebrew/bin/python3.12 is missing
+/opt/homebrew/bin/python3.12 -m venv .venv-agents
+.venv-agents/bin/pip install -r requirements-agents.txt
+.venv-agents/bin/pip check</code></pre>
+<pre class="code-block output"><code>No broken requirements.</code></pre>
+            <p>Run every <code>python -m agents</code> command from the repo root (the package is not installed). The first command that loads vectorbt takes about 30-40 seconds while numba compiles; later runs are faster.</p>
+
+            <h3 id="agents-status">Check the setup: <code>python -m agents status</code></h3>
+<pre class="code-block"><code>.venv-agents/bin/python -m agents status</code></pre>
+<pre class="code-block output"><code>{
+  "agent": null,
+  "agents_version": "0.2.0",
+  "python": ".../.venv-agents/bin/python",
+  "python_version": "3.12.12",
+  "endpoint_mode": "PAPER",
+  "offline": false,
+  "agents_enabled": false,
+  "llm_provider": "none",
+  "cache_dir": ".../cache/agents",
+  "has_alpaca_api_key": true,
+  "has_alpaca_secret_key": true,
+  "has_api_key_finnhub": true,
+  "has_api_key_newsapi": true,
+  "has_fred_api_key": true,
+  "has_sec_user_agent": true
+}</code></pre>
+            <p><code>endpoint_mode</code> must say <code>PAPER</code> (your <code>ALPACA_BASE_URL</code> in <code>config.sh</code> is <code>https://paper-api.alpaca.markets</code>). If it says anything else, the agents refuse to download data. The <code>has_*</code> lines only say whether a key is set; key values are never printed. The agents read market data from Alpaca with your paper keys (read-only requests for daily bars). Finnhub, NewsAPI, FRED and SEC are not used yet (Phase 3).</p>
+
+            <h3 id="agents-technical">Technical agent</h3>
+            <p>Computes standard TA-Lib indicators (RSI, MACD, Bollinger, ATR, ADX14 with +DI/−DI, Stochastic, Williams %R, OBV, Donchian) on Alpaca daily bars and a market regime from a real ADX14 (<code>regime_adx</code>), next to the bash scan's approximation (<code>regime_bash</code>).</p>
+<pre class="code-block"><code>.venv-agents/bin/python -m agents technical run --symbols AAPL,MSFT
+.venv-agents/bin/python -m agents technical run --symbols AAA,BBB --offline --as-of 2022-06-30   # fixtures, no network</code></pre>
+<pre class="code-block output"><code>{
+  "agent": "technical",
+  "as_of": "2026-11-01",
+  "written": ["AAPL", "MSFT"],
+  "unavailable": {},
+  "files": [".../cache/agents/technical/2026-11-01/AAPL.json", ".../cache/agents/technical/2026-11-01/MSFT.json"]
+}</code></pre>
+            <p>Files land in <code>cache/agents/technical/&lt;date&gt;/&lt;SYMBOL&gt;.json</code> (one JSON envelope per symbol: score, direction, <code>data_sources</code> such as <code>alpaca:sip</code>, <code>synthetic</code>, all features). Exit code 0 when at least one symbol worked, 2 when no data, 1 on bad arguments.</p>
+            <p>To let the scan use the agent's regime, run the agent for your symbols the same day, then:</p>
+<pre class="code-block"><code>AGENTS_ENABLED=true AGENT_TECHNICAL_ENABLED=true ./StockSwingTrader_Agent.sh --symbols AAPL,MSFT</code></pre>
+            <p>With a fresh, real-data envelope for today the scan replaces its regime with <code>regime_adx</code> (the JSON shows <code>regime_source: "technical_agent"</code>); otherwise it keeps the bash regime and records why in <code>technical_agent_status</code>. <span class="badge badge-warning">not recommended yet</span> The real gate run below found the real-ADX regime did <em>worse</em> than the bash approximation, so leave <code>AGENT_TECHNICAL_ENABLED</code> off (the default).</p>
+
+            <h3 id="agents-validate">Strategy Validation agent: gate, parity, offline demo</h3>
+            <p>Backtests the scan's own signals with vectorbt in a walk-forward test (2 years train, 6 months test, rolling) on 20 large caps against SPY, and writes one gate file per signal. Signals: <code>v2_confluence</code> (the CLI's v2 score replayed day by day, without ML and sentiment), <code>v2_confluence_adx</code> (same with the real-ADX regime), <code>mr_only</code> (mean reversion), <code>tf_only</code> (EMA trend following). Trades fill at the next day's open with 10 bp slippage, a stop of 1.5-3 × ATR (1-15%) and a 5-12% take profit. It only downloads daily bars (read-only).</p>
+<pre class="code-block"><code># Real run (about 10 minutes the first time; later runs reuse the cached signals)
+.venv-agents/bin/python -m agents validate gate \
+    --signals v2_confluence,v2_confluence_adx,mr_only,tf_only \
+    --start 2016-01-01 --report-dir ~/sst-gate-report
+.venv-agents/bin/python -m agents validate status
+
+# Engine check: vectorbt in legacy mode must match lib/backtest_engine.py
+.venv-agents/bin/python -m agents validate parity
+
+# Offline demo on generated fixtures (no network; always FAILS with synthetic_data)
+.venv-agents/bin/python -m agents validate gate --offline --report-dir /tmp/sst_gate_offline
+.venv-agents/bin/python -m agents validate parity --offline</code></pre>
+            <p>Gate files go to <code>cache/agents/gates/&lt;signal&gt;.json</code> (gitignored), the report to <code>report.html</code> and <code>report.json</code> in <code>--report-dir</code> (default <code>cache/agents/validate/reports/&lt;run id&gt;/</code>). Exit code 0 means the run worked, <em>also when a gate fails</em>; 2 means market data was missing for a symbol (nothing is written); 1 is a usage error. <code>validate parity</code> exits 0 only when every symbol matches.</p>
+
+            <h3 id="agents-gate-report">Reading the gate report</h3>
+            <p>Open <code>report.html</code> in a browser (self-contained, no internet needed). The summary has one row per signal; each criterion shows PASS or FAIL with the value and the threshold:</p>
+            <table>
+                <thead><tr><th scope="col">Criterion</th><th scope="col">Passes when</th><th scope="col">What it tells you</th></tr></thead>
+                <tbody>
+                    <tr><th scope="row"><code>min_oos_sharpe</code></th><td>Out-of-sample Sharpe ≥ 0.5</td><td>Return per unit of risk on data the tuning never saw</td></tr>
+                    <tr><th scope="row"><code>vs_spy_sharpe</code></th><td>Sharpe ≥ SPY's Sharpe − 0.1</td><td>Is it at least about as good as just holding SPY?</td></tr>
+                    <tr><th scope="row"><code>min_dsr</code></th><td>Deflated Sharpe ratio ≥ 0.95</td><td>Is the Sharpe still significant after counting every configuration tried?</td></tr>
+                    <tr><th scope="row"><code>max_pbo</code></th><td>Probability of backtest overfitting ≤ 0.30</td><td>How often the best in-sample setting is below median out of sample</td></tr>
+                    <tr><th scope="row"><code>max_drawdown_vs_spy</code></th><td>Max drawdown ≤ 1.2 × SPY's</td><td>Worst peak-to-trough loss compared with SPY</td></tr>
+                    <tr><th scope="row"><code>min_oos_trades</code></th><td>≥ 100 out-of-sample trades</td><td>Enough trades for the numbers to mean something</td></tr>
+                    <tr><th scope="row"><code>min_positive_folds</code></th><td>≥ 60% of test windows profitable</td><td>Consistency over time, not one lucky period</td></tr>
+                    <tr><th scope="row"><code>baseline_improvement</code></th><td>n/a for these four base signals</td><td>Used later to judge whether an added agent improves a signal</td></tr>
+                </tbody>
+            </table>
+            <p>A gate is PASSED only when every criterion passes and all data is real (Alpaca). Runs on fixtures are marked SYNTHETIC and can never pass. The fold table shows each test window: dates, the chosen settings, and the strategy's return next to SPY and an equal-weight basket.</p>
+            <p><strong>What a failed gate means:</strong> the signal has not shown an edge that survives costs, out-of-sample testing and overfitting checks. Then <strong>no live money</strong>: stay on paper, and keep every agent weight at 0 (<code>AGENT_QUANT_WEIGHT</code>, <code>AGENT_FUNDAMENTAL_WEIGHT</code>, <code>AGENT_MARKET_WEIGHT</code>). An agent weight above 0 only counts when its gate is PASSED, based on real data and at most 45 days old.</p>
+            <p><span class="badge badge-danger">result</span> The real Phase 1 run (2026-11-01, Alpaca SIP bars 2016-01-04 to 2026-10-30) <strong>failed all four gates</strong>. Closest was <code>v2_confluence</code>: out-of-sample Sharpe 0.55 vs SPY 0.78, deflated Sharpe 0.86 (needs 0.95), CAGR 3.2% vs 13.6%, max drawdown 9.4% vs 33.8%. <code>v2_confluence_adx</code> 0.40, <code>tf_only</code> 0.36, <code>mr_only</code> 0.20. Full report: <code>/Users/P3291917/Builds/6/.agents/tasks/phase1-gate-report.html</code> and <code>.md</code>. Caveats: today's large caps only (survivorship bias), ML and news sentiment left out, daily bars.</p>
+
+            <h3 id="agents-quant">Quant Research agent (Phase 2, Qlib)</h3>
+            <p><span class="badge badge-success">verified</span> against <code>75ea040</code> on 2026-11-01. The quant agent trains Microsoft Qlib models on about ten years of daily bars for a fixed list of 153 US large caps and ranks them every night. Main model <code>lgbm</code>: LightGBM on Qlib's 158 Alpha158 features plus the 14 features of the existing ML model (172 features). Baselines: <code>xgb14</code> (XGBoost on the 14 old features, the old ML path retrained on real data) and <code>xgb_full</code> (XGBoost on all 172, for comparison). It predicts the return from the next open to the open 5 days later. Like the other agents it is <strong>off by default</strong>, costs nothing, only reads Alpaca daily bars and cannot place orders. Its weight in the score, <code>AGENT_QUANT_WEIGHT</code>, stays 0.</p>
+            <p>Install the Phase 2 pins (already in <code>requirements-agents.txt</code>: pyqlib 0.9.7, lightgbm 4.7.0, xgboost 3.4.1, mlflow 3.17.2, pyarrow 25.0.1). The venv grows to about 1.2 GB; <code>import qlib</code> takes about 12 seconds.</p>
+<pre class="code-block"><code>cd ~/Projects/StockSwingTrader
+.venv-agents/bin/pip install -r requirements-agents.txt
+.venv-agents/bin/pip check
+.venv-agents/bin/python -m agents quant status</code></pre>
+            <p><strong>Survivorship bias:</strong> the list (<code>agents/quant/universe.txt</code>) is today's large caps. Companies that were delisted or bought since 2016 are missing, which makes every backtest look better than reality. LIN, MMC and BK were removed after the first download (late listing or stale data). SPY, QQQ and IWM are downloaded as benchmarks but never ranked.</p>
+
+            <h3 id="agents-quant-ingest">1. Download the data: <code>quant ingest</code></h3>
+<pre class="code-block"><code>.venv-agents/bin/python -m agents quant ingest            # 2016-01-01 to the last session
+.venv-agents/bin/python -m agents quant ingest --refresh  # re-download everything
+.venv-agents/bin/python -m agents quant ingest --offline  # generated fixtures, no network</code></pre>
+            <p>About 30 seconds and 45 read-only requests the first time; a second run the same day skips symbols that are current. Files: <code>cache/agents/quant/raw/</code> (one CSV per symbol) and the Qlib store <code>cache/agents/quant/qlib_data/</code>. Real result: 156 symbols, 2,723 sessions (2016-01-04 to 2026-10-30), all from <code>alpaca:sip</code>, no gaps. Exit code 2 means no symbol had data.</p>
+
+            <h3 id="agents-quant-train">2. Train: <code>quant train</code></h3>
+<pre class="code-block"><code>nice -n 10 .venv-agents/bin/python -m agents quant train                 # arms lgbm,xgb14,xgb_full
+QUANT_N_JOBS=2 nice -n 10 .venv-agents/bin/python -m agents quant train  # fewer CPU threads</code></pre>
+            <p>One model per year from 2018 (each trained only on earlier data, with a 7-session gap so the label cannot leak) plus a live model on the latest data. On this Mac (10 cores, busy, <code>QUANT_N_JOBS=4</code>) it took about 2 minutes. <code>nice -n 10</code> keeps the Mac responsive. Output: <code>cache/agents/quant/models/</code>, out-of-sample predictions in <code>cache/agents/quant/predictions/</code>.</p>
+
+            <h3 id="agents-quant-predict">3. Nightly ranking: <code>quant predict</code></h3>
+<pre class="code-block"><code>.venv-agents/bin/python -m agents quant predict
+.venv-agents/bin/python -m agents quant predict --as-of 2026-10-30 --symbols AAPL,MSFT</code></pre>
+            <p>Refreshes the data, then writes one file per stock to <code>cache/agents/quant/&lt;date&gt;/&lt;SYMBOL&gt;.json</code>: <code>score</code> = rank percentile (100 = best of the 153), <code>direction</code> bullish at 80 or more, bearish at 20 or less, plus rank, model id and the model's age. Files stay fresh for 84 hours, so Friday's ranking still counts on Monday. About a minute. To run it every weekday evening after the close, add this with <code>crontab -e</code> (adjust the path):</p>
+<pre class="code-block"><code>30 22 * * 1-5 cd ~/Projects/StockSwingTrader &amp;&amp; nice -n 10 .venv-agents/bin/python -m agents quant predict &gt;&gt; logs/quant_predict.log 2&gt;&amp;1</code></pre>
+
+            <h3 id="agents-quant-evaluate">4. Evaluate: <code>quant evaluate</code></h3>
+<pre class="code-block"><code>nice -n 10 .venv-agents/bin/python -m agents quant evaluate --report-dir ~/sst-quant-report
+.venv-agents/bin/python -m agents quant evaluate --offline --report-dir /tmp/sst_quant_offline   # fixtures, always NO-GO</code></pre>
+            <p>About 12 minutes. It measures how well the rankings predicted the next 5 days (information coefficient, IC) and runs three walk-forward gates with the Validation agent: <code>xgb_topk</code> and <code>quant_topk</code> (hold the 5/10/20 best-ranked stocks, rebalanced every 5 days) and <code>quant_rank</code> (the scan's v2 score with the quant rank mixed in at 15%, the gate that would unlock <code>AGENT_QUANT_WEIGHT</code>). Exit code 0 also when the result is NO-GO.</p>
+
+            <h3 id="agents-quant-report">Reading the quant report and the go rule</h3>
+            <p>Open <code>quant_report.html</code> (in <code>--report-dir</code> or <code>cache/agents/quant/eval/&lt;run id&gt;/</code>). Sections: data, training, IC per model and per year, top-k spreads, the three gates (same criteria as the <a href="#agents-gate-report">gate report</a>, plus <code>baseline_improvement</code>: beats its baseline in at least 60% of test windows), go / no-go. <strong>GO needs all of:</strong> lgbm Rank-IC at least 0.02 with a Newey-West t of at least 2; gate <code>quant_rank</code> PASSED; <code>quant_topk</code> beats <code>xgb_topk</code> in at least 60% of windows; real data. Even on GO the report only <em>proposes</em> a weight of 0.15; nothing changes until you set it yourself.</p>
+            <p><span class="badge badge-danger">result</span> The real run on 2026-11-01 was <strong>NO-GO</strong>. lgbm Rank-IC 0.0087 (t 1.95), xgb14 0.0068, xgb_full 0.0144. All three gates failed: <code>quant_rank</code> Sharpe 0.64 vs SPY 0.77 (needs 0.67), <code>quant_topk</code> 0.58, <code>xgb_topk</code> 0.53; deflated Sharpe 0.83-0.88 (needs 0.95), overfitting probability 0.35-0.42 (needs 0.30 or less). <code>quant_topk</code> beat <code>xgb_topk</code> in only 43% of windows. So <code>AGENT_QUANT_WEIGHT</code> stays 0 and <strong>no live money</strong>. Full report: <code>/Users/P3291917/Builds/6/.agents/tasks/phase2-quant-report.html</code> and <code>.md</code>.</p>
+
+            <h3 id="agents-tests">Tests with and without the agent venv</h3>
+            <p>The runner has 26 suites; 6 of them need <code>.venv-agents</code>. Without the venv they print <code>[SKIP]</code> with the setup command and do not count as failures. All agent tests are offline (generated fixtures, local stubs on 127.0.0.1). <span class="badge badge-success">verified</span></p>
+<pre class="code-block"><code>bash tests/test_runner.sh                               # with the venv
+SST_AGENTS_VENV=/nonexistent bash tests/test_runner.sh  # simulates a Mac without the venv</code></pre>
+<pre class="code-block output"><code>With the venv (2026-11-01, after d626d6b; the 18 older suites as in Step 8, then):
+[PASS] Agents: Contract (3617ms) - 24 passed, 0 failed
+[PASS] Agents: Data Clients (9129ms) - 20 passed, 0 failed
+[PASS] Agent Adapter (bash) (10941ms) - 83 passed, 0 failed
+[PASS] Scoring + Agents (zero-weight identity) (207098ms) - 90 passed, 0 failed
+[PASS] Agents: Technical (6684ms) - 21 passed, 0 failed
+[PASS] Agents: Parity vs bash (144334ms) - 322 passed, 0 failed
+[PASS] Agents: Validation (30737ms) - 36 passed, 0 failed
+[PASS] Agents: CLI (offline) (59744ms) - 23 passed, 0 failed
+Suites:              26 (26 passed, 0 failed, 0 skipped)
+Total Tests Run:     1580
+Tests Passed:        1580
+Tests Failed:        0
+
+Without the venv (SST_AGENTS_VENV=/nonexistent):
+[SKIP] Agents: Contract: agent venv not found (/nonexistent); create it: /opt/homebrew/bin/python3.12 -m venv .venv-agents &amp;&amp; .venv-agents/bin/pip install -r requirements-agents.txt
+...
+Suites:              26 (20 passed, 0 failed, 6 skipped)
+Total Tests Run:     1134
+Tests Passed:        1134
+Tests Failed:        0</code></pre>
+        </section>
+
+        <!-- ================= STEP 8 ================= -->
+        <section class="section" id="step-8" aria-labelledby="h-step-8">
+            <h2 id="h-step-8">Step 8. Run the tests</h2>
+            <p>Install the Node packages first (<a href="#step-9">Step 9</a> needs them anyway), otherwise the Dashboard and Backend suites fail with <code>Cannot find module 'express'</code>. The full run takes about 14 minutes, works offline (<code>SST_OFFLINE=1</code> is set by the runner) and needs the venv active and the model trained. <span class="badge badge-success">verified</span></p>
+<pre class="code-block"><code>(cd backend &amp;&amp; npm install)
+(cd frontend &amp;&amp; npm install)
+bash tests/test_runner.sh</code></pre>
+            <p class="see">What you should see (working copy at <code>5a7abc0</code>, live-safety Step 1, with a locally trained model; timings vary):</p>
+<pre class="code-block output"><code>[PASS] ML Predictor (23728ms) - 29 passed, 0 failed
+[PASS] Regime Weighting (28806ms) - 30 passed, 0 failed
+[PASS] Kalman Filter (3008ms) - 18 passed, 0 failed
+[PASS] Backtest (7107ms) - 34 passed, 0 failed
+[PASS] ML Scoring Integration (32758ms) - 29 passed, 0 failed
+[PASS] Regime Detector (29516ms) - 20 passed, 0 failed
+[PASS] Scoring Integration (Python) (97ms) - 32 passed, 0 failed
+[PASS] Dashboard Components (1838ms) - 27 passed, 0 failed
+[PASS] Backend API (710ms) - 17 passed, 0 failed
+[PASS] Kelly Sizing &amp; Risk Budget (5671ms) - 51 passed, 0 failed
+[PASS] Sentiment (deterministic) (3324ms) - 36 passed, 0 failed
+[PASS] MiroFish Cache Adapter (12392ms) - 42 passed, 0 failed
+[PASS] Phase 1 Integration (CLI) (173328ms) - 38 passed, 0 failed
+[PASS] No Silent Fake Data (99187ms) - 71 passed, 0 failed
+[PASS] Broker Commands (stubbed) (67558ms) - 136 passed, 0 failed
+[PASS] V2 CLI Scoring (129748ms) - 81 passed, 0 failed
+[PASS] Order Execution (stubbed) (33096ms) - 81 passed, 0 failed
+[PASS] Live Safety (stubbed) (153832ms) - 188 passed, 0 failed
+Suites:              18 (18 passed, 0 failed)
+Total Tests Run:     960
+Tests Passed:        960
+Tests Failed:        0
+Success Rate:        100%
+
+✅ All tests PASSED!</code></pre>
+            <p>The Broker Commands, Order Execution and Live Safety suites never contact a real broker: they run a local Alpaca stand-in on 127.0.0.1 with a stub config and temporary <code>.state</code>/alert folders, so your <code>config.sh</code> keys, ledger and kill switch are not used. Run the tests from a shell without a leftover <code>SST_CONFIG_FILE</code> export.</p>
+            <p>Timings vary. The tests do not depend on what your freshly trained model predicts, so the result is the same with any xgboost/numpy version that trains the model successfully (verified with xgboost 3.4.1 / numpy 2.5.4 on Python 3.13).</p>
+            <p>The runner rewrites the tracked file <code>.agents/tasks/test-report.md</code>. Undo that before pulling: <code>git restore .agents/tasks/test-report.md</code>. Single suites and the Node tests on their own:</p>
+<pre class="code-block"><code>bash tests/test_ml_predictor.sh
+npm test --prefix backend      # ℹ tests 17 / ℹ pass 17 / ℹ fail 0
+npm test --prefix frontend     # ℹ tests 27 / ℹ pass 27 / ℹ fail 0</code></pre>
+        </section>
+
+        <!-- ================= STEP 9 ================= -->
+        <section class="section" id="step-9" aria-labelledby="h-step-9">
+            <h2 id="h-step-9">Step 9. Run the dashboard</h2>
+            <p>Use two Terminal windows, both starting in the repo root. If you skipped Step 8, run the two <code>npm install</code> lines first (<code>added 465 packages</code> and <code>added 414 packages</code>; <code>npm audit</code> warnings are expected and can be ignored for local use).</p>
+
+            <h3 id="dash-backend">Terminal 1: backend API on port 3000</h3>
+            <p><span class="badge badge-success">verified</span></p>
+<pre class="code-block"><code>cd backend
+BACKTEST_OUTPUT_DIR="$PWD/../output/backtests" SST_LOG_FILE="$PWD/../logs/backend.log" npm start</code></pre>
+<pre class="code-block output"><code>&gt; stockswingtrader-backend@6.3.0 start
+&gt; node server.js
+[...] INFO: Backend server started on port 3000
+🚀 StockSwingTrader Backend API running on http://localhost:3000</code></pre>
+            <p>The two variables replace hard-coded paths from the author's Mac. Check it from another window: <span class="badge badge-success">verified</span></p>
+<pre class="code-block"><code>curl -s http://localhost:3000/api/health
+curl -s http://localhost:3000/api/backtest | jq -c '.results | map({file, data_source, synthetic})'</code></pre>
+<pre class="code-block output"><code>{"status":"healthy","timestamp":"2026-10-31T16:57:40.753Z"}
+[{"file":"backtest_AAPL_20261031_104931.json","data_source":"yfinance","synthetic":false}, ...]</code></pre>
+
+            <h3 id="dash-frontend">Terminal 2: React dev server on port 5173</h3>
+<pre class="code-block"><code>cd frontend
+npm run build      # optional: type-check + production build into frontend/dist
+npm run dev</code></pre>
+<pre class="code-block output"><code>✓ built in 1.73s
+  VITE v5.4.21  ready in 191 ms
+  ➜  Local:   http://localhost:5173/</code></pre>
+            <p><code>npm run build</code> <span class="badge badge-success">verified</span> (a "chunks larger than 500 kB" warning is normal). For <code>npm run dev</code> the test harness started the same Vite binary that script runs (<code>./node_modules/.bin/vite</code>); <code>http://localhost:5173/</code> returned 200 with the title "Stock Swing Trader - Dashboard", <code>/analysis</code>, <code>/trades</code>, <code>/watchlist</code> and <code>/settings</code> returned 200, and <code>/api/health</code> went through the Vite proxy to the backend.</p>
+            <p>Open <strong>http://localhost:5173</strong> in your browser (<code>open http://localhost:5173</code>) <span class="badge badge-warning">not run</span> (the test fetched the pages with <code>curl</code> instead).</p>
+            <table>
+                <thead><tr><th scope="col">Page</th><th scope="col">What it shows today</th></tr></thead>
+                <tbody>
+                    <tr><th scope="row">Dashboard (<code>/</code>)</th><td>Stat cards, signal chart, watchlist signals, portfolio, statistics. Score/price panels stay empty: <code>/api/signals</code>, <code>/api/quotes</code>, <code>/api/portfolio</code> and <code>/api/stats</code> return <code>{"raw":""}</code> (known backend gap).</td></tr>
+                    <tr><th scope="row">Analysis (<code>/analysis?symbol=AAPL</code>)</th><td>Signals, indicators and quote for one symbol; same empty-data gap.</td></tr>
+                    <tr><th scope="row">Trade History (<code>/trades</code>)</th><td>Trades (none until <code>.trades/trade_log.json</code> exists) and the backtest results from Step 7.5, each labelled with its data source.</td></tr>
+                    <tr><th scope="row">Watchlist (<code>/watchlist</code>)</th><td>Add/remove symbols and price/score alerts; saved in the browser.</td></tr>
+                    <tr><th scope="row">Settings (<code>/settings</code>)</th><td>Polling interval (default 5 s), config values with secrets masked. Saving <code>RISK_PER_TRADE</code>, <code>MIN_CONFLUENCE_SCORE</code> or <code>TRADING_ENABLED</code> returns 404 until you add an <code>export</code> line for them to <code>config.sh</code>.</td></tr>
+                </tbody>
+            </table>
+
+            <h3 id="dash-stop">Stopping</h3>
+            <p>Press <kbd>Ctrl</kbd>+<kbd>C</kbd> in each terminal. <span class="badge badge-warning">not run</span> (the test stopped both servers by PID instead). To confirm they are gone, or to find a leftover server:</p>
+<pre class="code-block"><code>curl -s -o /dev/null -w '%{http_code}\n' http://localhost:3000/api/health   # 000 = stopped
+lsof -nP -iTCP:3000 -iTCP:5173 -sTCP:LISTEN                                  # lists any PID still listening
+kill &lt;PID&gt;</code></pre>
+        </section>
+
+        <!-- ================= STEP 10 ================= -->
+        <section class="section" id="step-10" aria-labelledby="h-step-10">
+            <h2 id="h-step-10">Step 10. Updating later</h2>
+            <p><span class="badge badge-success">verified</span> (on an up-to-date clone)</p>
+<pre class="code-block"><code>cd ~/Projects/StockSwingTrader
+source .venv/bin/activate
+git restore .agents/tasks/test-report.md     # only if the test runner changed it
+git pull
+git log -1 --oneline
+pip install --upgrade xgboost pandas numpy scikit-learn scipy joblib filterpy requests yfinance
+(cd backend &amp;&amp; npm install)
+(cd frontend &amp;&amp; npm install)
+python3 lib/train_ml_model.py               # retrain when lib/ml_inference.py, lib/train_ml_model.py or the Python packages changed</code></pre>
+            <p class="see">What you should see: <code>Already up to date.</code> or a list of changed files, then <code>Requirement already satisfied</code> / <code>up to date, audited ... packages</code>. <code>.venv/</code>, <code>.state/</code> and the model are untracked, so <code>git pull</code> leaves them alone. <code>config.sh</code> is tracked: commit your key changes before pulling, or <code>git pull</code> stops with "local changes would be overwritten". New settings arrive in <code>config.template.sh</code> with defaults, so <code>config.sh</code> only needs the values you want to change.</p>
+        </section>
+
+        <!-- ================= STEP 11 ================= -->
+        <section class="section" id="step-11" aria-labelledby="h-step-11">
+            <h2 id="h-step-11">Step 11. Troubleshooting</h2>
+            <table>
+                <thead><tr><th scope="col">Symptom</th><th scope="col">Cause</th><th scope="col">Fix</th></tr></thead>
+                <tbody>
+                    <tr><th scope="row"><code>remote: Repository not found</code> or <code>Authentication failed</code> on clone</th><td>Private repo; no or wrong credentials, or the token lacks access to this repo</td><td>Redo <a href="#step-2">Step 2</a>. Use the token as the password. To clear a stale Keychain entry: <code>printf 'protocol=https\nhost=github.com\n' | git credential-osxkeychain erase</code> (not run).</td></tr>
+                    <tr><th scope="row"><code>Failed to build 'pandas'</code> / <code>No module named 'pkg_resources'</code></th><td><code>requirements.txt</code> pins need Python ≤ 3.11</td><td>Use the unpinned install in <a href="#py313">Step 4</a>, or the Python 3.11 path.</td></tr>
+                    <tr><th scope="row"><code>"status": "not_trained"</code> / <code>Model not found</code></th><td><code>*.pkl</code> is git-ignored; fresh clones have no model</td><td><code>python3 lib/train_ml_model.py</code> (<a href="#step-6">Step 6</a>).</td></tr>
+                    <tr><th scope="row"><code>ModuleNotFoundError: No module named 'xgboost'</code> (or yfinance)</th><td>The venv is not active in this window</td><td><code>source .venv/bin/activate</code></td></tr>
+                    <tr><th scope="row"><code>mapfile: command not found</code>, "Analyzing 0 stock(s)" with <code>--watchlist</code></th><td>macOS <code>/bin/bash</code> 3.2 has no <code>mapfile</code></td><td>Pass the file as <code>--symbols</code> instead (verified): <code>./StockSwingTrader_Agent.sh --symbols "$(paste -sd, watchlist.txt)"</code>. Or <code>brew install bash</code> and run <code>/opt/homebrew/bin/bash ./StockSwingTrader_Agent.sh --watchlist watchlist.txt</code> (not run).</td></tr>
+                    <tr><th scope="row">News key set in <code>config.sh</code> but sentiment still skipped</th><td>The line still uses <code>${API_KEY_FINNHUB:-...}</code>; the template already set it to <code>demo</code></td><td>Use a plain <code>export API_KEY_FINNHUB="your_key"</code> and run the check in <a href="#step-5">Step 5</a> (verified).</td></tr>
+                    <tr><th scope="row"><code>Failed to fetch current price</code></th><td>Yahoo quote endpoint rejects the curl request</td><td>Harmless; the last daily close is used.</td></tr>
+                    <tr><th scope="row"><code>Skipping AAPL - unable to fetch data</code>, exit 1</th><td>No network/yfinance and no synthetic opt-in</td><td><code>pip install yfinance</code>, check network, or use <code>SST_OFFLINE=1</code> for a marked demo run.</td></tr>
+                    <tr><th scope="row"><code>.../lib/lib/...module not found</code> or <code>Failed to load alpaca broker module</code></th><td>Old checkout from before the path fix</td><td><code>git pull</code> (<a href="#step-10">Step 10</a>), then <code>bash tests/test_broker_commands.sh</code>.</td></tr>
+                    <tr><th scope="row"><code>Missing Alpaca API credentials</code> on <code>--check-account</code></th><td>No <code>ALPACA_API_KEY</code>/<code>ALPACA_SECRET_KEY</code> in <code>config.sh</code>, or a leftover <code>SST_CONFIG_FILE</code> in your shell points at another file</td><td>Check the keys (<a href="#step-5">Step 5</a>, <a href="#cli-broker">Step 7.6</a>); <code>echo $SST_CONFIG_FILE</code> should print nothing (<code>unset SST_CONFIG_FILE</code>).</td></tr>
+                    <tr><th scope="row"><code>ERROR: Unauthorized</code>, <code>Failed to connect to alpaca</code></th><td>Wrong keys, or live keys with the paper URL (or the reverse)</td><td>Create paper keys in the Alpaca dashboard and keep <code>ALPACA_BASE_URL="https://paper-api.alpaca.markets"</code>.</td></tr>
+                    <tr><th scope="row"><code>Invalid symbol</code> / <code>Invalid quantity</code> on <code>--buy</code>/<code>--sell</code></th><td>Symbol not 1&ndash;5 uppercase letters, or quantity not above 0</td><td>For example <code>--buy AAPL 1</code>. Nothing was sent.</td></tr>
+                    <tr><th scope="row"><code>Unknown option: 2022-01-01</code></th><td>Backtest dates given positionally</td><td>Use <code>--start</code> and <code>--end</code>.</td></tr>
+                    <tr><th scope="row">Backtest files missing / written under <code>/Users/P3291917/...</code></th><td>Hard-coded default output folder</td><td><code>export BACKTEST_OUTPUT_DIR="$PWD/output/backtests"</code> before backtesting and before starting the backend.</td></tr>
+                    <tr><th scope="row"><code>Error: Port 5173 is already in use</code> (Vite exits)</th><td><code>strictPort: true</code>; another dev server is running</td><td><code>lsof -nP -iTCP:5173 -sTCP:LISTEN</code>, then <code>kill &lt;PID&gt;</code>.</td></tr>
+                    <tr><th scope="row"><code>EADDRINUSE: address already in use :::3000</code> (backend)</th><td>Something else uses port 3000</td><td><code>lsof -nP -iTCP:3000 -sTCP:LISTEN</code> and stop it. <code>PORT=3001 npm start</code> also works, but the dashboard proxy only talks to 3000.</td></tr>
+                    <tr><th scope="row"><code>Cannot find module 'express'</code> / <code>esbuild</code> in tests</th><td>Node packages not installed</td><td><code>(cd backend &amp;&amp; npm install)</code> and <code>(cd frontend &amp;&amp; npm install)</code>.</td></tr>
+                    <tr><th scope="row">Dashboard panels empty, API returns <code>{"raw":""}</code></th><td>Backend calls sub-commands the lib scripts do not implement</td><td>Known gap; health, trades, settings and backtest endpoints work.</td></tr>
+                    <tr><th scope="row">HTML report shows <code>--</code> and <code>$0.00</code></th><td>The report template is not filled with the computed scores yet</td><td>Known (<a href="#cli-analyze">Step 7.2</a>).</td></tr>
+                    <tr><th scope="row"><code>git status</code> shows <code>config.sh</code></th><td>Should never happen (it is in <code>.gitignore</code>)</td><td>Check <code>git check-ignore -v config.sh</code>; never <code>git add -f</code> it.</td></tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- ================= QUICK REFERENCE ================= -->
+        <section class="section" id="quick-ref" aria-labelledby="h-quick-ref">
+            <h2 id="h-quick-ref">Quick-reference card</h2>
+            <div class="card">
+<pre class="code-block"><code># one-time setup
+mkdir -p ~/Projects &amp;&amp; cd ~/Projects
+git clone https://github.com/uma5gowdas/StockSwingTrader.git StockSwingTrader
+cd StockSwingTrader
+python3 -m venv .venv &amp;&amp; source .venv/bin/activate
+pip install xgboost pandas numpy scikit-learn scipy joblib filterpy requests yfinance
+chmod 600 config.sh     # comes with the clone (tracked, paper keys); edit + commit to change keys
+python3 lib/train_ml_model.py
+(cd backend &amp;&amp; npm install) &amp;&amp; (cd frontend &amp;&amp; npm install)
+
+# every session
+cd ~/Projects/StockSwingTrader &amp;&amp; source .venv/bin/activate
+export BACKTEST_OUTPUT_DIR="$PWD/output/backtests"
+
+# use it
+./StockSwingTrader_Agent.sh --symbols AAPL,MSFT
+SST_OFFLINE=1 ./StockSwingTrader_Agent.sh --symbols AAPL          # synthetic demo
+./StockSwingTrader_Agent.sh --symbols AAPL --phase1               # + Kelly plan, MiroFish cache
+./StockSwingTrader_Agent.sh --backtest AAPL --start 2023-01-01 --end 2023-12-31
+bash lib/ml_predictor.sh predict AAPL 5 &lt;/dev/null
+./StockSwingTrader_Agent.sh --check-account                        # Alpaca paper only
+./StockSwingTrader_Agent.sh --view-positions
+./StockSwingTrader_Agent.sh --reconcile-accept                     # once: adopt existing paper positions
+./StockSwingTrader_Agent.sh --safety-status                        # no broker call
+./StockSwingTrader_Agent.sh --buy AAPL 1                           # limit + bracket; type yes to send, anything else cancels
+./StockSwingTrader_Agent.sh --halt "reason"   /   --resume         # kill switch
+bash tests/test_runner.sh                                          # ~14 min, 960/960 pass
+
+# dashboard (two terminals; Ctrl+C to stop)
+cd backend  &amp;&amp; BACKTEST_OUTPUT_DIR="$PWD/../output/backtests" SST_LOG_FILE="$PWD/../logs/backend.log" npm start   # :3000
+cd frontend &amp;&amp; npm run dev                                                                                          # :5173
+open http://localhost:5173</code></pre>
+            </div>
+        </section>
+    </main>
+
+    <footer class="footer">
+        <p>StockSwingTrader v6.3 local setup guide · verified on macOS (bash 3.2, Python 3.13.12, Node 25.6.1) against <code>main</code> at <code>813f7dd</code>, 2026-10-31; live-safety Step 1 sections re-checked at <code>5a7abc0</code>.</p>
+        <p>Not financial advice. Paper trading only. The ML model is trained on synthetic data.</p>
+    </footer>
+</div>
+</body>
+</html>
+                    <tr><th scope="row">HTML report shows <code>--</code> and <code>$0.00</code></th><td>The older template fields are not filled yet</td><td>Read the Score Breakdown table and the <code>.json</code> next to it (<a href="#cli-analyze">Step 7.2</a>).</td></tr>
+                    <tr><th scope="row"><code>git status</code> shows <code>config.sh</code> as modified</th><td>Expected: <code>config.sh</code> is tracked in the private repo</td><td>Review with <code>git diff config.sh</code> (prints keys; not while screen sharing), then commit (<a href="#config-change-keys">Step 5</a>). Make sure <code>ALPACA_BASE_URL</code> is still the paper URL.</td></tr>
+                    <tr><th scope="row"><code>KILL SWITCH ACTIVE since ...</code></th><td><code>--halt</code> was run</td><td><code>--safety-status</code>, then <code>--resume</code> when it is safe.</td></tr>
+                    <tr><th scope="row"><code>Order blocked: quantity ... MAX_ORDER_QTY</code>, <code>notional ... MAX_ORDER_NOTIONAL</code>, <code>today's buy notional ... MAX_DAILY_NOTIONAL</code>, <code>... MAX_OPEN_POSITIONS</code></th><td>A safety cap</td><td>Smaller order, or raise the cap on purpose in <code>config.sh</code> (<a href="#safety-caps">caps</a>).</td></tr>
+                    <tr><th scope="row"><code>Order blocked: sell ... exceeds the held position</code></th><td>No short selling</td><td>Sell at most what <code>--view-positions</code> shows.</td></tr>
+                    <tr><th scope="row"><code>DAILY LOSS HALT</code></th><td>Equity down by the daily loss limit since the prior close</td><td>Buys resume next trading day; sells work.</td></tr>
+                    <tr><th scope="row"><code>Order blocked: duplicate ...</code></th><td>Same symbol and side within 5 minutes, or an open order at the broker</td><td>Wait or cancel the open order in Alpaca.</td></tr>
+                    <tr><th scope="row"><code>RECONCILIATION ... NO BASELINE</code> / <code>MISMATCH</code>, <code>Order refused: broker state does not match ...</code></th><td>First run, or trades made outside the agent</td><td><code>--reconcile</code> to review, <code>--reconcile-accept</code> to adopt (<a href="#safety-reconcile">Reconciliation</a>).</td></tr>
+                    <tr><th scope="row"><code>Order blocked: the market is closed</code> / <code>market holiday</code> / <code>market clock unavailable (fail closed)</code></th><td>Outside regular hours, holiday, or Alpaca clock unreachable</td><td>Order during market hours, or <code>OUTSIDE_HOURS_POLICY=queue</code>.</td></tr>
+                    <tr><th scope="row"><code>LIVE endpoint ...: orders need --live</code> / <code>LIVE endpoint refused: config.sh is tracked in git</code></th><td>A non-paper URL (or Robinhood)</td><td>Put <code>config.sh</code> back on the paper URL. Live keys only in an untracked <code>config.live.sh</code> with <code>SST_CONFIG_FILE</code> and <code>--live</code> (<a href="#step-5">Step 5</a>).</td></tr>
