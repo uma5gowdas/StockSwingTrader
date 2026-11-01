@@ -65,6 +65,7 @@ add_test "Phase 1 Integration (CLI)" "${SCRIPT_DIR}/test_phase1_integration.sh"
 add_test "No Silent Fake Data" "${SCRIPT_DIR}/test_no_fake_data.sh"
 add_test "Broker Commands (stubbed)" "${SCRIPT_DIR}/test_broker_commands.sh"
 add_test "V2 CLI Scoring" "${SCRIPT_DIR}/test_v2_cli_scoring.sh"
+add_test "Order Execution (stubbed)" "${SCRIPT_DIR}/test_order_execution.sh"
 
 # ============================================================================
 # Utility Functions

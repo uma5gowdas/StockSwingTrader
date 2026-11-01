@@ -3,15 +3,19 @@
 # StockSwingTrader v6.1: Alpaca API Wrappers
 # ============================================================================
 # Purpose: High-level wrapper functions that map v6.1 strategy calls to the
-#          underlying Alpaca broker functions. Provides atomic operations like
-#          bracket orders (entry + stop + take-profit).
+#          underlying Alpaca broker functions (alpaca_broker.sh). It never
+#          redefines a broker function; orders, brackets, status and cancel
+#          live in alpaca_broker.sh.
 # ============================================================================
 
-# Source dependencies
-source "$(dirname "${BASH_SOURCE[0]}")/alpaca_broker.sh" 2>/dev/null || {
-    echo "ERROR: alpaca_broker.sh not found" >&2
-    return 1
-}
+# Source dependencies (only when the broker module is not loaded yet, so an
+# initialized connection, ALPACA_INITIALIZED, is kept)
+if ! declare -F alpaca_submit_order >/dev/null 2>&1; then
+    source "$(dirname "${BASH_SOURCE[0]}")/alpaca_broker.sh" 2>/dev/null || {
+        echo "ERROR: alpaca_broker.sh not found" >&2
+        return 1
+    }
+fi
 
 # ============================================================================
 # Account & Position Information
@@ -34,19 +38,6 @@ alpaca_get_account_equity() {
     
     # Parse equity from account JSON
     echo "$account_json" | jq -r '.equity // 0' 2>/dev/null || echo "0"
-}
-
-# Get all open positions
-# Args: none
-# Returns: JSON array of positions
-# Example: positions=$(alpaca_get_positions); jq '.[0].symbol' <<< "$positions"
-alpaca_get_positions() {
-    if ! command -v alpaca_get_positions &>/dev/null; then
-        echo "[]"
-        return 1
-    fi
-    
-    alpaca_get_positions 2>/dev/null || echo "[]"
 }
 
 # Get specific position by symbol
@@ -76,147 +67,51 @@ alpaca_get_current_price() {
     fi
     
     local quote=$(alpaca_get_quote "$symbol")
-    echo "$quote" | jq -r '.last_quote.ask // .last_quote.bid // 0' 2>/dev/null || echo "0"
+    echo "$quote" | jq -r '.last_price // 0' 2>/dev/null || echo "0"
 }
 
 # ============================================================================
 # Order Placement
 # ============================================================================
+# alpaca_place_order, alpaca_place_bracket_order, alpaca_get_order_status and
+# alpaca_cancel_order come from alpaca_broker.sh (not redefined here).
 
-# Place a simple market order
-# Args: symbol, qty, side (buy|sell)
-# Returns: Order ID
-# Example: order_id=$(alpaca_place_order "AAPL" 10 "buy")
-alpaca_place_order() {
-    local symbol=$1
-    local qty=$2
-    local side=$3
-    
-    if [[ -z "$symbol" ]] || [[ -z "$qty" ]] || [[ -z "$side" ]]; then
-        return 1
-    fi
-    
-    if ! command -v alpaca_submit_order &>/dev/null; then
-        return 1
-    fi
-    
-    local order=$(alpaca_submit_order "$symbol" "$qty" "$side" "market")
-    echo "$order" | jq -r '.id // empty' 2>/dev/null
-}
-
-# Place a bracket order (entry + stop-loss + take-profit)
-# Args: symbol, qty, entry_price, stop_loss_price, take_profit_price
-# Returns: JSON with order IDs {entry_order_id, stop_order_id, profit_order_id}
-# Example: bracket=$(alpaca_place_bracket_order "AAPL" 10 100 97 108)
-alpaca_place_bracket_order() {
-    local symbol=$1
-    local qty=$2
-    local entry_price=$3
-    local stop_loss_price=$4
-    local take_profit_price=$5
-    
-    if [[ -z "$symbol" ]] || [[ -z "$qty" ]]; then
-        return 1
-    fi
-    
-    # Place primary buy order
-    local entry_order=$(alpaca_place_order "$symbol" "$qty" "buy")
-    if [[ -z "$entry_order" ]]; then
-        return 1
-    fi
-    
-    # Note: Bracket orders with stop/profit legs require more complex setup
-    # In Alpaca, we can place a primary order and then place OTO (One-Triggers-Other) orders
-    # For now, return simplified structure - in production, use Alpaca's OCO/OTO capabilities
-    
-    cat <<EOF
-{
-  "entry_order_id": "$entry_order",
-  "stop_order_id": "",
-  "profit_order_id": "",
-  "status": "partial",
-  "note": "Entry placed; stop and profit orders require manual setup or advanced broker integration"
-}
-EOF
-}
-
-# Place a stop-loss order
+# Place a stop-loss order (sell stop, good till cancelled)
 # Args: symbol, qty, stop_price
-# Returns: Order ID
+# Returns: Order ID (1 on error)
+# Example: order_id=$(alpaca_place_stop_loss "AAPL" 10 97.50)
 alpaca_place_stop_loss() {
     local symbol=$1
     local qty=$2
     local stop_price=$3
-    
+    local payload order
+
     if [[ -z "$symbol" ]] || [[ -z "$qty" ]] || [[ -z "$stop_price" ]]; then
         return 1
     fi
-    
-    if ! command -v alpaca_submit_order &>/dev/null; then
-        return 1
-    fi
-    
-    # Place stop order (sell at or below stop price)
-    local order=$(alpaca_submit_order "$symbol" "$qty" "sell" "stop" "$stop_price")
-    echo "$order" | jq -r '.id // empty' 2>/dev/null
+
+    payload=$(alpaca_build_order_payload "$symbol" "$qty" "sell" "stop" "" "gtc" "" "$stop_price") || return 1
+    order=$(alpaca_submit_order "$payload") || return 1
+    echo "$order" | jq -r '.order_id // empty' 2>/dev/null
 }
 
-# Place a take-profit order
+# Place a take-profit order (sell limit, good till cancelled)
 # Args: symbol, qty, limit_price
-# Returns: Order ID
+# Returns: Order ID (1 on error)
+# Example: order_id=$(alpaca_place_take_profit "AAPL" 10 108)
 alpaca_place_take_profit() {
     local symbol=$1
     local qty=$2
     local limit_price=$3
-    
+    local payload order
+
     if [[ -z "$symbol" ]] || [[ -z "$qty" ]] || [[ -z "$limit_price" ]]; then
         return 1
     fi
-    
-    if ! command -v alpaca_submit_order &>/dev/null; then
-        return 1
-    fi
-    
-    # Place limit order (sell at or above limit price)
-    local order=$(alpaca_submit_order "$symbol" "$qty" "sell" "limit" "$limit_price")
-    echo "$order" | jq -r '.id // empty' 2>/dev/null
-}
 
-# ============================================================================
-# Order Status & Management
-# ============================================================================
-
-# Get order status
-# Args: order_id
-# Returns: Order status (new, partially_filled, filled, canceled, pending_cancel, etc.)
-alpaca_get_order_status() {
-    local order_id=$1
-    if [[ -z "$order_id" ]]; then
-        return 1
-    fi
-    
-    if ! command -v alpaca_get_order &>/dev/null; then
-        return 1
-    fi
-    
-    local order=$(alpaca_get_order "$order_id")
-    echo "$order" | jq -r '.status // "unknown"' 2>/dev/null
-}
-
-# Cancel order
-# Args: order_id
-# Returns: 0 if successful, 1 if failed
-alpaca_cancel_order() {
-    local order_id=$1
-    if [[ -z "$order_id" ]]; then
-        return 1
-    fi
-    
-    if ! command -v alpaca_cancel_order &>/dev/null; then
-        return 1
-    fi
-    
-    alpaca_cancel_order "$order_id" &>/dev/null && return 0 || return 1
+    payload=$(alpaca_build_order_payload "$symbol" "$qty" "sell" "limit" "$limit_price" "gtc" "") || return 1
+    order=$(alpaca_submit_order "$payload") || return 1
+    echo "$order" | jq -r '.order_id // empty' 2>/dev/null
 }
 
 # ============================================================================
