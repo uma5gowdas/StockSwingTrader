@@ -304,6 +304,12 @@ apply_mirofish_to_confluence() {
 #   [mr_score]: Mean reversion strategy score (0-100, optional)
 #   [tf_score]: Trend following strategy score (0-100, optional)
 #   [kalman_trend]: Kalman-filtered trend direction (-1|0|1, optional)
+#   [sentiment_score]: optional 10th arg, 0-100 or na/null/unavailable/"".
+#     Only when this arg is passed: components.sentiment is added; a numeric
+#     score with V2_SENTIMENT_WEIGHT (default 0.10, 0..0.5) > 0 gives
+#     final = core*(1-ws) + sentiment*ws (core = unrounded score incl.
+#     MiroFish) and every other weight_percent scales by (1-ws). Sentiment
+#     casts no vote. With <= 9 args the output is unchanged.
 #
 # Returns: JSON with {
 #   "confluence_score": 0-100,
@@ -332,6 +338,20 @@ calculate_confluence_score_v2() {
     local mr_score=${7:-50}
     local tf_score=${8:-50}
     local kalman_trend=${9:-0}
+    # Optional sentiment component (arg 10): see the header comment
+    local sent_passed=false sent_available=false sent_applied=false sent_score="null" sent_w=0
+    if [[ $# -ge 10 ]]; then
+        sent_passed=true
+        if [[ "${10}" =~ ^-?[0-9]+(\.[0-9]+)?$ ]]; then
+            sent_available=true
+            sent_score=$(awk -v s="${10}" 'BEGIN { print s + 0 }')
+            sent_w=$(awk -v w="${V2_SENTIMENT_WEIGHT:-0.10}" 'BEGIN {
+                if (w !~ /^[0-9]*\.?[0-9]+$/) w = 0.10
+                if (w > 0.5) w = 0.5
+                print w + 0 }')
+            awk -v w="$sent_w" 'BEGIN { exit !(w > 0) }' && sent_applied=true
+        fi
+    fi
     
     local start_time=$(date +%s%N)
     
@@ -477,6 +497,11 @@ calculate_confluence_score_v2() {
             ($technical_score * 0.30) + \
             ($volume_trend_score * 0.20)" | bc)
     fi
+    if [[ "$sent_applied" == "true" ]]; then
+        # Blend sentiment on the unrounded core score (MiroFish included)
+        confluence_score=$(awk -v c="$confluence_score" -v s="$sent_score" -v w="$sent_w" \
+            'BEGIN { printf "%.4f", c * (1 - w) + s * w }')
+    fi
     confluence_score=$(printf "%.0f" "$confluence_score")
     local wp_ml=15 wp_regime=35 wp_tech=30 wp_vt=20 mirofish_component=""
     if [[ "$ml_available" != "true" ]]; then
@@ -491,6 +516,22 @@ calculate_confluence_score_v2() {
         wp_regime=$(awk -v w="$mf_w" 'BEGIN { printf "%.1f", 35 * (1 - w) }')
         wp_tech=$(awk -v w="$mf_w" 'BEGIN { printf "%.1f", 30 * (1 - w) }')
         wp_vt=$(awk -v w="$mf_w" 'BEGIN { printf "%.1f", 20 * (1 - w) }')
+    fi
+    if [[ "$sent_applied" == "true" ]]; then
+        # Sentiment takes ws; every other weight scales by (1 - ws), computed
+        # from the unrounded base weights
+        local base_scale=1
+        [[ "$mf_applied" == "true" ]] && base_scale=$(awk -v w="$mf_w" 'BEGIN { print 1 - w }')
+        if [[ "$ml_available" != "true" ]]; then
+            wp_regime=$(awk -v s="$base_scale" -v w="$sent_w" 'BEGIN { printf "%.1f", 3500 / 85 * s * (1 - w) }')
+            wp_tech=$(awk -v s="$base_scale" -v w="$sent_w" 'BEGIN { printf "%.1f", 3000 / 85 * s * (1 - w) }')
+            wp_vt=$(awk -v s="$base_scale" -v w="$sent_w" 'BEGIN { printf "%.1f", 2000 / 85 * s * (1 - w) }')
+        else
+            wp_ml=$(awk -v s="$base_scale" -v w="$sent_w" 'BEGIN { printf "%.1f", 15 * s * (1 - w) }')
+            wp_regime=$(awk -v s="$base_scale" -v w="$sent_w" 'BEGIN { printf "%.1f", 35 * s * (1 - w) }')
+            wp_tech=$(awk -v s="$base_scale" -v w="$sent_w" 'BEGIN { printf "%.1f", 30 * s * (1 - w) }')
+            wp_vt=$(awk -v s="$base_scale" -v w="$sent_w" 'BEGIN { printf "%.1f", 20 * s * (1 - w) }')
+        fi
     fi
     # JSON fragments for the ML component's availability / data source
     local ml_score_json="$ml_confidence" ml_extra="" data_warning=""
@@ -511,12 +552,26 @@ calculate_confluence_score_v2() {
     if [[ -n "$mf_json" ]]; then
         local mf_wp="0"
         [[ "$mf_applied" == "true" ]] && mf_wp=$(awk -v w="$mf_w" 'BEGIN { printf "%.1f", 100 * w }')
+        if [[ "$mf_applied" == "true" && "$sent_applied" == "true" ]]; then
+            mf_wp=$(awk -v w="$mf_w" -v ws="$sent_w" 'BEGIN { printf "%.1f", 100 * w * (1 - ws) }')
+        fi
         mirofish_component=",
     \"mirofish\": {
       \"score\": ${mf_score},
       \"status\": \"${mf_status}\",
       \"prediction\": ${mf_pred:-null},
       \"weight_percent\": ${mf_wp}
+    }"
+    fi
+    local sentiment_component=""
+    if [[ "$sent_passed" == "true" ]]; then
+        local sent_wp=0
+        [[ "$sent_applied" == "true" ]] && sent_wp=$(awk -v w="$sent_w" 'BEGIN { printf "%.1f", 100 * w }')
+        sentiment_component=",
+    \"sentiment\": {
+      \"score\": ${sent_score},
+      \"available\": ${sent_available},
+      \"weight_percent\": ${sent_wp}
     }"
     fi
     
@@ -628,7 +683,7 @@ calculate_confluence_score_v2() {
     "volume_trend_score": {
       "score": ${volume_trend_score},
       "weight_percent": ${wp_vt}
-    }${mirofish_component}
+    }${mirofish_component}${sentiment_component}
   },
   "breakdown": {
     "symbol": "${symbol}",
@@ -657,6 +712,164 @@ calculate_confluence_score_v2() {
   }
 }
 EOF
+}
+
+# ============================================================================
+# v2 inputs from fetched bars (Step 1: CLI uses calculate_confluence_score_v2)
+# ============================================================================
+# All helpers are pure (awk/jq on the data already fetched); no network.
+
+# Score the OBV trend over the last LOOKBACK bars
+# Args: obv_json (JSON array, calc_obv output), volumes_json (JSON array),
+#       [lookback] (default OBV_LOOKBACK or 10)
+# Returns: {"obv_score","obv_available","obv_change","obv_lookback"}
+#   delta = obv[-1] - obv[-1-N]; ratio = delta / (N * mean(volume[-N:]))
+#   clamped to [-1,1]; score = round(50 + 50*ratio). All-up bars -> 100,
+#   all-down -> 0, flat -> 50. Fewer than N+1 points -> 50, obv_available false.
+# Example: score_obv_trend '[1,2,3]' '[1,1,1]' 2   # -> obv_score 100
+score_obv_trend() {
+    local obv_json=${1:-[]}
+    local volumes_json=${2:-[]}
+    local lookback=${3:-${OBV_LOOKBACK:-10}}
+    [[ "$lookback" =~ ^[0-9]+$ && "$lookback" -ge 1 ]] || lookback=10
+    jq -c -n --argjson o "$obv_json" --argjson v "$volumes_json" --argjson n "$lookback" '
+        if ($o | type) != "array" or ($v | type) != "array"
+           or ($o | length) < ($n + 1) or ($v | length) < $n then
+            {obv_score: 50, obv_available: false, obv_change: null, obv_lookback: $n}
+        else
+            ($o[-1] - $o[-1 - $n]) as $d
+            | (($v[-$n:] | add) / $n) as $mv
+            | (if $mv > 0 then $d / ($n * $mv) else 0 end) as $r
+            | ([[$r, 1] | min, -1] | max) as $rc
+            | {obv_score: ((50 + 50 * $rc) + 0.5 | floor), obv_available: true,
+               obv_change: $d, obv_lookback: $n}
+        end' 2>/dev/null \
+        || echo "{\"obv_score\":50,\"obv_available\":false,\"obv_change\":null,\"obv_lookback\":${lookback}}"
+}
+
+# Graded mean-reversion setup score (mirrors mean_reversion_analyze criteria)
+# Args: rsi, close, bb_upper, bb_lower, last_volume, avg_volume_20, macd, signal
+# Returns: score 0-100
+#   rsi_term = clamp((50-RSI)/20,-1,1)*25; bb_term = clamp((0.5-bbfrac)/0.5,-1,1)*15
+#   with bbfrac = (close-lower)/(upper-lower) (0.5 when the band is empty);
+#   vol_mult = 1.2 if last_volume > avg_volume_20 else 1.0;
+#   macd_term = +5 if macd > signal, -5 if macd < signal, 0 when equal
+#   MR = clamp(round(50 + vol_mult*(rsi_term+bb_term) + macd_term), 0, 100)
+score_mean_reversion_setup() {
+    awk -v rsi="${1:-50}" -v c="${2:-0}" -v u="${3:-0}" -v l="${4:-0}" \
+        -v lv="${5:-0}" -v av="${6:-0}" -v m="${7:-0}" -v s="${8:-0}" 'BEGIN {
+        rt = (50 - rsi) / 20; if (rt > 1) rt = 1; if (rt < -1) rt = -1; rt *= 25
+        f = 0.5; if (u - l > 0) f = (c - l) / (u - l)
+        bt = (0.5 - f) / 0.5; if (bt > 1) bt = 1; if (bt < -1) bt = -1; bt *= 15
+        vm = (lv + 0 > av + 0) ? 1.2 : 1.0
+        mt = 0; if (m + 0 > s + 0) mt = 5; else if (m + 0 < s + 0) mt = -5
+        x = int(50 + vm * (rt + bt) + mt + 0.5 + 1000) - 1000
+        if (x < 0) x = 0; if (x > 100) x = 100
+        print x }'
+}
+
+# Graded trend-following setup score (mirrors trend_follow_analyze criteria)
+# Args: close, ema12, ema26, sma50|'' , sma200|'', last_volume, avg_volume_30
+# Returns: score 0-100
+#   ema_term = +-15 (EMA12 vs EMA26), sma50_term = +-15 (close vs SMA50, 0
+#   when empty), sma200_term = +-10 (close vs SMA200, 0 when empty);
+#   vol_mult = 1.2 if last_volume > avg_volume_30;
+#   TF = clamp(round(50 + vol_mult*sum), 0, 100). Equal values give 0.
+score_trend_follow_setup() {
+    awk -v c="${1:-0}" -v e12="${2:-0}" -v e26="${3:-0}" -v s50="${4:-}" -v s200="${5:-}" \
+        -v lv="${6:-0}" -v av="${7:-0}" 'BEGIN {
+        t = 0
+        if (e12 + 0 > e26 + 0) t += 15; else if (e12 + 0 < e26 + 0) t -= 15
+        if (s50 != "") { if (c + 0 > s50 + 0) t += 15; else if (c + 0 < s50 + 0) t -= 15 }
+        if (s200 != "") { if (c + 0 > s200 + 0) t += 10; else if (c + 0 < s200 + 0) t -= 10 }
+        vm = (lv + 0 > av + 0) ? 1.2 : 1.0
+        x = int(50 + vm * t + 0.5 + 1000) - 1000
+        if (x < 0) x = 0; if (x > 100) x = 100
+        print x }'
+}
+
+# Kalman trend direction from closes
+# Args: closes_json (JSON array, oldest first)
+# Returns: {"kalman_trend": -1|0|1, "kalman_slope_pct", "kalman_available"}
+#   slope_pct = (f[-1]-f[-6])/f[-6]*100 on apply_kalman_filter_fast output;
+#   > KALMAN_TREND_THRESHOLD_PCT (default 0.5) -> 1, < -threshold -> -1.
+#   Failure or < 6 filtered prices -> 0 with kalman_available false.
+kalman_trend_from_closes() {
+    local closes_json=${1:-[]}
+    local threshold=${KALMAN_TREND_THRESHOLD_PCT:-0.5}
+    local filtered=""
+    if declare -f apply_kalman_filter_fast >/dev/null; then
+        filtered=$(apply_kalman_filter_fast "$closes_json" 2>/dev/null)
+    fi
+    echo "$filtered" | jq -c --argjson t "$threshold" '
+        (.filtered_prices // []) as $f
+        | if ($f | length) < 6 or ($f[-6] // 0) == 0 then error("short") else
+            (($f[-1] - $f[-6]) / $f[-6] * 100) as $s
+            | {kalman_trend: (if $s > $t then 1 elif $s < -$t then -1 else 0 end),
+               kalman_slope_pct: (($s * 10000 | round) / 10000), kalman_available: true}
+          end' 2>/dev/null \
+        || echo '{"kalman_trend":0,"kalman_slope_pct":null,"kalman_available":false}'
+}
+
+# Build every v2 input from the bars already fetched by the agent
+# Args: symbol, closes_json, volumes_json, obv_json, rsi, macd, signal,
+#       bb_upper, bb_lower
+# Returns: one-line JSON {obv_score, obv_available, obv_change, obv_lookback,
+#   mr_score, tf_score, kalman_trend, kalman_slope_pct, kalman_available,
+#   regime, regime_detail, ema_12, ema_26, sma_50, sma_200, last_volume,
+#   avg_volume_20, avg_volume_30, closes_count}
+#   regime comes from detect_market_regime on the passed closes
+#   (data_source "caller"); unavailable -> "unknown". sma_50/sma_200 are null
+#   with fewer than 50/200 closes (their trend terms are then 0).
+build_v2_inputs() {
+    local symbol=$1 closes_json=${2:-[]} volumes_json=${3:-[]} obv_json=${4:-[]}
+    local rsi=${5:-50} macd=${6:-0} signal=${7:-0} bb_upper=${8:-0} bb_lower=${9:-0}
+
+    # EMA12/EMA26 (SMA seed, like calc_ema), SMA50/200, volume averages
+    local stats
+    stats=$(jq -c -n --argjson c "$closes_json" --argjson v "$volumes_json" '
+        def ema($p): if ($c | length) < $p then null else
+            reduce $c[$p:][] as $x ((($c[0:$p] | add) / $p); ($x - .) * (2 / ($p + 1)) + .) end;
+        def tailmean($a; $n): if ($a | length) < $n or $n == 0 then null else ($a[-$n:] | add) / $n end;
+        def r4: if . == null then null else (. * 10000 | round) / 10000 end;
+        {ema_12: (ema(12) | r4), ema_26: (ema(26) | r4),
+         sma_50: (tailmean($c; 50) | r4), sma_200: (tailmean($c; 200) | r4),
+         last_close: ($c[-1] // null), last_volume: ($v[-1] // null),
+         avg_volume_20: (tailmean($v; 20) | r4), avg_volume_30: (tailmean($v; 30) | r4),
+         closes_count: ($c | length)}' 2>/dev/null)
+    [[ -z "$stats" ]] && stats='{"closes_count":0}'
+    local close ema12 ema26 sma50 sma200 lastv av20 av30 count
+    IFS='|' read -r close ema12 ema26 sma50 sma200 lastv av20 av30 count <<< "$(echo "$stats" | jq -r \
+        '[.last_close, .ema_12, .ema_26, .sma_50, .sma_200, .last_volume, .avg_volume_20, .avg_volume_30, .closes_count]
+         | map(if . == null then "" else tostring end) | join("|")')"
+
+    local obv mr tf kal
+    obv=$(score_obv_trend "$obv_json" "$volumes_json")
+    mr=$(score_mean_reversion_setup "$rsi" "${close:-0}" "$bb_upper" "$bb_lower" "${lastv:-0}" "${av20:-0}" "$macd" "$signal")
+    tf=$(score_trend_follow_setup "${close:-0}" "${ema12:-0}" "${ema26:-0}" "$sma50" "$sma200" "${lastv:-0}" "${av30:-0}")
+    kal=$(kalman_trend_from_closes "$closes_json")
+
+    local regime="unknown" regime_detail="null"
+    if declare -f detect_market_regime >/dev/null && [[ "${count:-0}" -ge 20 ]]; then
+        local -a closes_arr=()
+        closes_arr=($(echo "$closes_json" | jq -r '.[]' 2>/dev/null))
+        local rd
+        rd=$(detect_market_regime "$symbol" "${#closes_arr[@]}" "${closes_arr[@]}" 2>/dev/null | jq -c . 2>/dev/null)
+        if [[ -n "$rd" ]]; then
+            regime_detail="$rd"
+            if echo "$rd" | jq -e '.available != false and .data_source == "caller"' >/dev/null 2>&1; then
+                regime=$(echo "$rd" | jq -r '.regime // "unknown"')
+            fi
+        fi
+    fi
+
+    jq -c -n --argjson s "$stats" --argjson o "$obv" --argjson k "$kal" \
+        --argjson mr "${mr:-50}" --argjson tf "${tf:-50}" --arg rg "$regime" --argjson rd "$regime_detail" '
+        $o + {mr_score: $mr, tf_score: $tf} + $k
+        + {regime: $rg, regime_detail: $rd,
+           ema_12: $s.ema_12, ema_26: $s.ema_26, sma_50: $s.sma_50, sma_200: $s.sma_200,
+           last_volume: $s.last_volume, avg_volume_20: $s.avg_volume_20,
+           avg_volume_30: $s.avg_volume_30, closes_count: ($s.closes_count // 0)}'
 }
 
 # ============================================================================
@@ -754,3 +967,5 @@ export -f score_williams_r score_obv calculate_confluence_score calculate_conflu
 export -f _confluence_signal_for apply_mirofish_to_confluence
 export -f calc_stop_loss_atr calc_stop_loss_percent calc_take_profit
 export -f calc_risk_reward_ratio generate_score_summary
+export -f score_obv_trend score_mean_reversion_setup score_trend_follow_setup
+export -f kalman_trend_from_closes build_v2_inputs

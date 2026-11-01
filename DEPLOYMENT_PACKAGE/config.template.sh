@@ -94,6 +94,22 @@ export SENTIMENT_NEWS_COUNT="${SENTIMENT_NEWS_COUNT:-10}"              # Article
 export SENTIMENT_TIMEOUT_SECONDS="${SENTIMENT_TIMEOUT_SECONDS:-5}"     # curl --max-time for news
 export SENTIMENT_NEGATION_DISCOUNT="${SENTIMENT_NEGATION_DISCOUNT:-0.7}"  # Keyword weight factor when negated
 export SENTIMENT_CACHE_DIR="${SENTIMENT_CACHE_DIR:-cache/data}"        # 30-min cache of successful news results
+# ============================================================================
+# v2 scoring (Step 1)
+# ============================================================================
+# The CLI scores with calculate_confluence_score_v2 (15% ML + 35% regime-
+# weighted mean-reversion/trend-following + 30% technical + 20% OBV/Kalman
+# volume-trend), computed from the fetched bars. SCORING_MODE=legacy (or
+# --legacy-score) keeps the old 80% technical average + 20% sentiment.
+# Sentiment enters v2 once: when available, final = core*(1-w) + sentiment*w
+# and the other weights scale by (1-w); unavailable sentiment has 0 weight.
+export SCORING_MODE="${SCORING_MODE:-v2}"                          # v2 | legacy
+export V2_SENTIMENT_WEIGHT="${V2_SENTIMENT_WEIGHT:-0.10}"          # 0..0.5
+export OBV_LOOKBACK="${OBV_LOOKBACK:-10}"                          # Bars for the OBV trend score
+export KALMAN_TREND_THRESHOLD_PCT="${KALMAN_TREND_THRESHOLD_PCT:-0.5}"  # 5-bar Kalman slope (%) for up/down
+# One ML prediction takes ~5 s (python + model load); the library default of
+# 5 s would often time out (ML then scores a neutral 50), so the CLI waits longer.
+export ML_TIMEOUT_SECONDS="${ML_TIMEOUT_SECONDS:-15}"
 
 # ============================================================================
 # Phase 1: MiroFish (optional, cache-reading, default OFF)
@@ -172,40 +188,30 @@ export ALPACA_LOG_FILE="logs/alpaca.log"
 # Alpaca Paper Trading Configuration
 # ============================================================================
 # Get API credentials from: https://app.alpaca.markets/paper/settings/api
-# Paper Trading URL: https://paper-api.alpaca.markets/v2
-# Live Trading URL: https://api.alpaca.markets/v2 (use with caution!)
+# Paper Trading URL: https://paper-api.alpaca.markets (the agent adds /v2)
+# Live Trading URL:  https://api.alpaca.markets (real money)
 #
-# SECURITY BEST PRACTICES:
-#   - NEVER commit API keys to version control
-#   - Store credentials in environment variables or external config file
-#   - Use paper trading account for testing and development
-#   - Rotate API keys regularly
-#   - Use API keys with minimal required permissions
-#   - For production use, consider using IAM roles or credential providers
+# WHERE KEYS LIVE:
+#   - config.sh is TRACKED in git (private repository) and holds the PAPER
+#     keys. It must stay on paper-api.alpaca.markets: the agent refuses every
+#     broker command when the endpoint is live and the active config file is
+#     tracked in git.
+#   - Live keys go in an untracked file (config.live.sh is in .gitignore),
+#     selected per run with SST_CONFIG_FILE=/path/to/config.live.sh. Orders on
+#     a live endpoint then also need --live and a typed "SYMBOL QTY"
+#     confirmation.
+#   - config.sh hard-sets ALPACA_BASE_URL, so an environment override of the
+#     URL does not apply while config.sh is the active config.
+#   - Never print or paste key values; rotate keys that were exposed.
 #
-# SETUP INSTRUCTIONS:
-#   1. Generate Alpaca API key from https://app.alpaca.markets/paper/settings/api
-#   2. Set environment variables in your shell profile or .env file:
-#      export ALPACA_API_KEY="your_key_here"
-#      export ALPACA_SECRET_KEY="your_secret_here"
-#   3. OR create config/api_keys.sh (NOT tracked in git):
-#      source config/api_keys.sh before running start_paper.sh
-#   4. Example config/api_keys.sh:
-#      #!/bin/bash
-#      export ALPACA_API_KEY="PK1234567890ABCDEF"
-#      export ALPACA_SECRET_KEY="your_secret_key_here"
-#      chmod 600 config/api_keys.sh  # Restrict permissions
-#   5. Add config/api_keys.sh to .gitignore (already protected)
-#
-# IMPORTANT: This template file contains NO real credentials. It's safe to commit.
-# Keep config/api_keys.sh private and out of version control.
+# This template contains NO real credentials.
 
 export ALPACA_ENABLED="${ALPACA_ENABLED:-false}"
 export ALPACA_API_KEY="${ALPACA_API_KEY:-}"
 export ALPACA_SECRET_KEY="${ALPACA_SECRET_KEY:-}"
 export ALPACA_BASE_URL="${ALPACA_BASE_URL:-https://paper-api.alpaca.markets}"
 export ALPACA_MODE="paper"               # paper or live (paper recommended for testing)
-export ALPACA_TIMEOUT_SECONDS=15
+export ALPACA_TIMEOUT_SECONDS="${ALPACA_TIMEOUT_SECONDS:-15}"   # Whole request (curl -m), seconds
 export ALPACA_MAX_RETRIES=3
 
 # ============================================================================
@@ -217,6 +223,39 @@ export ALPACA_AUTO_TRADE=false           # Auto-execute on strong signals?
 export ALPACA_STRONG_BUY_THRESHOLD=80    # Confluence score to auto-buy
 export ALPACA_STRONG_SELL_THRESHOLD=20   # Confluence score to auto-sell
 export ALPACA_LOG_ALL_TRADES=true        # Log every trade attempt
+
+# ============================================================================
+# Live safety (Step 1): pre-trade checks for --buy / --sell
+# ============================================================================
+# lib/order_safety.sh runs these checks before an order is sent; blocks are
+# logged to ALERT_LOG_FILE (and Slack/email when enabled). Caps apply to
+# buys (opening/increasing); sells are only limited by MAX_ORDER_QTY and the
+# held quantity (no short selling), so exits stay possible.
+export ORDER_TYPE="${ORDER_TYPE:-limit}"                       # limit | market (--order-type)
+export LIMIT_OFFSET_PCT="${LIMIT_OFFSET_PCT:-0.2}"             # Limit = quote +/- this % (buy above, sell below)
+export ORDER_BRACKET="${ORDER_BRACKET:-true}"                  # Buys get a bracket stop loss + take profit (--no-bracket)
+export ORDER_TIME_IN_FORCE="${ORDER_TIME_IN_FORCE:-day}"       # Plain limit orders
+export BRACKET_TIME_IN_FORCE="${BRACKET_TIME_IN_FORCE:-gtc}"   # Bracket legs inherit it; gtc keeps stops overnight
+export ORDER_MIN_STOP_PCT="${ORDER_MIN_STOP_PCT:-1}"           # Bracket stop distance clamp (%)
+export ORDER_MAX_STOP_PCT="${ORDER_MAX_STOP_PCT:-15}"
+export MAX_ORDER_QTY="${MAX_ORDER_QTY:-100}"                   # Shares per order (both sides)
+export MAX_ORDER_NOTIONAL="${MAX_ORDER_NOTIONAL:-2500}"         # $ per buy order
+export MAX_DAILY_NOTIONAL="${MAX_DAILY_NOTIONAL:-10000}"        # $ of agent buys per trading day (America/New_York)
+export MAX_OPEN_POSITIONS="${MAX_OPEN_POSITIONS:-5}"            # A buy of a new symbol is refused at this count
+export DAILY_LOSS_LIMIT_PCT="${DAILY_LOSS_LIMIT_PCT:-}"         # Empty = DEFAULT_RISK_LEVEL limit (2/5/10%); vs last_equity
+export DUPLICATE_ORDER_WINDOW_SECONDS="${DUPLICATE_ORDER_WINDOW_SECONDS:-300}"  # Same symbol+side refused within
+export SST_STATE_DIR="${SST_STATE_DIR:-}"                       # Empty = <project>/.state (ledger, baseline, kill switch)
+export KILL_SWITCH_FILE="${KILL_SWITCH_FILE:-}"                 # Empty = $SST_STATE_DIR/KILL_SWITCH
+export RECONCILE_ON_STARTUP="${RECONCILE_ON_STARTUP:-true}"     # Orders blocked on mismatch (--allow-mismatch overrides)
+export OUTSIDE_HOURS_POLICY="${OUTSIDE_HOURS_POLICY:-refuse}"   # refuse | queue (Alpaca holds until the next open)
+export PDT_EQUITY_THRESHOLD="${PDT_EQUITY_THRESHOLD:-25000}"    # PDT warning below this equity (warning only)
+export ALERT_LOG_FILE="${ALERT_LOG_FILE:-}"                     # Empty = <project>/logs/alerts.log
+export ALERTS_SLACK_ENABLED="${ALERTS_SLACK_ENABLED:-false}"
+export ALERT_SLACK_WEBHOOK_URL="${ALERT_SLACK_WEBHOOK_URL:-}"   # Keep the webhook URL out of tracked files
+export ALERTS_EMAIL_ENABLED="${ALERTS_EMAIL_ENABLED:-false}"
+export ALERT_EMAIL_TO="${ALERT_EMAIL_TO:-}"
+export ALERT_SENDMAIL_CMD="${ALERT_SENDMAIL_CMD:-sendmail}"     # Called as: $ALERT_SENDMAIL_CMD -t
+export ALERT_TIMEOUT_SECONDS="${ALERT_TIMEOUT_SECONDS:-5}"
 
 # Note: Source this file from StockSwingTrader_Agent.sh to load all configuration
 

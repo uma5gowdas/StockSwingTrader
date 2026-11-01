@@ -43,3 +43,6 @@ cache/
 dist/
 build/
 *.egg-info/
+# Live safety state (order ledger, baseline, kill switch) and live keys
+.state/
+config.live.sh

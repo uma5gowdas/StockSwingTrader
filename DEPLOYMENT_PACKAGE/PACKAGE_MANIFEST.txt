@@ -39,11 +39,18 @@ DEPLOYMENT_PACKAGE/
 │   ├── sentiment.sh                  Sentiment analysis
 │   ├── scoring.sh                    Confluence scoring
 │   ├── risk_management.sh            Risk calculations
+│   ├── trade_journal.sh              Trade journal (sourced by risk_management.sh)
+│   ├── trading_thresholds.sh         Strategy threshold constants
+│   ├── kelly_sizing.sh               Kelly sizing + daily risk budget (--kelly)
+│   ├── mirofish_adapter.sh           MiroFish cache adapter (--mirofish)
 │   │
 │   ├── backtest.sh                   Backtesting framework
 │   ├── backtest_engine.py            Backtest engine
 │   │
-│   ├── alpaca_broker.sh              Alpaca integration
+│   ├── alpaca_broker.sh              Alpaca integration (limit/bracket orders, clock, calendar)
+│   ├── alpaca_wrappers.sh            Alpaca helpers (stop/take-profit, current price)
+│   ├── order_safety.sh               Pre-trade checks: caps, kill switch, reconciliation
+│   ├── alerts.sh                     Alert log + optional Slack/email
 │   ├── robinhood_broker.sh           Robinhood integration
 │   ├── html_report.sh                Report generation
 │   │
@@ -83,43 +90,49 @@ CORE MODULES CHECKLIST
 ================================================================================
 
 [✓] ML & AI Modules:
-    [✓] lib/ml_predictor.sh (6,087 bytes)
-    [✓] lib/ml_inference.py (12,428 bytes)
+    [✓] lib/ml_predictor.sh (6,778 bytes)
+    [✓] lib/ml_inference.py (18,110 bytes)
     [✓] lib/train_ml_model.py (11,710 bytes)
     [✓] lib/models/xgboost_predictor.pkl (271,672 bytes)
 
 [✓] Kalman Filter Modules:
-    [✓] lib/kalman_filter.sh (7,579 bytes)
+    [✓] lib/kalman_filter.sh (8,331 bytes)
     [✓] lib/kalman_inference.py (6,294 bytes)
 
 [✓] Regime Detection Modules:
-    [✓] lib/regime_detector.sh (16,330 bytes)
-    [✓] lib/regime_weighting.sh (13,809 bytes)
+    [✓] lib/regime_detector.sh (18,510 bytes)
+    [✓] lib/regime_weighting.sh (14,036 bytes)
 
 [✓] Backtesting Modules:
-    [✓] lib/backtest.sh (16,930 bytes)
-    [✓] lib/backtest_engine.py (17,886 bytes)
+    [✓] lib/backtest.sh (19,098 bytes)
+    [✓] lib/backtest_engine.py (21,107 bytes)
 
 [✓] Core Analysis Modules:
     [✓] lib/indicators.sh (15,107 bytes)
     [✓] lib/strategy_mean_reversion.sh (10,965 bytes)
     [✓] lib/strategy_trend_follow.sh (10,853 bytes)
-    [✓] lib/scoring.sh (27,155 bytes)
+    [✓] lib/scoring.sh (42,154 bytes)
     [✓] lib/sentiment.sh (14,935 bytes)
     [✓] lib/risk_management.sh (14,760 bytes)
+    [✓] lib/trade_journal.sh (12,248 bytes)
+    [✓] lib/trading_thresholds.sh (5,767 bytes)
 
 [✓] Phase 1 Modules (ported from v6.2, off by default):
     [✓] lib/kelly_sizing.sh (15,850 bytes)
     [✓] lib/mirofish_adapter.sh (8,675 bytes)
 [✓] Broker Integration Modules:
-    [✓] lib/alpaca_broker.sh (19,242 bytes)
-    [✓] lib/robinhood_broker.sh (33,537 bytes)
+    [✓] lib/alpaca_broker.sh (36,593 bytes)
+    [✓] lib/alpaca_wrappers.sh (7,962 bytes)
+    [✓] lib/robinhood_broker.sh (33,674 bytes)
 
+[✓] Live Safety Modules (Step 1):
+    [✓] lib/order_safety.sh (41,308 bytes)
+    [✓] lib/alerts.sh (5,472 bytes)
 [✓] Output Modules:
-    [✓] lib/html_report.sh (18,048 bytes)
+    [✓] lib/html_report.sh (23,272 bytes)
 
 [✓] Main Orchestrator:
-    [✓] StockSwingTrader_Agent.sh (45,905 bytes)
+    [✓] StockSwingTrader_Agent.sh (82,575 bytes)
 
 ================================================================================
 DEPENDENCIES

@@ -283,6 +283,8 @@ generate_html_report() {
         
         <div class="content">
             DATA_SOURCE_BANNER
+            <!-- Score Breakdown Section (filled last, see below) -->
+SCORE_BREAKDOWN_SECTION
             <!-- Stock Summary Section -->
             <div class="section">
                 <div class="stock-header">
@@ -490,7 +492,74 @@ EOF
     sed -i '' "s/STOCH_STATUS/--/g" "$output_file"
     sed -i '' "s/WILLIAMS_STATUS/--/g" "$output_file"
     sed -i '' "s/OBV_STATUS/--/g" "$output_file"
+
+    # Score breakdown: filled LAST, after every sed above (they rewrite words
+    # such as SIGNAL/SYMBOL/VOLUME globally), by splicing a temp file in awk
+    _html_fill_score_breakdown "$stock_data" "$output_file"
+}
+
+# Build the "Score Breakdown" section and splice it into the report
+# Args: stock_data (analysis output; JSON lines starting with "{" that have
+#       .confluence are used, others ignored), output_file (has a
+#       SCORE_BREAKDOWN_SECTION line)
+# Returns: 0; all text is HTML-escaped with jq @html
+_html_fill_score_breakdown() {
+    local stock_data=$1
+    local output_file=$2
+    local section_file
+    section_file=$(mktemp "${TMPDIR:-/tmp}/sst_breakdown.XXXXXX") || return 0
+    local rows
+    rows=$(echo "$stock_data" | grep '^{' | jq -R -r '
+        fromjson? // empty
+        | select(type == "object" and has("confluence"))
+        | def n: if . == null then "n/a" else tostring end;
+          def w: if . == null then "0" else tostring end;
+          . as $a
+        | if .confluence_v2 then
+            (.confluence_v2.components) as $c
+            | [ $a.symbol, "v2", ($a.confluence.final_confidence | n), $a.confluence.signal,
+                (($c.ml_confidence.score | n)
+                  + (if $c.ml_confidence.score != null then " " + $c.ml_confidence.direction else "" end)
+                  + " (" + ($c.ml_confidence.weight_percent | w) + "% weight)"),
+                (($c.regime_score.score | n) + " " + $c.regime_score.regime + " (" + ($c.regime_score.weight_percent | w) + "% weight)"),
+                (($c.technical_score.score | n) + " (" + ($c.technical_score.weight_percent | w) + "% weight)"),
+                (($c.volume_trend_score.score | n) + " (" + ($c.volume_trend_score.weight_percent | w) + "% weight)"),
+                ((($c.sentiment.score // null) | n) + " (" + (($c.sentiment.weight_percent // 0) | w) + "% weight)"),
+                (if $c.mirofish then ($c.mirofish.score | n) + " " + ($c.mirofish.status | n) + " (" + ($c.mirofish.weight_percent | w) + "% weight)" else "off" end),
+                ($a.scores.obv | n), ($a.data_source | n) ]
+          else
+            [ $a.symbol, "legacy", ($a.confluence.final_confidence | n), ($a.confluence.signal | n),
+              "n/a", "n/a",
+              ("avg " + ($a.confluence.technical_avg | n)),
+              "n/a",
+              ($a.confluence.sentiment_contribution | n),
+              (if $a.confluence.mirofish then ($a.confluence.mirofish.score | n) + " " + ($a.confluence.mirofish.status | n) else "off" end),
+              ($a.scores.obv | n), ($a.data_source | n) ]
+          end
+        | map(tostring | @html)
+        | "                    <tr><th scope=\"row\">" + .[0] + "</th>"
+          + (.[1:] | map("<td>" + . + "</td>") | join("")) + "</tr>"' 2>/dev/null)
+    if [[ -z "$rows" ]]; then
+        rows='                    <tr><td colspan="12">No score breakdown in this input</td></tr>'
+    fi
+    {
+        echo '            <div class="section" id="score-breakdown">'
+        echo '                <h2 class="section-title">Score Breakdown</h2>'
+        echo '                <table>'
+        echo '                    <caption>Confluence score components per symbol (component score, then its weight in the final score)</caption>'
+        echo '                    <thead><tr><th scope="col">Symbol</th><th scope="col">Model</th><th scope="col">Score</th><th scope="col">Signal</th><th scope="col">ML</th><th scope="col">Regime</th><th scope="col">Technical</th><th scope="col">Volume/Trend</th><th scope="col">Sentiment</th><th scope="col">MiroFish</th><th scope="col">OBV</th><th scope="col">Data</th></tr></thead>'
+        echo '                    <tbody>'
+        echo "$rows"
+        echo '                    </tbody>'
+        echo '                </table>'
+        echo '            </div>'
+    } > "$section_file"
+    awk -v f="$section_file" '
+        $0 ~ /^SCORE_BREAKDOWN_SECTION$/ { while ((getline line < f) > 0) print line; close(f); next }
+        { print }' "$output_file" > "${section_file}.out" && mv "${section_file}.out" "$output_file"
+    rm -f "$section_file" "${section_file}.out"
+    return 0
 }
 
 # Export function
-export -f generate_html_report
+export -f generate_html_report _html_fill_score_breakdown
