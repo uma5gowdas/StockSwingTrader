@@ -62,7 +62,7 @@ import math
 import re
 from decimal import ROUND_DOWN, ROUND_HALF_UP, Context, Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -993,21 +993,65 @@ def score_stock_extraction(ind: Dict[str, Any]) -> Dict[str, str]:
 
 
 # ============================================================================
-# calculate_confluence_score_v2 (MiroFish and agents off)
+# calculate_confluence_score_v2 (MiroFish off; agents as an optional blend)
 # ============================================================================
 
 def _awk_f1(x: float) -> str:
     return format(x, ".1f")
 
 
+def _awk_print(x: float) -> float:
+    """awk `print X` (OFMT %.6g) read back as a number by the next awk -v."""
+    return float(format(x, ".6g"))
+
+
+def recommend(confluence_score: int, bull: int, bear: int) -> Tuple[str, str]:
+    """(recommendation, confidence_note) of calculate_confluence_score_v2 from
+    the rounded score and the bullish / bearish vote counts."""
+    agreement = bull + bear
+    rec, note = "HOLD", ""
+    if agreement >= 3:
+        if bull >= 3 and bear == 0:
+            if confluence_score > 70:
+                rec, note = "STRONG_BUY", "Strong consensus across all indicators"
+            elif confluence_score > 55:
+                rec, note = "BUY", "Multiple bullish signals confirmed"
+        elif bear >= 3 and bull == 0:
+            if confluence_score < 30:
+                rec, note = "STRONG_SELL", "Strong consensus across all indicators"
+            elif confluence_score < 45:
+                rec, note = "SELL", "Multiple bearish signals confirmed"
+    else:
+        if confluence_score > 60:
+            rec, note = "BUY", "Moderately bullish; some conflicting signals"
+        elif confluence_score < 40:
+            rec, note = "SELL", "Moderately bearish; some conflicting signals"
+        else:
+            rec, note = "HOLD", "Mixed signals; await clearer direction"
+    return rec, note
+
+
 def calculate_confluence_score_v2(symbol: str, rsi_score, macd_score, bb_score, obv_score, regime: str,
                                   mr_score=50, tf_score=50, kalman_trend=0, sentiment: Any = "__absent__",
                                   ml_mode: Union[str, Dict[str, Any]] = "absent",
-                                  sentiment_weight: float = V2_SENTIMENT_WEIGHT) -> Dict[str, Any]:
-    """calculate_confluence_score_v2 without MiroFish/agents. ml_mode:
+                                  sentiment_weight: float = V2_SENTIMENT_WEIGHT,
+                                  agent_blend: Optional[Tuple[float, float]] = None,
+                                  with_core: bool = False) -> Dict[str, Any]:
+    """calculate_confluence_score_v2 without MiroFish. ml_mode:
     'absent' (no predictor: 50 neutral, available), 'unavailable' or
     {'available': False, 'reason': ...}, or {'confidence', 'direction',
-    ['data_source']}. sentiment: omitted (<= 9 args) or the 10th arg string."""
+    ['data_source']}. sentiment: omitted (<= 9 args) or the 10th arg string.
+
+    agent_blend=(w, s): the agent layer as lib/scoring.sh applies it with
+    AGENTS_ENABLED=true (w = agent_components_json .applied_weight, s =
+    .weighted_sum = sum(score x weight)): when w > 0 the unrounded core
+    becomes awk printf "%.4f" core x (1 - w) + s, before sentiment; agents
+    cast no vote; every core weight_percent is rescaled like bash (ag_scale).
+    components.agents is NOT produced (only the score, recommendation and
+    weights are replayed). None or w <= 0: output unchanged.
+    with_core=True adds the private key '_core' = {conf (unrounded core
+    string before agents and sentiment), bull, bear}; default output
+    unchanged."""
     rsi_score, macd_score, bb_score, obv_score = (str(x) for x in (rsi_score, macd_score, bb_score, obv_score))
     mr_score, tf_score, kalman_trend = str(mr_score), str(tf_score), str(kalman_trend)
     sent_passed = sentiment != "__absent__"
@@ -1057,6 +1101,11 @@ def calculate_confluence_score_v2(symbol: str, rsi_score, macd_score, bb_score, 
     else:
         conf = bc("(%s * 0.15) + (%s * 0.35) + (%s * 0.30) + (%s * 0.20)"
                   % (ml_conf, regime_score, technical_score, volume_trend_score), 2)
+    core_conf = conf
+    ag_w, ag_sum = (float(agent_blend[0]), float(agent_blend[1])) if agent_blend is not None else (0.0, 0.0)
+    ag_applied = ag_w > 0
+    if ag_applied:
+        conf = format(awk_num(conf) * (1 - ag_w) + ag_sum, ".4f")
     if sent_applied:
         conf = format(awk_num(conf) * (1 - sent_w) + sent_score * sent_w, ".4f")
     confluence_score = int(printf_f(conf, 0))
@@ -1073,6 +1122,15 @@ def calculate_confluence_score_v2(symbol: str, rsi_score, macd_score, bb_score, 
         else:
             wp = {"ml": float(_awk_f1(15 * 1 * k)), "regime": float(_awk_f1(35 * 1 * k)),
                   "tech": float(_awk_f1(30 * 1 * k)), "vt": float(_awk_f1(20 * 1 * k))}
+    if ag_applied:
+        s_scale = _awk_print(1 - sent_w) if sent_applied else 1.0
+        k = _awk_print((1 - ag_w) * s_scale)
+        if not ml_available:
+            wp.update(regime=float(_awk_f1(3500 / 85 * k)), tech=float(_awk_f1(3000 / 85 * k)),
+                      vt=float(_awk_f1(2000 / 85 * k)))
+        else:
+            wp = {"ml": float(_awk_f1(15 * k)), "regime": float(_awk_f1(35 * k)),
+                  "tech": float(_awk_f1(30 * k)), "vt": float(_awk_f1(20 * k))}
 
     ml_comp: Dict[str, Any] = {"score": None if not ml_available else _int_or_float(ml_conf),
                                "direction": ml_dir, "weight_percent": wp["ml"]}
@@ -1107,27 +1165,9 @@ def calculate_confluence_score_v2(symbol: str, rsi_score, macd_score, bb_score, 
         elif sc < 40:
             bear += 1
     agreement = bull + bear
-    rec, note = "HOLD", ""
-    if agreement >= 3:
-        if bull >= 3 and bear == 0:
-            if confluence_score > 70:
-                rec, note = "STRONG_BUY", "Strong consensus across all indicators"
-            elif confluence_score > 55:
-                rec, note = "BUY", "Multiple bullish signals confirmed"
-        elif bear >= 3 and bull == 0:
-            if confluence_score < 30:
-                rec, note = "STRONG_SELL", "Strong consensus across all indicators"
-            elif confluence_score < 45:
-                rec, note = "SELL", "Multiple bearish signals confirmed"
-    else:
-        if confluence_score > 60:
-            rec, note = "BUY", "Moderately bullish; some conflicting signals"
-        elif confluence_score < 40:
-            rec, note = "SELL", "Moderately bearish; some conflicting signals"
-        else:
-            rec, note = "HOLD", "Mixed signals; await clearer direction"
+    rec, note = recommend(confluence_score, bull, bear)
 
-    return {
+    out = {
         "confluence_score": confluence_score,
         "recommendation": rec,
         "signal_strength": agreement,
@@ -1144,6 +1184,9 @@ def calculate_confluence_score_v2(symbol: str, rsi_score, macd_score, bb_score, 
         "metadata": {"confidence_note": note, "ml_error": ml_error, "ml_available": ml_available,
                      "data_warning": data_warning},
     }
+    if with_core:
+        out["_core"] = {"conf": core_conf, "bull": bull, "bear": bear}
+    return out
 
 
 def _int_or_float(x: Any):
@@ -1156,7 +1199,8 @@ def _int_or_float(x: Any):
 # ============================================================================
 
 def score_stock(symbol: str, ind: Dict[str, Any], ml_mode: Union[str, Dict[str, Any]] = "absent",
-                sentiment: str = "na", bollinger_price: Optional[str] = None) -> Dict[str, Any]:
+                sentiment: str = "na", bollinger_price: Optional[str] = None,
+                agent_blend: Optional[Tuple[float, float]] = None, with_core: bool = False) -> Dict[str, Any]:
     """score_stock in v2 mode (offline: no live quote, so the Bollinger price
     is the last close unless BOLLINGER_PRICE > 0 is given)."""
     ex = score_stock_extraction(ind)
@@ -1192,14 +1236,15 @@ def score_stock(symbol: str, ind: Dict[str, Any], ml_mode: Union[str, Dict[str, 
     scores["sentiment"] = None if sent_arg == "na" else _int_or_float(sent_arg)
     conf_v2 = calculate_confluence_score_v2(
         symbol, scores["rsi"], scores["macd"], scores["bollinger_bands"], obv_s, regime,
-        mr_s, tf_s, kt, sent_arg, ml_mode=ml_mode)
+        mr_s, tf_s, kt, sent_arg, ml_mode=ml_mode, agent_blend=agent_blend, with_core=with_core)
     return {"symbol": symbol, "scores": scores, "confluence_v2": conf_v2, "v2_inputs": v2,
             "v2_inputs_available": v2_ok, "extraction": ex}
 
 
 def v2_from_bars(window, ml_mode: Union[str, Dict[str, Any]] = "unavailable", sentiment: str = "na",
                  bollinger_price: Optional[str] = None, symbol: str = "SYM",
-                 data_source: str = "fixture") -> Optional[Dict[str, Any]]:
+                 data_source: str = "fixture", agent_blend: Optional[Tuple[float, float]] = None,
+                 with_core: bool = False) -> Optional[Dict[str, Any]]:
     """calculate_all_indicators -> score_stock -> calculate_confluence_score_v2
     on one bars window (MiroFish and agents off). Returns None with fewer than
     30 bars, else {confluence_score, recommendation, signal_strength,
@@ -1207,7 +1252,8 @@ def v2_from_bars(window, ml_mode: Union[str, Dict[str, Any]] = "unavailable", se
     ind = calculate_all_indicators(symbol, window, data_source)
     if ind is None:
         return None
-    s = score_stock(symbol, ind, ml_mode=ml_mode, sentiment=sentiment, bollinger_price=bollinger_price)
+    s = score_stock(symbol, ind, ml_mode=ml_mode, sentiment=sentiment, bollinger_price=bollinger_price,
+                    agent_blend=agent_blend, with_core=with_core)
     out = dict(s["confluence_v2"])
     out.update({"v2_inputs": s["v2_inputs"], "scores": s["scores"], "indicators": ind["indicators"]})
     return out
