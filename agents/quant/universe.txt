@@ -17,6 +17,13 @@
 #
 # Created 2026-11-01 (156 rank symbols + 3 benchmarks).
 #
+# Pruned 2026-11-01 after the first real ingest (Alpaca SIP, adjustment=all,
+# 2016-01-01 -> 2026-10-30): 153 rank symbols + 3 benchmarks remain.
+#   LIN  first SIP bar 2018-10-31 (after 2016-01-08; 2010 rows of 2723)
+#   MMC  unavailable: stale_data, last bar 2026-01-13
+#   BK   unavailable: stale_data, last bar 2026-05-20
+# No remaining symbol misses a session of the calendar (missing_sessions 0).
+#
 # rank
 AAPL
 MSFT
@@ -63,14 +70,12 @@ COF
 MET
 AIG
 PRU
-MMC
 CB
 SPGI
 ICE
 CME
 V
 MA
-BK
 TRV
 ALL
 UNH
@@ -165,7 +170,6 @@ PLD
 CCI
 SPG
 O
-LIN
 APD
 SHW
 ECL
