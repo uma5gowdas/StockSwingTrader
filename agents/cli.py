@@ -39,6 +39,9 @@ def _lazy(module: str, func: str) -> Callable[[argparse.Namespace], int]:
 
 HANDLERS[("technical", "run")] = _lazy("agents.technical.agent", "cli_run")
 HANDLERS[("technical", "status")] = _lazy("agents.technical.agent", "cli_status")
+HANDLERS[("validate", "gate")] = _lazy("agents.validate.agent", "cli_gate")
+HANDLERS[("validate", "parity")] = _lazy("agents.validate.agent", "cli_parity")
+HANDLERS[("validate", "status")] = _lazy("agents.validate.agent", "cli_status")
 
 
 def emit(obj) -> None:

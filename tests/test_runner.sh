@@ -88,6 +88,8 @@ add_test "Agent Adapter (bash)" "${SCRIPT_DIR}/test_agent_adapter.sh"
 add_test "Scoring + Agents (zero-weight identity)" "${SCRIPT_DIR}/test_scoring_agents.sh"
 add_test "Agents: Technical" "${SCRIPT_DIR}/test_agents_technical.py" venv
 add_test "Agents: Parity vs bash" "${SCRIPT_DIR}/test_agents_parity.sh" venv
+add_test "Agents: Validation" "${SCRIPT_DIR}/test_agents_validate.py" venv
+add_test "Agents: CLI (offline)" "${SCRIPT_DIR}/test_agents_cli.sh" venv
 
 # ============================================================================
 # Utility Functions
@@ -283,8 +285,10 @@ when it exits 0 with at least one passed test and zero failures.
 | Agents: Data Clients | tests/test_agents_data.py | .venv-agents python (SKIP without venv) | agents/data Alpaca bars client against a 127.0.0.1 stub (pagination, GET only, host whitelist, sip->iex, retry, stale, timeout, cache), offline fixtures, yfinance fallback off |
 | Agent Adapter (bash) | tests/test_agent_adapter.sh | bash | lib/agent_adapter.sh statuses, gates, latest dir, ttl, weight clamp/cap, components reasons, no network |
 | Scoring + Agents (zero-weight identity) | tests/test_scoring_agents.sh | bash | v2 goldens captured at 970af57 unchanged (agents off, and on with weights 0), applied weight math, gate/staleness reasons, sentiment ordering, Technical Agent scan hook (regime_adx) |
-| Agents: Technical | tests/test_agents_technical.py | .venv-agents python (SKIP without venv) | TA-Lib features (ranges, ADX14), regime_adx rule table, trend_state, envelopes (synthetic, < 60 bars unavailable), `technical run/status` CLI exit codes |
+| Agents: Technical | tests/test_agents_technical.py | .venv-agents python (SKIP without venv) | TA-Lib features (ranges, ADX14), regime_adx rule table, trend_state, envelopes (synthetic, < 60 bars unavailable), technical run/status CLI exit codes |
 | Agents: Parity vs bash | tests/test_agents_parity.sh | bash + .venv-agents python (SKIP without venv) | TA-Lib vs bash indicator tolerances, bash_compat port exact vs bash (indicators, 40 score_* edge inputs), v2 port vs 65 stored bash windows, 3 live bash recomputes |
+| Agents: Validation | tests/test_agents_validate.py | .venv-agents python (SKIP without venv) | stats (Sharpe, DSR, PSR, PBO/CSCV), walk-forward folds, vectorbt gate engine (next-open fills, ATR stop, TP), legacy parity vs lib/backtest_engine.py, gate criteria + schema, report HTML, trial log, v2 replay vs bash_compat |
+| Agents: CLI (offline) | tests/test_agents_cli.sh | bash + .venv-agents python (SKIP without venv) | validate gate --offline (4 synthetic gate files, report), agent_gate_get contract, missing data exit 2, validate parity --offline, technical run exit 2, validate status, no network |
 
 ## Environment
 

@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stockswingtrader.local/schemas/gate.schema.json",
+  "title": "StockSwingTrader validation gate",
+  "description": "Gate file cache/agents/gates/<signal_id>.json written by the Strategy Validation Agent (six-agent plan section 5.6, phase 0-1 plan D20). lib/agent_adapter.sh agent_gate_get reads signal_id, generated_at, passed and synthetic. Rule checks (passed implies synthetic false and every applicable criterion passed) are enforced by agents.validate.gate.gate_errors.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "signal_id", "agent", "agent_version", "generated_at", "passed", "synthetic",
+    "data_sources", "universe", "benchmark", "data_range", "folds", "metrics",
+    "criteria", "costs", "config_hash", "reasons"
+  ],
+  "$defs": {
+    "num": {"type": ["number", "null"]},
+    "date": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+    "criterion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "threshold", "op", "passed", "applicable"],
+      "properties": {
+        "value": {"type": ["number", "null"]},
+        "threshold": {"type": ["number", "null"]},
+        "op": {"enum": [">=", "<=", "n/a"]},
+        "passed": {"type": ["boolean", "null"]},
+        "applicable": {"type": "boolean"},
+        "note": {"type": "string"}
+      }
+    }
+  },
+  "properties": {
+    "signal_id": {"type": "string", "pattern": "^[a-z0-9_]{1,64}$"},
+    "agent": {"const": "validate"},
+    "agent_version": {"type": "string", "minLength": 1},
+    "generated_at": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"},
+    "run_id": {"type": "string", "minLength": 1},
+    "mode": {"enum": ["offline", "real"]},
+    "description": {"type": "string"},
+    "passed": {"type": "boolean"},
+    "synthetic": {"type": "boolean"},
+    "data_sources": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "symbol_sources": {
+      "type": "object",
+      "additionalProperties": {"type": "string", "minLength": 1}
+    },
+    "universe": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^[A-Z0-9.-]{1,10}$"}},
+    "benchmark": {"type": "string", "pattern": "^[A-Z0-9.-]{1,10}$"},
+    "data_range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end"],
+      "properties": {"start": {"$ref": "#/$defs/date"}, "end": {"$ref": "#/$defs/date"}}
+    },
+    "walk_forward": {"type": "object"},
+    "folds": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fold", "train", "test", "params", "oos_sharpe", "oos_return", "trades"],
+        "properties": {
+          "fold": {"type": "integer", "minimum": 0},
+          "train": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/date"}},
+          "test": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/date"}},
+          "params": {"type": "object"},
+          "train_sharpe": {"$ref": "#/$defs/num"},
+          "oos_sharpe": {"$ref": "#/$defs/num"},
+          "oos_return": {"$ref": "#/$defs/num"},
+          "spy_return": {"$ref": "#/$defs/num"},
+          "ew_return": {"$ref": "#/$defs/num"},
+          "trades": {"type": "integer", "minimum": 0}
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "oos_sharpe", "oos_cagr", "oos_max_dd", "oos_trades", "pct_positive_folds",
+        "spy_sharpe", "spy_max_dd", "ew_sharpe", "ew_max_dd", "dsr", "psr", "pbo",
+        "n_trials", "n_evaluations"
+      ],
+      "properties": {
+        "oos_sharpe": {"$ref": "#/$defs/num"},
+        "oos_cagr": {"$ref": "#/$defs/num"},
+        "oos_max_dd": {"$ref": "#/$defs/num"},
+        "oos_trades": {"type": "integer", "minimum": 0},
+        "oos_days": {"type": "integer", "minimum": 0},
+        "pct_positive_folds": {"$ref": "#/$defs/num"},
+        "spy_sharpe": {"$ref": "#/$defs/num"},
+        "spy_max_dd": {"$ref": "#/$defs/num"},
+        "spy_cagr": {"$ref": "#/$defs/num"},
+        "ew_sharpe": {"$ref": "#/$defs/num"},
+        "ew_max_dd": {"$ref": "#/$defs/num"},
+        "ew_cagr": {"$ref": "#/$defs/num"},
+        "dsr": {"$ref": "#/$defs/num"},
+        "psr": {"$ref": "#/$defs/num"},
+        "pbo": {"$ref": "#/$defs/num"},
+        "pbo_S": {"type": ["integer", "null"]},
+        "pbo_lambda": {"type": ["object", "null"]},
+        "sr0_per_period": {"$ref": "#/$defs/num"},
+        "n_trials": {"type": "integer", "minimum": 1},
+        "grid_size": {"type": "integer", "minimum": 1},
+        "n_evaluations": {"type": "integer", "minimum": 0},
+        "full_sample_default_sharpe": {"$ref": "#/$defs/num"}
+      }
+    },
+    "criteria": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/$defs/criterion"},
+      "required": [
+        "min_oos_sharpe", "vs_spy_sharpe", "min_dsr", "max_pbo", "max_drawdown_vs_spy",
+        "min_oos_trades", "min_positive_folds", "baseline_improvement"
+      ]
+    },
+    "thresholds": {"type": "object"},
+    "costs": {"type": "object"},
+    "config_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "reasons": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "warning": {"type": ["string", "null"]}
+  }
+}
