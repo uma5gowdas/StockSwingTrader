@@ -686,6 +686,20 @@ calculate_all_indicators() {
     [[ -z "$data_source" ]] && data_source="unknown"
     local last_close="${close_array[${#close_array[@]}-1]}"
 
+    # v2 scoring inputs (OBV trend, MR/TF setup scores, Kalman trend, regime)
+    # from these same bars; no extra network calls
+    local v2_inputs="null"
+    if declare -f build_v2_inputs >/dev/null; then
+        local closes_json volumes_json macd_v signal_v bb_u bb_l
+        closes_json=$(jq -c -n '$ARGS.positional | map(tonumber)' --args "${close_array[@]}" 2>/dev/null)
+        volumes_json=$(jq -c -n '$ARGS.positional | map(tonumber)' --args "${volume_array[@]}" 2>/dev/null)
+        IFS='|' read -r macd_v signal_v <<< "$(echo "$macd" | jq -r '"\(.macd // 0)|\(.signal // 0)"' 2>/dev/null)"
+        IFS='|' read -r bb_u bb_l <<< "$(echo "$bb" | jq -r '"\(.upper // 0)|\(.lower // 0)"' 2>/dev/null)"
+        v2_inputs=$(build_v2_inputs "$symbol" "${closes_json:-[]}" "${volumes_json:-[]}" "${obv:-[]}" \
+            "${rsi_value:-50}" "${macd_v:-0}" "${signal_v:-0}" "${bb_u:-0}" "${bb_l:-0}" 2>/dev/null)
+        [[ -z "$v2_inputs" ]] && v2_inputs="null"
+    fi
+
     # Output all indicators as JSON
     echo "{
         \"symbol\":\"${symbol}\",
@@ -698,7 +712,8 @@ calculate_all_indicators() {
             \"stochastic\": ${stoch},
             \"williams_r\": ${williams},
             \"atr\": ${atr}
-        }
+        },
+        \"v2_inputs\": ${v2_inputs}
     }"
 }
 
@@ -753,35 +768,72 @@ score_stock() {
     local sentiment_score=$(echo "$sentiment" | jq -r '.aggregate_sentiment_score // "na"' 2>/dev/null)
     [[ -z "$sentiment_score" || "$sentiment_score" == "null" ]] && sentiment_score="na"
 
-    # OBV score (simplified)
-    local obv_score=50
-    
-    # Calculate confluence
-    local confluence=$(calculate_confluence_score "$rsi_score" "$macd_score" "$bb_score" "$stoch_score" "$williams_score" "$obv_score" "$sentiment_score")
-    # Optional MiroFish cache blend (no-op unless MIROFISH_ENABLED=true; no network)
-    if declare -f apply_mirofish_to_confluence >/dev/null; then
-        confluence=$(apply_mirofish_to_confluence "$confluence" "$symbol")
+    # v2 inputs computed from the bars by calculate_all_indicators. Missing
+    # (old or hand-made indicator JSON): neutral 50 / 0 / unknown.
+    local v2_inputs v2_inputs_available=true
+    v2_inputs=$(echo "$indicators_json" | jq -c '.v2_inputs // empty | select(type == "object")' 2>/dev/null)
+    if [[ -z "$v2_inputs" ]]; then
+        v2_inputs_available=false
+        v2_inputs='{"obv_score":50,"obv_available":false,"mr_score":50,"tf_score":50,"kalman_trend":0,"kalman_available":false,"regime":"unknown"}'
     fi
+    local obv_score mr_score tf_score kalman_trend regime
+    IFS='|' read -r obv_score mr_score tf_score kalman_trend regime <<< "$(echo "$v2_inputs" | jq -r \
+        '"\(.obv_score // 50)|\(.mr_score // 50)|\(.tf_score // 50)|\(.kalman_trend // 0)|\(.regime // "unknown")"' 2>/dev/null)"
+    [[ "$obv_score" =~ ^[0-9]+$ ]] || obv_score=50
+    [[ "$mr_score" =~ ^[0-9]+$ ]] || mr_score=50
+    [[ "$tf_score" =~ ^[0-9]+$ ]] || tf_score=50
+    [[ "$kalman_trend" =~ ^-?[01]$ ]] || kalman_trend=0
+    [[ -n "$regime" ]] || regime="unknown"
+
     local sentiment_json="$sentiment_score"
     [[ "$sentiment_score" == "na" ]] && sentiment_json="null"
 
-    # Generate output
-    echo "{
-        \"symbol\": \"${symbol}\",
-        \"data_source\": \"${data_source}\",
-        \"data_warning\": \"${data_warning}\",
-        \"scores\": {
-            \"rsi\": $rsi_score,
-            \"macd\": $macd_score,
-            \"bollinger_bands\": $bb_score,
-            \"stochastic\": $stoch_score,
-            \"williams_r\": $williams_score,
-            \"obv\": $obv_score,
-            \"sentiment\": $sentiment_json
-        },
-        \"confluence\": $confluence,
-        \"indicators\": $indicators_json
-    }"
+    local scoring_model="${SCORING_MODE:-v2}"
+    [[ "$scoring_model" == "legacy" ]] || scoring_model="v2"
+
+    local confluence confluence_v2="null"
+    if [[ "$scoring_model" == "legacy" ]]; then
+        # Legacy: 80% technical average + 20% sentiment, MiroFish blended after
+        confluence=$(calculate_confluence_score "$rsi_score" "$macd_score" "$bb_score" "$stoch_score" "$williams_score" "$obv_score" "$sentiment_score")
+        # Optional MiroFish cache blend (no-op unless MIROFISH_ENABLED=true; no network)
+        if declare -f apply_mirofish_to_confluence >/dev/null; then
+            confluence=$(apply_mirofish_to_confluence "$confluence" "$symbol")
+        fi
+    else
+        # v2: ML + regime-weighted MR/TF + technical + volume/trend; MiroFish
+        # is applied inside v2 and sentiment enters once (arg 10), so
+        # apply_mirofish_to_confluence is NOT called here.
+        confluence_v2=$(calculate_confluence_score_v2 "$symbol" "$rsi_score" "$macd_score" "$bb_score" \
+            "$obv_score" "$regime" "$mr_score" "$tf_score" "$kalman_trend" "$sentiment_score" </dev/null 2>/dev/null \
+            | jq -c . 2>/dev/null)
+        if [[ -z "$confluence_v2" ]]; then
+            log_error "v2 scoring failed for $symbol"
+            return 1
+        fi
+        confluence=$(echo "$confluence_v2" | jq -c '{
+            model: "v2",
+            final_confidence: .confluence_score,
+            signal: .recommendation,
+            reasoning: .metadata.confidence_note,
+            sentiment_available: (.components.sentiment.available // false),
+            sentiment_contribution: (.components.sentiment.score // null)
+        } + (if .components.mirofish then {mirofish: .components.mirofish} else {} end)')
+    fi
+
+    # Generate output (one line, so callers can pick it out with grep '^{')
+    jq -c -n --arg symbol "$symbol" --arg ds "$data_source" --arg dw "$data_warning" \
+        --arg model "$scoring_model" \
+        --argjson rsi "$rsi_score" --argjson macd "$macd_score" --argjson bb "$bb_score" \
+        --argjson stoch "$stoch_score" --argjson will "$williams_score" --argjson obv "$obv_score" \
+        --argjson sent "$sentiment_json" --argjson conf "$confluence" --argjson c2 "$confluence_v2" \
+        --argjson v2in "$v2_inputs" --argjson v2ok "$v2_inputs_available" \
+        --argjson ind "$indicators_json" '
+        {symbol: $symbol, data_source: $ds, data_warning: $dw, scoring_model: $model,
+         scores: {rsi: $rsi, macd: $macd, bollinger_bands: $bb, stochastic: $stoch,
+                  williams_r: $will, obv: $obv, sentiment: $sent},
+         confluence: $conf}
+        + (if $c2 != null then {confluence_v2: $c2} else {} end)
+        + {v2_inputs: $v2in, v2_inputs_available: $v2ok, indicators: $ind}'
 }
 
 # ============================================================================
@@ -808,18 +860,24 @@ analyze_stock() {
     fi
     
     # Score and calculate confluence
-    local analysis=$(score_stock "$symbol" "$indicators")
+    local analysis
+    if ! analysis=$(score_stock "$symbol" "$indicators") || [[ -z "$analysis" ]]; then
+        log_error "Skipping $symbol - scoring failed"
+        return 1
+    fi
 
     # Phase 1 Kelly position plan (analysis only; never allocates budget).
     # Entry = last close of the fetched series, stop = STOP_LOSS_PERCENT below.
     if [[ "${KELLY_SIZING_ENABLED:-false}" == "true" ]] && declare -f kelly_position_plan >/dev/null; then
-        local entry stop conf plan
+        local entry stop conf plan kelly_regime
         entry=$(extract_closes "$ohlcv" | tail -1)
         stop=$(calc_stop_loss_percent "$entry" "${STOP_LOSS_PERCENT:-5}")
         conf=$(echo "$analysis" | jq -r '.confluence.final_confidence // 50' 2>/dev/null)
-        plan=$(kelly_position_plan "${ACCOUNT_EQUITY:-10000}" "$entry" "$stop" "${conf:-50}" unknown)
+        # v2 mode: size with the detected regime (legacy has none: unknown)
+        kelly_regime=$(echo "$analysis" | jq -r '.confluence_v2.components.regime_score.regime // "unknown"' 2>/dev/null)
+        plan=$(kelly_position_plan "${ACCOUNT_EQUITY:-10000}" "$entry" "$stop" "${conf:-50}" "${kelly_regime:-unknown}")
         if [[ -n "$plan" ]]; then
-            analysis=$(echo "$analysis" | jq --argjson p "$plan" '. + {position_sizing:$p}' 2>/dev/null || echo "$analysis")
+            analysis=$(echo "$analysis" | jq -c --argjson p "$plan" '. + {position_sizing:$p}' 2>/dev/null || echo "$analysis")
         fi
     fi
 
@@ -843,6 +901,16 @@ generate_report() {
     
     log_info "Generating HTML report: $report_file" >&2
     
+    # Machine-readable copy: array of the analysis JSON lines (log lines and
+    # "---" separators dropped)
+    local json_file="${output_dir}/swing_analysis_${timestamp}.json"
+    if echo "$analysis_json" | grep '^{' | jq -s '.' > "$json_file" 2>/dev/null; then
+        log_info "JSON report: $json_file" >&2
+    else
+        rm -f "$json_file"
+        log_warn "Could not write JSON report: $json_file" >&2
+    fi
+
     generate_html_report "$analysis_json" "$report_file"
     
     if [[ -f "$report_file" ]]; then
@@ -853,6 +921,45 @@ generate_report() {
         log_error "Failed to generate report"
         return 1
     fi
+}
+
+# Print one score breakdown line per analysis to stdout
+# Args: analysis output (log lines, "---" separators and one JSON line per symbol)
+# Returns: 0; prints a "SCORE BREAKDOWN (v2: ...)" or "(legacy: ...)" block
+print_score_breakdown() {
+    local results=$1
+    local header="v2: 15% ML + 35% regime-weighted MR/TF + 30% technical + 20% OBV/Kalman volume-trend; sentiment ${V2_SENTIMENT_WEIGHT:-0.10} when available"
+    [[ "${SCORING_MODE:-v2}" == "legacy" ]] && header="legacy: 80% technical average + 20% sentiment"
+    echo ""
+    echo "============================================"
+    echo "SCORE BREAKDOWN (${header})"
+    echo "============================================"
+    echo "$results" | grep '^{' | jq -r '
+        def num: if . == null then "n/a" else tostring end;
+        def pct: if . == null then "0" else tostring end;
+        . as $a
+        | if .confluence_v2 then
+            (.confluence_v2.components) as $c
+            | "\($a.symbol)  score \($a.confluence.final_confidence) \($a.confluence.signal)"
+              + " | ML \($c.ml_confidence.score | num)"
+              + (if $c.ml_confidence.score != null then " \($c.ml_confidence.direction)" else "" end)
+              + " (\($c.ml_confidence.weight_percent | pct)%)"
+              + " | Regime \($c.regime_score.score) \($c.regime_score.regime) (\($c.regime_score.weight_percent)%)"
+              + " | Technical \($c.technical_score.score) (\($c.technical_score.weight_percent)%)"
+              + " | Volume/Trend \($c.volume_trend_score.score) (\($c.volume_trend_score.weight_percent)%)"
+              + " | Sentiment \(($c.sentiment.score // null) | num) (\(($c.sentiment.weight_percent // 0) | pct)%)"
+              + (if $c.mirofish then " | MiroFish \($c.mirofish.score | num) \($c.mirofish.status) (\($c.mirofish.weight_percent)%)" else "" end)
+              + " | OBV \($a.scores.obv) | data \($a.data_source)"
+          else
+            "\($a.symbol)  score \($a.confluence.final_confidence) \($a.confluence.signal)"
+              + " | Technical avg \($a.confluence.technical_avg | num)"
+              + " (\(if $a.confluence.sentiment_available then "80" else "100" end)%)"
+              + " | Sentiment \($a.confluence.sentiment_contribution | num)"
+              + " (\(if $a.confluence.sentiment_available then "20" else "0" end)%)"
+              + (if $a.confluence.mirofish then " | MiroFish \($a.confluence.mirofish.score | num) \($a.confluence.mirofish.status)" else "" end)
+              + " | OBV \($a.scores.obv) | data \($a.data_source)"
+          end' 2>/dev/null
+    return 0
 }
 
 # ============================================================================
@@ -878,7 +985,7 @@ init_ml_predictor() {
         return 1
     }
     
-    log_info "✓ ML predictor module loaded (lib/ml_predictor.sh; CLI scoring still uses the legacy formula)"
+    log_info "✓ ML predictor module loaded (lib/ml_predictor.sh; v2 scoring (default) always runs the ML predictor; --legacy-score does not use it)"
     return 0
 }
 
@@ -924,7 +1031,7 @@ init_kalman_filter() {
         return 1
     }
     
-    log_info "✓ Kalman filter module loaded (lib/kalman_filter.sh; CLI scoring still uses the legacy formula)"
+    log_info "✓ Kalman filter module loaded (lib/kalman_filter.sh; v2 scoring (default) always uses the Kalman trend; --legacy-score does not use it)"
     return 0
 }
 
@@ -988,6 +1095,8 @@ FEATURES:
     • 8+ technical indicators (RSI, MACD, Bollinger Bands, ATR, OBV, Stochastic, Williams %R)
     • Multi-source sentiment analysis (Twitter, Reddit, StockTwits, News)
     • Confidence scoring (0-100) with buy/sell/hold signals
+    • v2 confluence scoring by default (ML, regime-weighted MR/TF, technical,
+      OBV/Kalman volume-trend, optional sentiment); --legacy-score for the old formula
     • Professional HTML reports with risk metrics
 
   v6.3 Enhancements:
@@ -1047,17 +1156,21 @@ Usage: ./StockSwingTrader_Agent.sh [OPTIONS]
     --output-dir DIR                 Output directory for reports (default: output/reports)
     --debug                          Enable verbose debug logging
     --version                        Display version and feature information
+    --legacy-score                   Use the legacy score (80% technical average + 20% sentiment)
+                                     instead of v2 (default: 15% ML + 35% regime-weighted MR/TF
+                                     + 30% technical + 20% OBV/Kalman volume-trend; sentiment
+                                     V2_SENTIMENT_WEIGHT when available). Also: SCORING_MODE=legacy
 
 === ENHANCEMENT FLAGS (v6.3) ===
 
-    --ml                             Enable ML predictor in scoring 
-                                     (XGBoost, 15% weight, +5-10% accuracy)
+    --ml                             Load the ML predictor module (v2 scoring, the default,
+                                     always runs the ML predictor: XGBoost, 15% weight)
     
     --regime-adapt                   Enable regime-adaptive weighting by market conditions
                                      (+3-5% win rate improvement)
     
-    --kalman                         Enable Kalman filter for price smoothing
-                                     (fewer false signals, better trend detection)
+    --kalman                         Load the Kalman filter module (v2 scoring, the default,
+                                     always uses the Kalman trend in volume/trend)
     
     --dashboard                      Start dashboard backend and frontend servers
                                      (React UI, professional interface, real-time updates)
@@ -1229,6 +1342,12 @@ main() {
                 ;;
             --debug)
                 DEBUG_MODE=true
+                shift
+                ;;
+            --legacy-score)
+                SCORING_MODE=legacy
+                export SCORING_MODE
+                log_info "Legacy scoring enabled (--legacy-score: 80% technical average + 20% sentiment)"
                 shift
                 ;;
             --check-account)
@@ -1475,6 +1594,8 @@ ${result}"
         # Generate reports
         local report_file=$(generate_report "$all_results" "$output_dir")
         
+        print_score_breakdown "$all_results"
+
         if [[ -n "$report_file" ]]; then
             log_info "Analysis complete. Open report in browser: $report_file"
             echo ""

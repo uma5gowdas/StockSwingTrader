@@ -94,6 +94,22 @@ export SENTIMENT_NEWS_COUNT="${SENTIMENT_NEWS_COUNT:-10}"              # Article
 export SENTIMENT_TIMEOUT_SECONDS="${SENTIMENT_TIMEOUT_SECONDS:-5}"     # curl --max-time for news
 export SENTIMENT_NEGATION_DISCOUNT="${SENTIMENT_NEGATION_DISCOUNT:-0.7}"  # Keyword weight factor when negated
 export SENTIMENT_CACHE_DIR="${SENTIMENT_CACHE_DIR:-cache/data}"        # 30-min cache of successful news results
+# ============================================================================
+# v2 scoring (Step 1)
+# ============================================================================
+# The CLI scores with calculate_confluence_score_v2 (15% ML + 35% regime-
+# weighted mean-reversion/trend-following + 30% technical + 20% OBV/Kalman
+# volume-trend), computed from the fetched bars. SCORING_MODE=legacy (or
+# --legacy-score) keeps the old 80% technical average + 20% sentiment.
+# Sentiment enters v2 once: when available, final = core*(1-w) + sentiment*w
+# and the other weights scale by (1-w); unavailable sentiment has 0 weight.
+export SCORING_MODE="${SCORING_MODE:-v2}"                          # v2 | legacy
+export V2_SENTIMENT_WEIGHT="${V2_SENTIMENT_WEIGHT:-0.10}"          # 0..0.5
+export OBV_LOOKBACK="${OBV_LOOKBACK:-10}"                          # Bars for the OBV trend score
+export KALMAN_TREND_THRESHOLD_PCT="${KALMAN_TREND_THRESHOLD_PCT:-0.5}"  # 5-bar Kalman slope (%) for up/down
+# One ML prediction takes ~5 s (python + model load); the library default of
+# 5 s would often time out (ML then scores a neutral 50), so the CLI waits longer.
+export ML_TIMEOUT_SECONDS="${ML_TIMEOUT_SECONDS:-15}"
 
 # ============================================================================
 # Phase 1: MiroFish (optional, cache-reading, default OFF)

@@ -115,13 +115,13 @@ assert_true "fixture indicators computed (>= 30 demo closes)" jq -e '.indicators
 # ============================================================================
 echo ""
 echo "analyze_stock:"
-plain=$(run_analysis KELLY_SIZING_ENABLED=false MIROFISH_ENABLED=false)
+plain=$(run_analysis SCORING_MODE=legacy KELLY_SIZING_ENABLED=false MIROFISH_ENABLED=false)
 assert_true "analysis JSON parses (Kelly/MiroFish off)" jq -e 'type == "object" and .symbol == "AAPL"' <<< "$plain" >/dev/null
 assert_equals "false|false" "$(jget "$plain" '(has("position_sizing")|tostring) + "|" + (.confluence|has("mirofish")|tostring)')" "disabled: no position_sizing, no mirofish block"
 assert_equals "null|false" "$(jget "$plain" '(.scores.sentiment|tostring) + "|" + (.confluence.sentiment_available|tostring)')" "offline: sentiment null, sentiment_available false"
 assert_equals "$(jget "$plain" .confluence.technical_avg)" "$(jget "$plain" .confluence.final_confidence)" "offline: final confidence equals technical average"
 
-kelly=$(run_analysis KELLY_SIZING_ENABLED=true MIROFISH_ENABLED=true)
+kelly=$(run_analysis SCORING_MODE=legacy KELLY_SIZING_ENABLED=true MIROFISH_ENABLED=true)
 assert_true "analysis JSON parses (Kelly + MiroFish on)" jq -e 'type == "object" and .symbol == "AAPL"' <<< "$kelly" >/dev/null
 assert_true "Kelly on: position_sizing.status present" jq -e '.position_sizing.status | type == "string"' <<< "$kelly" >/dev/null
 assert_true "Kelly on: position_dollars <= MAX_POSITION_SIZE 2500" jq -e '.position_sizing.position_dollars <= 2500 and .position_sizing.qty * 1 >= 0' <<< "$kelly" >/dev/null
@@ -130,11 +130,24 @@ assert_equals "0" "$(ls "$RISK_BUDGET_DIR" 2>/dev/null | wc -l | tr -d ' ')" "an
 assert_equals "MISSING" "$(jget "$kelly" .confluence.mirofish.status)" "MiroFish on, no cache -> block status MISSING"
 assert_equals "$(jget "$plain" .confluence.final_confidence)" "$(jget "$kelly" .confluence.final_confidence)" "MiroFish MISSING leaves final confidence unchanged"
 
+# v2 (default scoring)
+plain_v2=$(run_analysis ML_TIMEOUT_SECONDS=30 KELLY_SIZING_ENABLED=false MIROFISH_ENABLED=false)
+assert_equals "v2" "$(jget "$plain_v2" .scoring_model)" "v2: default analysis has scoring_model v2"
+assert_equals "false|0" "$(jget "$plain_v2" '(.confluence_v2.components.sentiment.available|tostring) + "|" + (.confluence_v2.components.sentiment.weight_percent|tostring)')" "v2 offline: sentiment unavailable with weight 0"
+kelly_v2=$(run_analysis ML_TIMEOUT_SECONDS=30 KELLY_SIZING_ENABLED=true MIROFISH_ENABLED=true)
+assert_equals "MISSING" "$(jget "$kelly_v2" .confluence_v2.components.mirofish.status)" "v2: MiroFish on, no cache -> component status MISSING"
+assert_equals "$(jget "$plain_v2" .confluence.final_confidence)" "$(jget "$kelly_v2" .confluence.final_confidence)" "v2: MiroFish MISSING leaves final confidence unchanged"
+
 jq -n --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{symbol:"AAPL", generated_at:$t, prediction:"BULLISH", confidence:0.8}' > "$MIROFISH_CACHE_DIR/AAPL.json"
-mf=$(run_analysis MIROFISH_ENABLED=true MIROFISH_WEIGHT=0.1)
+mf=$(run_analysis SCORING_MODE=legacy MIROFISH_ENABLED=true MIROFISH_WEIGHT=0.1)
 assert_equals "OK|true" "$(jget "$mf" '.confluence.mirofish.status + "|" + (.confluence.mirofish.applied|tostring)')" "fresh BULLISH cache -> mirofish OK and applied"
 expected=$(awk -v b="$(jget "$plain" .confluence.final_confidence)" 'BEGIN { printf "%d", int(b * 0.9 + 90 * 0.1 + 0.5) }')
 assert_equals "$expected" "$(jget "$mf" .confluence.final_confidence)" "fresh cache blends final = base*0.9 + 90*0.1"
+# v2 (default scoring): MiroFish is applied once inside calculate_confluence_score_v2
+mf_v2=$(run_analysis ML_TIMEOUT_SECONDS=30 MIROFISH_ENABLED=true MIROFISH_WEIGHT=0.1)
+assert_equals "true" "$(jget "$mf_v2" '.confluence_v2.components.mirofish.weight_percent == 10')" "v2: fresh BULLISH cache -> mirofish weight_percent 10"
+v2_expected=$(echo "$mf_v2" | jq -r '.confluence_v2.components | (.ml_confidence.score * 0.15 + .regime_score.score * 0.35 + .technical_score.score * 0.30 + .volume_trend_score.score * 0.20) * 0.9 + .mirofish.score * 0.1' | awk '{ printf "%.0f", $1 }')
+assert_equals "$v2_expected" "$(jget "$mf_v2" .confluence.final_confidence)" "v2: fresh cache score = components*0.9 + mirofish*0.1"
 rm -f "$MIROFISH_CACHE_DIR/AAPL.json"
 
 # ============================================================================
