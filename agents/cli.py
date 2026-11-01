@@ -100,7 +100,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return EXIT_OK
     if args.offline:
         os.environ["SST_OFFLINE"] = "1"
-    if args.as_of and not re.match(r"^\d{4}-\d{2}-\d{2}$", args.as_of):
+    if args.as_of and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", args.as_of):
         return error({"error": "invalid_as_of", "detail": "use YYYY-MM-DD"})
 
     agent, command = args.agent, args.command

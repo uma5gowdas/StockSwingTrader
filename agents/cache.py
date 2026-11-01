@@ -37,13 +37,13 @@ def cache_root() -> Path:
 
 def check_symbol(symbol: str) -> str:
     """Return SYMBOL if it matches ^[A-Z0-9.-]{1,10}$ without '..'; else ValueError."""
-    if not isinstance(symbol, str) or not SYMBOL_RE.match(symbol) or ".." in symbol:
+    if not isinstance(symbol, str) or not SYMBOL_RE.fullmatch(symbol) or ".." in symbol:
         raise ValueError("invalid symbol: %r" % (symbol,))
     return symbol
 
 
 def check_as_of(as_of: str) -> str:
-    if not isinstance(as_of, str) or not AS_OF_RE.match(as_of):
+    if not isinstance(as_of, str) or not AS_OF_RE.fullmatch(as_of):
         raise ValueError("invalid as_of (YYYY-MM-DD): %r" % (as_of,))
     return as_of
 
@@ -59,7 +59,7 @@ def cache_path(agent: str, as_of: str, symbol: str, root: Optional[Path] = None)
 
 def gate_path(signal_id: str, root: Optional[Path] = None) -> Path:
     """Path of a gate file gates/<signal_id>.json (signal_id ^[a-z0-9_]{1,64}$)."""
-    if not isinstance(signal_id, str) or not SIGNAL_ID_RE.match(signal_id):
+    if not isinstance(signal_id, str) or not SIGNAL_ID_RE.fullmatch(signal_id):
         raise ValueError("invalid signal id: %r" % (signal_id,))
     return (root or cache_root()) / "gates" / ("%s.json" % signal_id)
 

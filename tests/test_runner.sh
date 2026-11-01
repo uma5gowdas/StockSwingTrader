@@ -21,6 +21,10 @@ REPORT_DIR="${PROJECT_DIR}/.agents/tasks"
 REPORT_FILE="${REPORT_DIR}/test-report.md"
 
 export SST_OFFLINE=1
+# Agent-layer settings from the caller's shell would change the v2 output the
+# suites assert on; suites that need them set them explicitly.
+unset AGENTS_ENABLED AGENT_CACHE_DIR AGENT_TECHNICAL_ENABLED AGENT_QUANT_WEIGHT \
+    AGENT_FUNDAMENTAL_WEIGHT AGENT_MARKET_WEIGHT AGENT_MAX_TOTAL_WEIGHT
 
 mkdir -p "$REPORT_DIR"
 
@@ -37,16 +41,27 @@ TOTAL_TESTS_FAILED=0
 TOTAL_TESTS_RUN=0
 SUITES_PASSED=0
 SUITES_FAILED=0
+SUITES_SKIPPED=0
+
+# Agent layer venv (requirements-agents.txt). Suites registered with "venv"
+# run with this python (.py) or get AGENTS_PY exported (.sh); when it is not
+# executable they are reported as SKIP, which is not a failure.
+# SST_AGENTS_VENV=/nonexistent simulates a machine without the venv.
+AGENTS_VENV="${SST_AGENTS_VENV:-$PROJECT_DIR/.venv-agents}"
+AGENTS_PY="${AGENTS_VENV}/bin/python"
 
 # Markdown table rows for the report
 TEST_RESULTS=""
 
 TEST_NAMES=()
 TEST_FILES=()
+TEST_KINDS=()
 
+# add_test NAME FILE [venv]
 add_test() {
     TEST_NAMES+=("$1")
     TEST_FILES+=("$2")
+    TEST_KINDS+=("${3:-}")
 }
 
 add_test "ML Predictor" "${SCRIPT_DIR}/test_ml_predictor.sh"
@@ -67,6 +82,10 @@ add_test "Broker Commands (stubbed)" "${SCRIPT_DIR}/test_broker_commands.sh"
 add_test "V2 CLI Scoring" "${SCRIPT_DIR}/test_v2_cli_scoring.sh"
 add_test "Order Execution (stubbed)" "${SCRIPT_DIR}/test_order_execution.sh"
 add_test "Live Safety (stubbed)" "${SCRIPT_DIR}/test_live_safety.sh"
+add_test "Agents: Contract" "${SCRIPT_DIR}/test_agents_contract.py" venv
+add_test "Agents: Data Clients" "${SCRIPT_DIR}/test_agents_data.py" venv
+add_test "Agent Adapter (bash)" "${SCRIPT_DIR}/test_agent_adapter.sh"
+add_test "Scoring + Agents (zero-weight identity)" "${SCRIPT_DIR}/test_scoring_agents.sh"
 
 # ============================================================================
 # Utility Functions
@@ -109,10 +128,11 @@ record_row() {
 }
 
 # Run one suite and fold its counts into the totals
-# Args: name, file
+# Args: name, file, [kind: "venv" = needs the agent venv]
 run_suite() {
     local test_name=$1
     local test_file=$2
+    local kind=${3:-}
     local -a cmd=()
 
     echo -e "${BLUE}[TEST]${NC} Running: ${test_name}..."
@@ -125,8 +145,21 @@ run_suite() {
         return 1
     fi
 
+    if [[ "$kind" == "venv" && ! -x "$AGENTS_PY" ]]; then
+        echo -e "${YELLOW}[SKIP]${NC} ${test_name}: agent venv not found (${AGENTS_VENV}); create it: /opt/homebrew/bin/python3.12 -m venv .venv-agents && .venv-agents/bin/pip install -r requirements-agents.txt"
+        SUITES_SKIPPED=$((SUITES_SKIPPED + 1))
+        record_row "$test_name" "⏭ SKIP" "-" "agent venv not found (${AGENTS_VENV})"
+        return 0
+    fi
+
     case "$test_file" in
-        *.py) cmd=(python3 "$test_file") ;;
+        *.py)
+            if [[ "$kind" == "venv" ]]; then
+                cmd=("$AGENTS_PY" "$test_file")
+            else
+                cmd=(python3 "$test_file")
+            fi
+            ;;
         *.js) cmd=(node --test --test-reporter=spec "$test_file") ;;
         *)    cmd=(bash "$test_file") ;;
     esac
@@ -141,7 +174,7 @@ run_suite() {
 
     local start_time end_time elapsed output exit_code counts
     start_time=$(now_ms)
-    output=$(cd "$PROJECT_DIR" && "${cmd[@]}" < /dev/null 2>&1 | strip_ansi)
+    output=$(cd "$PROJECT_DIR" && AGENTS_PY="$AGENTS_PY" "${cmd[@]}" < /dev/null 2>&1 | strip_ansi)
     exit_code=$?
     end_time=$(now_ms)
     elapsed=$((end_time - start_time))
@@ -211,7 +244,7 @@ generate_markdown_report() {
 
 | Metric | Value |
 |--------|-------|
-| Suites | $((SUITES_PASSED + SUITES_FAILED)) (${SUITES_PASSED} passed, ${SUITES_FAILED} failed) |
+| Suites | $((SUITES_PASSED + SUITES_FAILED + SUITES_SKIPPED)) (${SUITES_PASSED} passed, ${SUITES_FAILED} failed, ${SUITES_SKIPPED} skipped) |
 | Total Tests | ${TOTAL_TESTS_RUN} |
 | Tests Passed | **${TOTAL_TESTS_PASSED}** |
 | Tests Failed | **${TOTAL_TESTS_FAILED}** |
@@ -244,6 +277,10 @@ when it exits 0 with at least one passed test and zero failures.
 | Phase 1 Integration (CLI) | tests/test_phase1_integration.sh | bash | StockSwingTrader_Agent.sh --kelly/--mirofish/--phase1, help, --backtest syntax, MiroFish-enabled timing |
 | No Silent Fake Data | tests/test_no_fake_data.sh | bash | data_source rules with yfinance stubs (no data, error, fixture) |
 | Broker Commands (stubbed) | tests/test_broker_commands.sh | bash | --check-account/--view-positions/--buy/--sell and deprecated aliases against a local Alpaca stub, Robinhood with stub functions, confirmation yes/no, invalid input, --ml/--kalman loading, libs keep SCRIPT_DIR |
+| Agents: Contract | tests/test_agents_contract.py | .venv-agents python (SKIP without venv) | agents/ envelope schema + rules, atomic cache writes, path guards, config masking, assert_paper, LLM providers + \$0 budget, CLI exit codes |
+| Agents: Data Clients | tests/test_agents_data.py | .venv-agents python (SKIP without venv) | agents/data Alpaca bars client against a 127.0.0.1 stub (pagination, GET only, host whitelist, sip->iex, retry, stale, timeout, cache), offline fixtures, yfinance fallback off |
+| Agent Adapter (bash) | tests/test_agent_adapter.sh | bash | lib/agent_adapter.sh statuses, gates, latest dir, ttl, weight clamp/cap, components reasons, no network |
+| Scoring + Agents (zero-weight identity) | tests/test_scoring_agents.sh | bash | v2 goldens captured at 970af57 unchanged (agents off, and on with weights 0), applied weight math, gate/staleness reasons, sentiment ordering |
 
 ## Environment
 
@@ -252,6 +289,7 @@ when it exits 0 with at least one passed test and zero failures.
 - **Python:** $(python3 --version 2>&1)
 - **Node:** $(node --version 2>&1)
 - **Offline mode:** SST_OFFLINE=1 (synthetic/seeded data, no network)
+- **Agent venv:** ${AGENTS_VENV} ($( [[ -x "$AGENTS_PY" ]] && "$AGENTS_PY" --version 2>&1 || echo "not found: venv suites skipped"))
 EOF
 
     echo -e "\n${GREEN}✓${NC} Report generated: $REPORT_FILE"
@@ -268,7 +306,7 @@ main() {
 
     local i=0
     for test_name in "${TEST_NAMES[@]}"; do
-        run_suite "$test_name" "${TEST_FILES[$i]}"
+        run_suite "$test_name" "${TEST_FILES[$i]}" "${TEST_KINDS[$i]}"
         i=$((i + 1))
     done
 
@@ -282,7 +320,7 @@ main() {
     echo -e "\n${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${BLUE}║${NC}        Test Execution Summary${NC}"
     echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
-    echo -e "Suites:              $((SUITES_PASSED + SUITES_FAILED)) (${SUITES_PASSED} passed, ${SUITES_FAILED} failed)"
+    echo -e "Suites:              $((SUITES_PASSED + SUITES_FAILED + SUITES_SKIPPED)) (${SUITES_PASSED} passed, ${SUITES_FAILED} failed, ${SUITES_SKIPPED} skipped)"
     echo -e "Total Tests Run:     ${TOTAL_TESTS_RUN}"
     echo -e "Tests Passed:        ${GREEN}${TOTAL_TESTS_PASSED}${NC}"
     echo -e "Tests Failed:        ${RED}${TOTAL_TESTS_FAILED}${NC}"
