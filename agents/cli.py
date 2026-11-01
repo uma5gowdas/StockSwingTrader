@@ -1,7 +1,12 @@
 """Single CLI: python -m agents <agent> <command> [options].
 
 Agents:   market | fundamental | technical | quant | validate | portfolio
-Commands: run | status | train | gate   (validate adds its own, e.g. parity)
+Commands: run | status | train | gate   (validate adds its own, e.g. parity;
+          quant adds ingest; `quant run` is not implemented)
+  quant ingest [--symbols ...] [--start] [--end] [--refresh] [--offline]
+               raw Alpaca bars (+ vwap) -> cache/agents/quant/raw, then the
+               Qlib bin store cache/agents/quant/qlib_data
+  quant status raw store / Qlib store summary
 Exit codes: 0 ok, 1 error (incl. not_implemented), 2 data unavailable.
 
 `python -m agents status` (top level or any agent) prints the agent version,
@@ -42,6 +47,8 @@ HANDLERS[("technical", "status")] = _lazy("agents.technical.agent", "cli_status"
 HANDLERS[("validate", "gate")] = _lazy("agents.validate.agent", "cli_gate")
 HANDLERS[("validate", "parity")] = _lazy("agents.validate.agent", "cli_parity")
 HANDLERS[("validate", "status")] = _lazy("agents.validate.agent", "cli_status")
+HANDLERS[("quant", "ingest")] = _lazy("agents.quant.agent", "cli_ingest")
+HANDLERS[("quant", "status")] = _lazy("agents.quant.agent", "cli_status")
 
 
 def emit(obj) -> None:
@@ -75,6 +82,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--signals", help="Comma-separated signal ids")
     p.add_argument("--benchmark", help="Benchmark symbol (default SPY)")
     p.add_argument("--report-dir", dest="report_dir", help="Directory for reports")
+    p.add_argument("--refresh", action="store_true", help="quant ingest: refetch symbols that are current")
+    p.add_argument("--arms", help="quant: comma-separated model arms")
     p.add_argument("--version", action="store_true", help="Print the agent layer version")
     return p
 

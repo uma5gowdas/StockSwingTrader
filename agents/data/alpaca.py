@@ -13,6 +13,9 @@
     AGENT_MAX_BAR_STALENESS_DAYS (3) business days
   - disk cache <cache_root>/data/alpaca/<SYM>_1Day_<adj>.csv + .meta.json,
     reused when it covers the range and is < 12 h old
+  - include_vwap=True (quant raw store): frames get a `vwap` column (Alpaca
+    `vw`, typical price (h+l+c)/3 when absent) and the cache file name gets
+    `_vw`; the default (False) is the Phase 1 behaviour, unchanged
 No method other than GET exists here: there is no order, cancel or account call.
 """
 
@@ -100,7 +103,8 @@ class AlpacaBarsClient:
     """Read-only daily bars from Alpaca market data."""
 
     def __init__(self, cfg: Optional[Config] = None, timeout: float = 20.0,
-                 sleep: Callable[[float], None] = time.sleep, use_cache: bool = True):
+                 sleep: Callable[[float], None] = time.sleep, use_cache: bool = True,
+                 include_vwap: bool = False):
         cfg = cfg if cfg is not None else load_config()
         assert_paper(cfg)  # paper-only, before anything else
         self.base = check_data_url(cfg.get("ALPACA_DATA_URL") or "https://" + DATA_HOST)
@@ -111,6 +115,7 @@ class AlpacaBarsClient:
         self.timeout = timeout
         self.sleep = sleep
         self.use_cache = use_cache
+        self.include_vwap = bool(include_vwap)
         self.requests_made = 0
         self._session = requests.Session()
 
@@ -175,23 +180,31 @@ class AlpacaBarsClient:
             params = dict(params, page_token=token)
 
     @staticmethod
-    def rows_to_frame(rows: Iterable[dict]) -> pd.DataFrame:
-        """Alpaca bar records -> DataFrame indexed by America/New_York date."""
+    def rows_to_frame(rows: Iterable[dict], include_vwap: bool = False) -> pd.DataFrame:
+        """Alpaca bar records -> DataFrame indexed by America/New_York date.
+        INCLUDE_VWAP adds `vwap` (Alpaca `vw`, else (h+l+c)/3)."""
+        cols = COLUMNS + ["vwap"] if include_vwap else COLUMNS
         recs = []
         for r in rows:
             ts = pd.Timestamp(r["t"])
             ts = ts.tz_localize("UTC") if ts.tzinfo is None else ts
-            recs.append({"date": pd.Timestamp(ts.tz_convert(NY).date()),
-                         "open": float(r["o"]), "high": float(r["h"]), "low": float(r["l"]),
-                         "close": float(r["c"]), "volume": float(r["v"])})
+            rec = {"date": pd.Timestamp(ts.tz_convert(NY).date()),
+                   "open": float(r["o"]), "high": float(r["h"]), "low": float(r["l"]),
+                   "close": float(r["c"]), "volume": float(r["v"])}
+            if include_vwap:
+                vw = r.get("vw")
+                rec["vwap"] = float(vw) if vw is not None else (rec["high"] + rec["low"] + rec["close"]) / 3.0
+            recs.append(rec)
         if not recs:
-            return pd.DataFrame(columns=COLUMNS, index=pd.DatetimeIndex([], name="date"))
+            return pd.DataFrame(columns=cols, index=pd.DatetimeIndex([], name="date"))
         df = pd.DataFrame(recs).drop_duplicates("date", keep="last").set_index("date").sort_index()
-        return df[COLUMNS]
+        return df[cols]
 
     # -- disk cache --------------------------------------------------------
     def _cache_files(self, symbol: str) -> Tuple[str, str]:
         base = cache_root() / "data" / "alpaca" / ("%s_1Day_%s" % (symbol, self.adjustment))
+        if self.include_vwap:
+            base = base.with_name(base.name + "_vw")
         return str(base) + ".csv", str(base) + ".meta.json"
 
     def _cache_get(self, symbol: str, start, end_d: date):
@@ -209,7 +222,8 @@ class AlpacaBarsClient:
         if not (fresh and covers):
             return None
         try:
-            df = pd.read_csv(csv_path, parse_dates=["date"]).set_index("date").sort_index()[COLUMNS]
+            cols = COLUMNS + ["vwap"] if self.include_vwap else COLUMNS
+            df = pd.read_csv(csv_path, parse_dates=["date"]).set_index("date").sort_index()[cols]
         except (OSError, ValueError, KeyError):
             return None
         return df, meta.get("data_source", "alpaca")
@@ -275,7 +289,7 @@ class AlpacaBarsClient:
                 continue
             label = "alpaca:%s" % feed
             for s in batch:
-                df = self.rows_to_frame(raw.get(s, []))
+                df = self.rows_to_frame(raw.get(s, []), include_vwap=self.include_vwap)
                 if len(df):
                     self._cache_put(s, df, start, end_d, label)
                 frames[s] = (df, label)
