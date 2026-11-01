@@ -59,3 +59,5 @@ config.live.sh
 
 # Git worktrees
 .worktrees/
+# Agent layer venv (requirements-agents.txt, Python 3.12)
+.venv-agents/

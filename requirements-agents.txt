@@ -1,0 +1,32 @@
+# ============================================================================
+# StockSwingTrader agent layer (agents/), Phase 0-1 only. Exact pins.
+# ============================================================================
+# Separate venv, Python 3.12 (the repo requirements.txt pins numpy 1.24.3 /
+# pandas 2.0.3, which do not build on 3.12; never use it for the agents):
+#   /opt/homebrew/bin/python3.12 -m venv .venv-agents
+#   .venv-agents/bin/pip install -r requirements-agents.txt
+#   .venv-agents/bin/pip check
+# yfinance is NOT pinned here: it is an opt-in fallback only
+# (AGENT_DATA_FALLBACK=yfinance), install it yourself if you want it.
+
+vectorbt==1.2.0
+numba==0.68.1
+llvmlite==0.50.0
+pandas==3.1.0
+numpy==2.5.4
+# scipy < 1.17 keeps the door open for PyPortfolioOpt 1.6.0 (Phase 4)
+scipy==1.16.3
+TA-Lib==0.8.3
+jsonschema==4.26.0
+requests==2.34.2
+
+# ----------------------------------------------------------------------------
+# Later phases (NOT installed in Phase 0-1; uncomment when the phase starts).
+# NEVER install openbb-yfinance (pulls yfinance into OpenBB; not needed).
+# ----------------------------------------------------------------------------
+# openbb==5.0.0
+# openbb-equity==2.0.0
+# openbb-economy==2.0.0
+# pyqlib==0.9.7
+# lightgbm==4.7.0
+# PyPortfolioOpt==1.6.0

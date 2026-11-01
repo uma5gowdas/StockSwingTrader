@@ -1,0 +1,22 @@
+{
+  "synthetic": true,
+  "generator": "tests/fixtures/agents/make_fixtures.py",
+  "seed": 20260101,
+  "rng": "numpy.random.default_rng (PCG64)",
+  "symbols": [
+    "AAA",
+    "BBB",
+    "CCC",
+    "SPY"
+  ],
+  "start": "2019-01-02",
+  "end": "2022-11-01",
+  "rows": 1000,
+  "segments": [
+    "trend_up",
+    "sideways_oscillation",
+    "trend_down",
+    "high_volatility"
+  ],
+  "note": "Generated bars, not market data"
+}
