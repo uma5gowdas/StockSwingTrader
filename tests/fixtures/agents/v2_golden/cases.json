@@ -1,0 +1,16 @@
+[
+  {"name": "a1_bull_trending_bull_k1",  "ml": "absent", "args": ["AAPL", "75", "80", "70", "72", "trending_bull", "60", "80", "1"]},
+  {"name": "a2_bear_trending_bear_km1", "ml": "absent", "args": ["AAPL", "20", "25", "30", "28", "trending_bear", "30", "20", "-1"]},
+  {"name": "a3_mixed_sideways_k0",      "ml": "absent", "args": ["AAPL", "65", "40", "55", "50", "sideways", "70", "45", "0"]},
+  {"name": "a4_volatile_k1",            "ml": "absent", "args": ["AAPL", "60", "55", "45", "62", "volatile", "55", "60", "1"]},
+  {"name": "a5_unknown_neutral_k0",     "ml": "absent", "args": ["AAPL", "50", "50", "50", "50", "unknown", "50", "50", "0"]},
+  {"name": "a6_bull_sideways_k1",       "ml": "absent", "args": ["MSFT", "70", "72", "68", "66", "sideways", "75", "60", "1"]},
+  {"name": "a7_mixed_trending_bull_km1","ml": "absent", "args": ["MSFT", "45", "70", "35", "40", "trending_bull", "40", "70", "-1"]},
+  {"name": "a8_bear_trending_bear_k1",  "ml": "absent", "args": ["NVDA", "30", "20", "35", "45", "trending_bear", "25", "30", "1"]},
+  {"name": "b1_bull_sentiment_70",      "ml": "absent", "args": ["AAPL", "75", "80", "70", "72", "trending_bull", "60", "80", "1", "70"]},
+  {"name": "b2_bear_sentiment_na",      "ml": "absent", "args": ["AAPL", "20", "25", "30", "28", "trending_bear", "30", "20", "-1", "na"]},
+  {"name": "b3_mixed_sentiment_30",     "ml": "absent", "args": ["AAPL", "65", "40", "55", "50", "sideways", "70", "45", "0", "30"]},
+  {"name": "c1_mirofish_bullish_08",    "ml": "absent", "args": ["AAPL", "65", "40", "55", "50", "sideways", "70", "45", "0"],
+   "env": {"MIROFISH_WEIGHT": "0.10"}, "mirofish_cache": {"prediction": "BULLISH", "confidence": 0.8}},
+  {"name": "d1_offline_ml",             "ml": "offline", "args": ["AAPL", "75", "80", "70", "72", "trending_bull", "60", "80", "1"]}
+]
