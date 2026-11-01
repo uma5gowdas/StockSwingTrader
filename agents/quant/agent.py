@@ -42,6 +42,7 @@ def _store_summary(meta) -> Dict[str, Any]:
         "data_sources": _count(meta.get("data_sources") or {}),
         "synthetic": bool(meta.get("synthetic")),
         "missing_sessions_over_5": sorted(s for s, n in missing.items() if int(n) > MISSING_SESSIONS_WARN),
+        "ohlc_anomaly_bars": sum(len(v) for v in (meta.get("ohlc_anomalies") or {}).values()),
     }
 
 

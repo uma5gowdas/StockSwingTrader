@@ -11,7 +11,9 @@ store_dir() = cache_root()/quant/qlib_data:
                                     bar (missing sessions NaN)
   store_meta.json                   {built_at, calendar range, sessions,
                                     instruments, fields, data_sources, synthetic,
-                                    bars_sha12, missing_sessions, ...}
+                                    bars_sha12, missing_sessions,
+                                    ohlc_anomalies (implausible bars,
+                                    listed, not changed), ...}
 Fields: open, high, low, close, volume, vwap, factor (1.0: prices are already
 adjusted, adjustment=all) and the 14 legacy features sst_<name>.
 
@@ -38,6 +40,9 @@ PRICE_FIELDS = ("open", "high", "low", "close", "volume", "vwap", "factor")
 FIELDS = PRICE_FIELDS + SST_COLUMNS
 FREQ = "day"
 RANK_MARKET = "sst_us"
+# ohlc_anomalies thresholds (relative to the open/close body)
+OHLC_HIGH_MULT = 1.25
+OHLC_LOW_MULT = 0.8
 # qlib.utils.code_to_fname: Windows device names get this prefix
 _RESERVED = {"CON", "PRN", "AUX", "NUL"} | {"COM%d" % i for i in range(10)} | {"LPT%d" % i for i in range(10)}
 
@@ -54,6 +59,21 @@ def instrument_dirname(symbol: str) -> str:
 
 def _write_bin(path: Path, start_index: int, values: np.ndarray) -> None:
     np.hstack([[start_index], values]).astype("<f").tofile(str(path))
+
+
+def ohlc_anomalies(df: pd.DataFrame) -> List[dict]:
+    """Bars with an implausible print: high > OHLC_HIGH_MULT x max(open, close)
+    or low < OHLC_LOW_MULT x min(open, close). Detection only: the bars are
+    stored unchanged and listed in store_meta.json (review finding: bad SIP
+    prints; clipping would change every downstream number, deferred)."""
+    body_hi = df[["open", "close"]].max(axis=1)
+    body_lo = df[["open", "close"]].min(axis=1)
+    bad = (df["high"] > OHLC_HIGH_MULT * body_hi) | (df["low"] < OHLC_LOW_MULT * body_lo)
+    out: List[dict] = []
+    for ts, row in df[bad].iterrows():
+        out.append({"date": pd.Timestamp(ts).strftime("%Y-%m-%d"),
+                    **{k: round(float(row[k]), 4) for k in ("open", "high", "low", "close")}})
+    return out
 
 
 def _instrument_lines(spans: Dict[str, tuple], symbols: Iterable[str]) -> str:
@@ -94,6 +114,7 @@ def build_store(bars: Dict[str, object], rank_symbols: Iterable[str], benchmark_
         data_sources: Dict[str, str] = {}
         hashes: Dict[str, str] = {}
         missing: Dict[str, int] = {}
+        anomalies: Dict[str, List[dict]] = {}
         synthetic = False
         for s in symbols:
             res = usable[s]
@@ -109,6 +130,9 @@ def build_store(bars: Dict[str, object], rank_symbols: Iterable[str], benchmark_
             span = cal_index[pos[first]:pos[last] + 1]
             frame = frame.reindex(span)
             missing[s] = int(len(span) - len(df))
+            bad = ohlc_anomalies(df)
+            if bad:
+                anomalies[s] = bad
             fdir = tmp / "features" / instrument_dirname(s)
             fdir.mkdir(parents=True)
             for field in FIELDS:
@@ -128,7 +152,11 @@ def build_store(bars: Dict[str, object], rank_symbols: Iterable[str], benchmark_
             "instruments": len(symbols), "rank_instruments": len(rank),
             "rank_symbols": rank, "benchmarks": bench, "market": RANK_MARKET,
             "fields": list(FIELDS), "data_sources": data_sources, "synthetic": synthetic,
-            "bars_sha12": hashes, "missing_sessions": missing, "spans": {s: list(v) for s, v in spans.items()},
+            "bars_sha12": hashes, "missing_sessions": missing,
+            "ohlc_anomalies": anomalies,
+            "ohlc_anomaly_rule": "high > %s x max(open, close) or low < %s x min(open, close); stored unchanged"
+                                 % (OHLC_HIGH_MULT, OHLC_LOW_MULT),
+            "spans": {s: list(v) for s, v in spans.items()},
         }
         atomic_write_json(tmp / "store_meta.json", meta)
 

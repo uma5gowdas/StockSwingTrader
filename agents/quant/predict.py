@@ -16,6 +16,8 @@ Friday prediction is still fresh on Monday or after a holiday). Unavailable
 envelopes: not_in_quant_universe, no_features_at_as_of, stale_data (newest
 store session older than the staleness cutoff), universe_too_small.
 validation = {gate_id: quant_rank, passed: the gate file's passed}.
+A historical --as-of whose label lies inside the live model's data gets an
+"IN-SAMPLE" warning (score kept; it is not out of sample).
 """
 
 from __future__ import annotations
@@ -163,6 +165,7 @@ def run_predict(as_of: Optional[str] = None, offline: bool = False, symbols: Opt
     reasons: Dict[str, str] = {}
     ranked = None
     feature_date = None
+    in_sample = False
     cal_end = pd.Timestamp(meta["calendar_end"])
     if cal_end.date() < staleness_cutoff(as_of_ts.date()):
         reasons = {s: "stale_data" for s in rank_syms}
@@ -179,6 +182,7 @@ def run_predict(as_of: Optional[str] = None, offline: bool = False, symbols: Opt
             reasons = {s: "no_features_at_as_of" for s in rank_syms}
         else:
             feature_date = past[-1]
+            in_sample = _in_sample(calendar, feature_date, train_end)
             model = load_model(live["model_path"])
             pred = _predict_frame(arm_info, model, meta.get("market") or "sst_us", calendar, feature_date)
             pred = pred[[s in rank_syms for s in pred.index]] if len(pred) else pred
@@ -208,6 +212,11 @@ def run_predict(as_of: Optional[str] = None, offline: bool = False, symbols: Opt
             if age_days is not None and age_days > MODEL_MAX_AGE_DAYS:
                 extra = "model older than %d days (%d)" % (MODEL_MAX_AGE_DAYS, age_days)
                 warn = "%s; %s" % (warn, extra) if warn else extra
+            if in_sample:
+                extra = ("IN-SAMPLE: feature date %s and its label lie inside the live model's training data "
+                         "(through %s); this score is not out of sample" % (feature_date.strftime("%Y-%m-%d"),
+                                                                            train_end))
+                warn = "%s; %s" % (warn, extra) if warn else extra
             env = make_envelope(
                 AGENT, s, as_of_s,
                 score=pct, direction=direction_for(pct), confidence=round(abs(pct - 50.0) / 50.0, 4),
@@ -230,6 +239,21 @@ def run_predict(as_of: Optional[str] = None, offline: bool = False, symbols: Opt
             "feature_date": feature_date.strftime("%Y-%m-%d") if feature_date is not None else None,
             "universe_size": n, "gate": validation, "written": written, "unavailable": unavailable,
             "files": files}
+
+
+def _in_sample(calendar: pd.DatetimeIndex, feature_date: pd.Timestamp, train_end: Optional[str]) -> bool:
+    """True when FEATURE_DATE's label (LABEL_HORIZON sessions ahead) was
+    available inside the live model's data, which ends at TRAIN_END: a
+    historical --as-of then gets an in-sample score. The nightly default
+    (feature date = newest session) is never in sample."""
+    from agents.quant.handler import LABEL_HORIZON
+
+    if not train_end:
+        return False
+    upto = calendar[calendar <= pd.Timestamp(train_end)]
+    if not len(upto):
+        return False
+    return int(calendar.get_loc(feature_date)) + LABEL_HORIZON <= len(upto) - 1
 
 
 def _label_expr() -> str:

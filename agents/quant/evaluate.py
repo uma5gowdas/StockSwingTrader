@@ -59,6 +59,15 @@ CAVEATS = [
     "Several arms (lgbm, xgb14, xgb_full) and signals (quant_topk, xgb_topk, quant_rank) were tested; this "
     "multiple testing is not in the DSR beyond each gate's own grid.",
     "Adjusted prices (adjustment=all, back-adjusted on every dividend and split).",
+    "Look-ahead in the 14 legacy features: close_price, ema_20, ema_50, atr, macd, macd_signal and macd_hist "
+    "are absolute dollar levels of back-adjusted bars, so their scale at a past date encodes splits and "
+    "dividends that happened later (e.g. NVDA's stored 2018-01-02 close is about 4.92, not about 199). This "
+    "leaks into training and the OOS IC and gates (strongest for xgb14 and xgb_full, which lean on these "
+    "features) and skews live inputs (factor about 1) against training rows. The bias is optimistic, so a "
+    "no-go stands, but IC differences between arms (e.g. xgb_full's higher IC, LightGBM's early stopping) "
+    "may partly be this leak. Before any re-run these features must be made scale-free or point-in-time.",
+    "Bad prints: a few stored SIP bars have an implausible high or low (store_meta.json ohlc_anomalies; "
+    "stored unchanged); they reach the Alpha158/legacy features and the gates' stop and take-profit checks.",
     "Alpaca SIP daily bars (IEX when SIP is refused); fills at the next open with 10 bp slippage per side.",
     "vectorbt is Apache 2.0 + Commons Clause (free to use, not to sell).",
     "Not financial advice. A go is evidence for proposing a small weight, not a guarantee.",
@@ -149,7 +158,8 @@ def _data_summary() -> Dict[str, Any]:
     return {"store_built_at": meta.get("built_at"), "calendar_start": meta.get("calendar_start"),
             "calendar_end": meta.get("calendar_end"), "sessions": meta.get("sessions"),
             "rank_instruments": meta.get("rank_instruments"), "benchmarks": meta.get("benchmarks"),
-            "data_sources": counts, "synthetic": bool(meta.get("synthetic"))}
+            "data_sources": counts, "synthetic": bool(meta.get("synthetic")),
+            "ohlc_anomalies": meta.get("ohlc_anomalies") or {}}
 
 
 def run_evaluate(offline: bool = False, report_dir: Optional[str] = None, start: Optional[str] = None) -> Dict[str, Any]:

@@ -22,6 +22,7 @@ from agents.quant.legacy_features import SST_FEATURES
 
 LABEL_EXPR = "Ref($open, -6) / Ref($open, -1) - 1"
 LABEL_NAME = "LABEL0"
+LABEL_HORIZON = 6  # sessions after the feature date the label reads (Ref($open, -6))
 KINDS = ("alpha158_sst14", "sst14")
 FEATURE_SETS = {"alpha158_sst14": "Alpha158 + sst14", "sst14": "sst14 (lib/ml_inference.py features)"}
 LEARN_PROCESSORS = [{"class": "DropnaLabel"}, {"class": "CSZScoreNorm", "kwargs": {"fields_group": "label"}}]

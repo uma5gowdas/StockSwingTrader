@@ -394,6 +394,35 @@ class StoreTests(TempCacheMixin, unittest.TestCase):
         self.assertTrue(np.isnan(arr[1 + 100]) and np.isnan(arr[1 + 102]))
         self.assertAlmostEqual(float(arr[1]), float(df["close"].iloc[0]), places=3)
 
+    def test_ohlc_anomalies_listed_not_changed(self):
+        bars = self.bars()
+        rank, bench = universe.rank_universe(True), universe.benchmarks(True)
+        meta = store.build_store(bars, rank, bench)
+        self.assertEqual(meta["ohlc_anomalies"], {})
+        qcc = bars["QCC"]
+        df = qcc.df.copy()
+        d1, d2 = df.index[300], df.index[500]
+        body_hi = max(df.at[d1, "open"], df.at[d1, "close"])
+        body_lo = min(df.at[d2, "open"], df.at[d2, "close"])
+        df.at[d1, "high"] = body_hi * 1.6
+        df.at[d2, "low"] = body_lo * 0.5
+        bars["QCC"] = BarsResult(df, qcc.data_source, qcc.synthetic, qcc.warning)
+        meta = store.build_store(bars, rank, bench)
+        got = meta["ohlc_anomalies"]
+        self.assertEqual(list(got), ["QCC"])
+        self.assertEqual([b["date"] for b in got["QCC"]], [d1.strftime("%Y-%m-%d"), d2.strftime("%Y-%m-%d")])
+        self.assertAlmostEqual(got["QCC"][0]["high"], round(float(df.at[d1, "high"]), 4), places=4)
+        self.assertEqual(store.read_store_meta()["ohlc_anomalies"], got)
+        # detection only: the stored high/low are the bars as given
+        hi = np.fromfile(store.store_dir() / "features" / "qcc" / "high.day.bin", dtype="<f")
+        lo = np.fromfile(store.store_dir() / "features" / "qcc" / "low.day.bin", dtype="<f")
+        cal = (store.store_dir() / "calendars" / "day.txt").read_text().split()
+        i1 = cal.index(d1.strftime("%Y-%m-%d")) - int(hi[0])
+        i2 = cal.index(d2.strftime("%Y-%m-%d")) - int(lo[0])
+        self.assertAlmostEqual(float(hi[1 + i1]), float(df.at[d1, "high"]), places=2)
+        self.assertAlmostEqual(float(lo[1 + i2]), float(df.at[d2, "low"]), places=2)
+        self.assertIn("stored unchanged", meta["ohlc_anomaly_rule"])
+
     def test_swap_keeps_prev_and_error_leaves_store_untouched(self):
         bars = self.bars()
         rank, bench = universe.rank_universe(True), universe.benchmarks(True)
@@ -787,6 +816,25 @@ class QuantModelTests(unittest.TestCase):
             self.assertEqual(e["features"]["label"], LABEL_EXPR)
             self.assertAlmostEqual(e["confidence"], abs(e["score"] - 50) / 50, places=4)
         self.assertFalse(envs["ZZZ"]["available"])
+        for e in live:  # default as_of (newest session): out of sample
+            self.assertNotIn("IN-SAMPLE", e["warning"])
+        # historical as_of inside the live model's data -> in-sample warning
+        cal = (store.store_dir() / "calendars" / "day.txt").read_text().split()
+        past = qpredict.run_predict(as_of=cal[-40], offline=True, symbols=rank)
+        self.assertEqual(sorted(past["written"]), rank)
+        self.assertEqual(past["feature_date"], cal[-40])
+        for f in past["files"]:
+            e = json.loads(Path(f).read_text())
+            validate_envelope(e)
+            self.assertIn("IN-SAMPLE", e["warning"])
+            self.assertIn("SYNTHETIC", e["warning"])
+        # label horizon boundary: 6 sessions before train_end is in sample, 5 is not
+        from agents.quant.predict import _in_sample
+        cidx = pd.DatetimeIndex(cal)
+        self.assertTrue(_in_sample(cidx, cidx[-7], cal[-1]))
+        self.assertFalse(_in_sample(cidx, cidx[-6], cal[-1]))
+        self.assertFalse(_in_sample(cidx, cidx[-1], cal[-1]))
+        self.assertFalse(_in_sample(cidx, cidx[-1], None))
 
         # stale store -> every envelope unavailable 'stale_data'
         stale = qpredict.run_predict(as_of="2023-06-30", offline=True)
