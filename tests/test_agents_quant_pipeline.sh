@@ -12,6 +12,10 @@
 # MLflow file store under the temp cache (no ./mlruns). Then the bash side:
 # lib/agent_adapter.sh agent_get quant QAA is OK with SST_OFFLINE=1, and
 # agent_components_json marks it 'synthetic' without SST_OFFLINE.
+# FEAT-003: scan identity at AGENT_QUANT_WEIGHT=0 on every v2 golden with the
+# real quant envelope present (weight 0.15 applies), then
+# `quant evaluate --offline`: exit 0, go false, synthetic gates that cannot
+# pass, SYNTHETIC banner, agent_gate_get quant_rank SYNTHETIC.
 # No network: a sitecustomize.py first on PYTHONPATH logs and refuses every
 # socket connect; the log must stay empty. bash 3.2 compatible.
 # Needs AGENTS_PY (the runner exports it; default .venv-agents/bin/python).
@@ -211,6 +215,92 @@ out=$(agents quant status 2>/dev/null); rc=$?
 assert_equals "0" "$rc" "quant status exits 0"
 assert_equals "$RID" "$(jq -r '.models.train_run_id' <<< "$out" 2>/dev/null)" "status: models.train_run_id"
 assert_equals "$LAST" "$(jq -r '.envelopes.latest_as_of' <<< "$out" 2>/dev/null)" "status: latest envelope dir"
+
+# --- scan identity at AGENT_QUANT_WEIGHT=0 (FEAT-003, deliverable 4) ------------------
+# The real quant envelope (QAA's, copied as each golden symbol with .symbol
+# fixed) and a hand-written PASSED, non-synthetic quant_rank gate. Every v2
+# golden (tests/fixtures/agents/v2_golden, same invocation and comparison as
+# tests/test_scoring_agents.sh): agents off -> identical; agents on, weight 0
+# -> identical apart from components.agents, quant OK / shadow; weight 0.15
+# -> applied, confluence = round(core x 0.85 + q x 0.15).
+GOLDEN="$TEST_DIR/fixtures/agents/v2_golden"
+RUN="$GOLDEN/run_case.sh"
+mkdir -p "$CACHE/gates"
+jq -n --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{signal_id:"quant_rank", generated_at:$t, passed:true, synthetic:false}' \
+    > "$CACHE/gates/quant_rank.json"
+for s in $(jq -r '.[].args[0]' "$GOLDEN/cases.json" | sort -u); do
+    jq --arg s "$s" '.symbol = $s' "$CACHE/quant/$LAST/QAA.json" > "$CACHE/quant/$LAST/$s.json"
+done
+Q_SCORE=$(jq -r '.score' "$CACHE/quant/$LAST/QAA.json")
+ON=(AGENTS_ENABLED=true SST_OFFLINE=1 AGENT_CACHE_DIR="$CACHE" AGENT_QUANT_WEIGHT=0)
+n=$(jq length "$GOLDEN/cases.json")
+for ((i = 0; i < n; i++)); do
+    c=$(jq -c ".[$i]" "$GOLDEN/cases.json")
+    name=$(jq -r .name <<< "$c")
+    exp=$(jq -S -c . "$GOLDEN/expected/$name.json")
+    off=$(bash "$RUN" v2 "$c" AGENT_CACHE_DIR="$CACHE")
+    assert_equals "$exp" "$off" "$name: AGENTS_ENABLED unset, quant envelope present -> identical to golden"
+    on=$(bash "$RUN" v2 "$c" "${ON[@]}")
+    assert_equals "$exp" "$(jq -S -c 'del(.components.agents)' <<< "$on")" \
+        "$name: AGENTS_ENABLED=true AGENT_QUANT_WEIGHT=0 -> score, recommendation and every weight_percent identical"
+    assert_equals "OK|shadow|0|0" "$(jq -r '.components.agents | "\(.quant.status)|\(.quant.reason)|\(.quant.weight_percent)|\(.applied_weight_percent)"' <<< "$on")" \
+        "$name: quant OK, reason shadow, weight 0"
+done
+A1=$(jq -c '.[] | select(.name == "a1_bull_trending_bull_k1")' "$GOLDEN/cases.json")
+gold=$(jq -S -c . "$GOLDEN/expected/a1_bull_trending_bull_k1.json")
+core=$(jq -r '.components | "\(.ml_confidence.score) \(.regime_score.score) \(.technical_score.score) \(.volume_trend_score.score)"' <<< "$gold" |
+    awk '{ printf "%.4f", $1 * 0.15 + $2 * 0.35 + $3 * 0.30 + $4 * 0.20 }')
+out=$(bash "$RUN" v2 "$A1" AGENTS_ENABLED=true SST_OFFLINE=1 AGENT_CACHE_DIR="$CACHE" AGENT_QUANT_WEIGHT=0.15)
+want=$(awk -v c="$core" -v q="$Q_SCORE" 'BEGIN { printf "%.0f", c * 0.85 + q * 0.15 }')
+assert_equals "applied|15|$want" "$(jq -r '"\(.components.agents.quant.reason)|\(.components.agents.applied_weight_percent)|\(.confluence_score)"' <<< "$out")" \
+    "AGENT_QUANT_WEIGHT=0.15: quant applied, confluence = round(core x 0.85 + $Q_SCORE x 0.15) = $want"
+assert_equals "0" "$(env -i PATH="$PATH" /bin/bash -c 'source "$1/config.template.sh" >/dev/null 2>&1; echo "$AGENT_QUANT_WEIGHT"' _ "$PROJECT_DIR")" \
+    "config.template.sh default AGENT_QUANT_WEIGHT stays 0"
+
+# --- quant evaluate --offline (FEAT-003) ---------------------------------------------
+out=$(agents quant evaluate --offline --report-dir "$WORK_DIR/evalrep" 2>"$WORK_DIR/evaluate.err"); rc=$?
+assert_equals "0" "$rc" "quant evaluate --offline exits 0"
+if jq -e . >/dev/null 2>&1 <<< "$out"; then
+    pass "evaluate stdout is one JSON document"
+else
+    fail "evaluate stdout is one JSON document" "$(head -3 <<< "$out"; tail -3 "$WORK_DIR/evaluate.err")"
+fi
+assert_equals "false|true" "$(jq -r '"\(.go)|\(.synthetic)"' <<< "$out" 2>/dev/null)" "evaluate: go false, synthetic true"
+assert_equals "quant_rank quant_topk xgb_topk" "$(jq -r '.gates | keys | join(" ")' <<< "$out" 2>/dev/null)" "evaluate: three quant gates"
+assert_equals "true" "$(jq -r '[.gates[] | (.synthetic == true and .passed == false)] | all' <<< "$out" 2>/dev/null)" \
+    "evaluate: every gate synthetic true, passed false"
+assert_equals "false" "$(jq -r '.criteria.real_data.passed' <<< "$out" 2>/dev/null)" "evaluate: real_data criterion fails"
+assert_equals "null" "$(jq -r '.proposal' <<< "$out" 2>/dev/null)" "evaluate: no weight proposal on no-go"
+bad=0
+for sid in xgb_topk quant_topk quant_rank; do
+    [[ "$(jq -r '"\(.synthetic)|\(.passed)"' "$CACHE/gates/$sid.json" 2>/dev/null)" == "true|false" ]] || bad=$((bad + 1))
+done
+assert_equals "0" "$bad" "gate files xgb_topk / quant_topk / quant_rank: synthetic true, passed false"
+if [[ ! -e "$CACHE/gates/v2_confluence.json" ]]; then
+    pass "baseline v2_confluence evaluated in memory (no gate file)"
+else
+    fail "baseline v2_confluence evaluated in memory (no gate file)"
+fi
+assert_equals "true|v2_confluence" "$(jq -r '"\(.criteria.baseline_improvement.applicable)|\(.metrics.baseline_signal_id)"' "$CACHE/gates/quant_rank.json" 2>/dev/null)" \
+    "quant_rank gate: baseline_improvement applicable vs v2_confluence"
+assert_equals "xgb_topk|lgbm" "$(jq -r '"\(.metrics.baseline_signal_id)|\(.inputs.arm)"' "$CACHE/gates/quant_topk.json" 2>/dev/null)" \
+    "quant_topk gate: baseline xgb_topk, inputs.arm lgbm"
+HTML="$WORK_DIR/evalrep/quant_report.html"
+if grep -q 'id="synthetic-banner"' "$HTML" 2>/dev/null && [[ -s "$WORK_DIR/evalrep/quant_report.json" ]]; then
+    pass "report HTML (with SYNTHETIC banner) and JSON copied to --report-dir"
+else
+    fail "report HTML (with SYNTHETIC banner) and JSON copied to --report-dir"
+fi
+if ! grep -qiE '<script|https?://' "$HTML" 2>/dev/null; then
+    pass "report HTML is self-contained (no script, no external URL)"
+else
+    fail "report HTML is self-contained (no script, no external URL)"
+fi
+assert_equals "SYNTHETIC|false" "$(AGENTS_ENABLED=true agent_gate_get quant_rank | jq -r '"\(.status)|\(.passed)"')" \
+    "agent_gate_get quant_rank -> SYNTHETIC"
+out=$(agents quant status 2>/dev/null)
+assert_equals "false|false" "$(jq -r '"\(.evaluation.go)|\(.gates.quant_rank.passed)"' <<< "$out" 2>/dev/null)" \
+    "quant status: latest evaluation go false, quant_rank gate not passed"
 
 # --- no network ------------------------------------------------------------------
 if [[ ! -s "$NET_LOG" ]]; then
