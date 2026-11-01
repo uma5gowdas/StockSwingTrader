@@ -119,6 +119,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         os.environ["SST_OFFLINE"] = "1"
     if args.as_of and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", args.as_of):
         return error({"error": "invalid_as_of", "detail": "use YYYY-MM-DD"})
+    # Agent-layer settings from config.sh (e.g. AGENT_CACHE_DIR) must reach the
+    # modules that read os.environ, so writer and bash reader agree.
+    from agents.config import apply_config_settings
+
+    apply_config_settings()
 
     agent, command = args.agent, args.command
     if agent is None or (agent == "status" and command is None):

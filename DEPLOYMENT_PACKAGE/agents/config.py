@@ -142,6 +142,42 @@ def load_config(env: Optional[Dict[str, str]] = None) -> Config:
     return Config(values)
 
 
+# Agent-layer settings defined in the config.template.sh "Agent layer" block.
+# Some Python modules read them from os.environ (cache root, data fallback,
+# staleness, LLM provider/budget); apply_config_settings() copies the
+# effective values there so a value set in config.sh is honoured by both the
+# Python writer and the bash reader (lib/agent_adapter.sh). Other AGENT_* /
+# LLM_* / GATE_* names stay environment-only.
+TEMPLATE_SETTINGS = (
+    "AGENTS_ENABLED",
+    "AGENT_BARS_ADJUSTMENT",
+    "AGENT_BARS_FEED",
+    "AGENT_CACHE_DIR",
+    "AGENT_DATA_FALLBACK",
+    "AGENT_FUNDAMENTAL_WEIGHT",
+    "AGENT_GATE_MAX_AGE_DAYS",
+    "AGENT_MARKET_WEIGHT",
+    "AGENT_MAX_AGE_HOURS",
+    "AGENT_MAX_BAR_STALENESS_DAYS",
+    "AGENT_MAX_TOTAL_WEIGHT",
+    "AGENT_QUANT_WEIGHT",
+    "AGENT_TECHNICAL_ENABLED",
+    "LLM_MAX_CALLS_PER_RUN",
+    "LLM_MONTHLY_BUDGET_USD",
+    "LLM_PROVIDER",
+)
+
+
+def apply_config_settings(cfg: Optional[Config] = None) -> None:
+    """Export the effective TEMPLATE_SETTINGS values (config file first, then
+    environment) to os.environ. Non-secret settings only; nothing is printed."""
+    cfg = load_config() if cfg is None else cfg
+    for name in TEMPLATE_SETTINGS:
+        value = cfg.get(name)
+        if value is not None:
+            os.environ[name] = value
+
+
 def endpoint_mode(cfg: Config) -> str:
     """PAPER, LOCAL (loopback stub) or LIVE, like broker_endpoint_mode."""
     url = cfg.get("ALPACA_BASE_URL", "") or ""

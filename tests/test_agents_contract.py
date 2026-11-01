@@ -364,6 +364,26 @@ class CLITests(unittest.TestCase):
         self.assertEqual(p.returncode, 0)
         self.assertEqual(json.loads(p.stdout)["endpoint_mode"], "LIVE")
 
+    def test_agent_settings_in_config_file_reach_the_cli(self):
+        # AGENT_CACHE_DIR set in config.sh must be the dir the Python writer
+        # uses, like lib/agent_adapter.sh (the scan sources config.sh too)
+        cfg_cache = os.path.join(self.tmp, "cfg_cache")
+        with open(self.cfg_file, "a") as fh:
+            fh.write('export AGENT_CACHE_DIR="%s"\nexport LLM_PROVIDER="fake"\n' % cfg_cache)
+        p = self.run_cli("status")
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        out = json.loads(p.stdout)
+        self.assertEqual(out["cache_dir"], cfg_cache)
+        self.assertEqual(out["llm_provider"], "fake")
+
+    def test_template_settings_match_the_config_template(self):
+        from agents.config import TEMPLATE_SETTINGS
+        import re as _re
+
+        with open(os.path.join(PROJECT_DIR, "config.template.sh")) as fh:
+            names = set(_re.findall(r"^export ((?:AGENTS?|LLM)_[A-Z_]+)=", fh.read(), _re.M))
+        self.assertEqual(set(TEMPLATE_SETTINGS), names)
+
 
 if __name__ == "__main__":
     sys.exit(run_tests(sys.modules[__name__]))
