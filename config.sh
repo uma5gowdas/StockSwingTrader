@@ -11,8 +11,8 @@
 # ============================================================================
 # ALPACA API CREDENTIALS (Paper Trading)
 # ============================================================================
-export ALPACA_API_KEY="PK76WBZRA3WVIRGIZTD6SVVOTB"
-export ALPACA_SECRET_KEY="Hgio83rdZWCzGqRZF8ABqvQgFmnL5xREsj6hw2ecQMxj"
+export ALPACA_API_KEY="PK2VHJFH73VK5YSUVCCLWDDJCK"
+export ALPACA_SECRET_KEY="8dEK3aaAGJg5gbXakgfJ1Ab6oDgGvpLwBvSeDTz3rYzH"
 export ALPACA_BASE_URL="https://paper-api.alpaca.markets"  # Paper trading
 # export ALPACA_BASE_URL="https://api.alpaca.markets"      # Live trading (use with caution!)
 
@@ -134,3 +134,7 @@ export DEFAULT_STRATEGY="mean_reversion"
 export DEFAULT_RISK_LEVEL="moderate"
 export SUPPORTED_STRATEGIES="mean_reversion trend_follow both"
 export SUPPORTED_RISK_LEVELS="conservative moderate aggressive"
+
+# Macro data (FRED, free key) and SEC EDGAR fair-access identifier
+export FRED_API_KEY="eee7a44c5d5514b4e4fbebd13b7ba43c"
+export SEC_USER_AGENT="Umashankar Mallikarjunaiaha uma.stock.trade@gmail.com"
