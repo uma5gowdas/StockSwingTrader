@@ -1,6 +1,6 @@
 # StockSwingTrader v6.3 - Test Report
 
-**Generated:** 2026-10-31 02:04:19  
+**Generated:** 2026-10-31 18:35:25  
 **Command:** `bash tests/test_runner.sh`  
 **Result:** ✅ All suites passed
 
@@ -8,9 +8,9 @@
 
 | Metric | Value |
 |--------|-------|
-| Suites | 14 (14 passed, 0 failed) |
-| Total Tests | 468 |
-| Tests Passed | **468** |
+| Suites | 15 (15 passed, 0 failed) |
+| Total Tests | 598 |
+| Tests Passed | **598** |
 | Tests Failed | **0** |
 | Success Rate | 100% |
 
@@ -18,20 +18,21 @@
 
 | Suite | Status | Time | Details |
 |-------|--------|------|---------|
-| ML Predictor | ✅ PASS | 25146ms | 29 passed, 0 failed |
-| Regime Weighting | ✅ PASS | 31448ms | 30 passed, 0 failed |
-| Kalman Filter | ✅ PASS | 3182ms | 18 passed, 0 failed |
-| Backtest | ✅ PASS | 7946ms | 34 passed, 0 failed |
-| ML Scoring Integration | ✅ PASS | 35325ms | 29 passed, 0 failed |
-| Regime Detector | ✅ PASS | 32477ms | 20 passed, 0 failed |
+| ML Predictor | ✅ PASS | 32040ms | 29 passed, 0 failed |
+| Regime Weighting | ✅ PASS | 34346ms | 30 passed, 0 failed |
+| Kalman Filter | ✅ PASS | 3363ms | 18 passed, 0 failed |
+| Backtest | ✅ PASS | 8160ms | 34 passed, 0 failed |
+| ML Scoring Integration | ✅ PASS | 38342ms | 29 passed, 0 failed |
+| Regime Detector | ✅ PASS | 29764ms | 20 passed, 0 failed |
 | Scoring Integration (Python) | ✅ PASS | 106ms | 32 passed, 0 failed |
-| Dashboard Components | ✅ PASS | 1875ms | 27 passed, 0 failed |
-| Backend API | ✅ PASS | 774ms | 17 passed, 0 failed |
-| Kelly Sizing & Risk Budget | ✅ PASS | 6445ms | 51 passed, 0 failed |
-| Sentiment (deterministic) | ✅ PASS | 3905ms | 36 passed, 0 failed |
-| MiroFish Cache Adapter | ✅ PASS | 14341ms | 42 passed, 0 failed |
-| Phase 1 Integration (CLI) | ✅ PASS | 125740ms | 32 passed, 0 failed |
-| No Silent Fake Data | ✅ PASS | 96287ms | 71 passed, 0 failed |
+| Dashboard Components | ✅ PASS | 2277ms | 27 passed, 0 failed |
+| Backend API | ✅ PASS | 716ms | 17 passed, 0 failed |
+| Kelly Sizing & Risk Budget | ✅ PASS | 5967ms | 51 passed, 0 failed |
+| Sentiment (deterministic) | ✅ PASS | 3413ms | 36 passed, 0 failed |
+| MiroFish Cache Adapter | ✅ PASS | 14523ms | 42 passed, 0 failed |
+| Phase 1 Integration (CLI) | ✅ PASS | 124980ms | 32 passed, 0 failed |
+| No Silent Fake Data | ✅ PASS | 92384ms | 71 passed, 0 failed |
+| Broker Commands (stubbed) | ✅ PASS | 28236ms | 130 passed, 0 failed |
 
 Counts are taken from each suite's own summary output. A suite passes only
 when it exits 0 with at least one passed test and zero failures.
@@ -53,6 +54,8 @@ when it exits 0 with at least one passed test and zero failures.
 | Sentiment (deterministic) | tests/test_sentiment.sh | bash | lib/sentiment.sh (news keyword classifier, unavailable sources, local Finnhub stub), legacy sentiment sentinel |
 | MiroFish Cache Adapter | tests/test_mirofish_adapter.sh | bash | lib/mirofish_adapter.sh cache statuses, legacy and v2 blending, no network calls |
 | Phase 1 Integration (CLI) | tests/test_phase1_integration.sh | bash | StockSwingTrader_Agent.sh --kelly/--mirofish/--phase1, help, --backtest syntax, MiroFish-enabled timing |
+| No Silent Fake Data | tests/test_no_fake_data.sh | bash | data_source rules with yfinance stubs (no data, error, fixture) |
+| Broker Commands (stubbed) | tests/test_broker_commands.sh | bash | --check-account/--view-positions/--buy/--sell and deprecated aliases against a local Alpaca stub, Robinhood with stub functions, confirmation yes/no, invalid input, --ml/--kalman loading, libs keep SCRIPT_DIR |
 
 ## Environment
 

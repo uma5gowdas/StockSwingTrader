@@ -12,14 +12,14 @@
 # - 20% weight: Volume/Trend confirmation (OBV + Kalman filtered)
 # ============================================================================
 
-# Source integrated modules
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/ml_predictor.sh" 2>/dev/null || true
-source "${SCRIPT_DIR}/regime_weighting.sh" 2>/dev/null || true
-source "${SCRIPT_DIR}/kalman_filter.sh" 2>/dev/null || true
-# Optional MiroFish cache adapter (Phase 1 port). Uses its own dir variable so
-# the SCRIPT_DIR semantics above are left unchanged.
+# Source integrated modules. This file is sourced by the agent and by tests,
+# so it uses its own dir variable and never touches the caller's SCRIPT_DIR.
+# calculate_confluence_score_v2 runs "$SCORING_LIB_DIR/ml_predictor.sh".
 SCORING_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCORING_LIB_DIR}/ml_predictor.sh" 2>/dev/null || true
+source "${SCORING_LIB_DIR}/regime_weighting.sh" 2>/dev/null || true
+source "${SCORING_LIB_DIR}/kalman_filter.sh" 2>/dev/null || true
+# Optional MiroFish cache adapter (Phase 1 port)
 source "${SCORING_LIB_DIR}/mirofish_adapter.sh" 2>/dev/null || true
 
 # ============================================================================
@@ -361,7 +361,7 @@ calculate_confluence_score_v2() {
             alarm $t;
             waitpid($pid, 0);
             exit($? >> 8);' "${ML_TIMEOUT_SECONDS:-5}" \
-            bash "${SCRIPT_DIR}/ml_predictor.sh" predict "$symbol" 5 </dev/null 2>/dev/null \
+            bash "${SCORING_LIB_DIR}/ml_predictor.sh" predict "$symbol" 5 </dev/null 2>/dev/null \
             || echo "{\"error\": \"timeout_or_failure\"}")
         
         if ! echo "$ml_result" | jq -e 'type == "object"' >/dev/null 2>&1; then

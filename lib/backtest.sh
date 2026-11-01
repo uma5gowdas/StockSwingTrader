@@ -22,7 +22,9 @@
 
 set -o pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# File-specific dir variable: this file is sourced, so it must not change the
+# caller's SCRIPT_DIR.
+BACKTEST_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ============================================================================
 # Configuration
@@ -192,7 +194,7 @@ run_backtest_engine() {
     fi
     
     # Call Python backtest engine
-    python3 "$SCRIPT_DIR/backtest_engine.py" "$config_file"
+    python3 "$BACKTEST_LIB_DIR/backtest_engine.py" "$config_file"
 }
 
 # ============================================================================

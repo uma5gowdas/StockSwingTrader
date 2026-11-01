@@ -63,6 +63,7 @@ add_test "Sentiment (deterministic)" "${SCRIPT_DIR}/test_sentiment.sh"
 add_test "MiroFish Cache Adapter" "${SCRIPT_DIR}/test_mirofish_adapter.sh"
 add_test "Phase 1 Integration (CLI)" "${SCRIPT_DIR}/test_phase1_integration.sh"
 add_test "No Silent Fake Data" "${SCRIPT_DIR}/test_no_fake_data.sh"
+add_test "Broker Commands (stubbed)" "${SCRIPT_DIR}/test_broker_commands.sh"
 
 # ============================================================================
 # Utility Functions
@@ -238,6 +239,8 @@ when it exits 0 with at least one passed test and zero failures.
 | Sentiment (deterministic) | tests/test_sentiment.sh | bash | lib/sentiment.sh (news keyword classifier, unavailable sources, local Finnhub stub), legacy sentiment sentinel |
 | MiroFish Cache Adapter | tests/test_mirofish_adapter.sh | bash | lib/mirofish_adapter.sh cache statuses, legacy and v2 blending, no network calls |
 | Phase 1 Integration (CLI) | tests/test_phase1_integration.sh | bash | StockSwingTrader_Agent.sh --kelly/--mirofish/--phase1, help, --backtest syntax, MiroFish-enabled timing |
+| No Silent Fake Data | tests/test_no_fake_data.sh | bash | data_source rules with yfinance stubs (no data, error, fixture) |
+| Broker Commands (stubbed) | tests/test_broker_commands.sh | bash | --check-account/--view-positions/--buy/--sell and deprecated aliases against a local Alpaca stub, Robinhood with stub functions, confirmation yes/no, invalid input, --ml/--kalman loading, libs keep SCRIPT_DIR |
 
 ## Environment
 

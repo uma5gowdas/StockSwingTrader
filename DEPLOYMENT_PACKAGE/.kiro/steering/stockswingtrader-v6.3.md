@@ -3,7 +3,7 @@
 
 **Version:** 6.3 (`VERSION="6.3"` in `StockSwingTrader_Agent.sh`; the separate `VERSION` file still says v6.2)  
 **Last Updated:** 2026-10-31  
-**Verified against:** commit `532828e` on `main`; the data-source rules ([Data Sources & Synthetic Data](#data-sources--synthetic-data)) and the sections that reference them were re-verified after the no-fake-data change  
+**Verified against:** commit `532828e` on `main`; the data-source rules ([Data Sources & Synthetic Data](#data-sources--synthetic-data)) and the sections that reference them were re-verified after the no-fake-data change; issue 1, the broker flags and [Main Agent Flags](#main-agent-flags) were re-verified after the broker/path fix  
 **Purpose:** Accurate guide for future AI agents to understand, enhance, and maintain the codebase. Every command, function, path, port, weight and threshold below was checked against the code. Where the code does not do something, this guide says so.
 
 > Not financial advice. The ML model is trained on synthetic data (every prediction says `"model_training_data": "synthetic"`). Synthetic prices/features are used only on explicit opt-in (`SST_OFFLINE=1`, `SST_ALLOW_SYNTHETIC=1`, `--synthetic`) and are then marked `"data_source": "synthetic"`. Paper-trade only.
@@ -33,11 +33,10 @@
 
 The v6.3 enhancement modules work when you call them directly (sourced as libraries or run as scripts). The main agent does **not** yet run them. Known issues at `532828e`, observed by running the commands:
 
-1. **Path bug.** `lib/scoring.sh` line 16 sets `SCRIPT_DIR` to `lib/`. The agent sources `scoring.sh`, so every later `$SCRIPT_DIR/lib/...` lookup becomes `lib/lib/...`. Effects:
-   - *(Fixed: the agent now sources `html_report.sh` via `AGENT_DIR`, so the HTML report is written.)*
-   - `--ml` and `--kalman` log "module not found" and are skipped.
-   - `--backtest` exits 1 with `Backtest module not found: …/lib/lib/backtest.sh`.
-   - Broker flags (`--check-account`, `--view-positions`, `--buy`, `--sell`) fail to load the broker module.
+1. *(Fixed.)* **Path bug.** `lib/scoring.sh`, `lib/ml_predictor.sh`, `lib/backtest.sh` and `lib/robinhood_broker.sh` used to set `SCRIPT_DIR` to `lib/` when sourced, so the agent's `$SCRIPT_DIR/lib/...` lookups became `lib/lib/...`. Each lib now uses its own dir variable (`SCORING_LIB_DIR`, `ML_PREDICTOR_DIR`, `BACKTEST_LIB_DIR`, `ROBINHOOD_LIB_DIR`) and the agent resolves every project path through `AGENT_DIR` (`SCRIPT_DIR` stays an alias of it). `lib/alpaca_broker.sh` no longer turns on `errexit` in the caller. Now working:
+   - HTML report, `--backtest`, `--ml` and `--kalman` (the last two load their module; CLI scoring still ignores them, issue 3).
+   - Broker flags `--check-account`, `--view-positions`, `--buy`, `--sell` and the deprecated `--alpaca`, `--alpaca-status`, `--place-buy`, `--place-sell` (see [Main Agent Flags](#main-agent-flags)). Use Alpaca **paper** trading only (`ALPACA_BASE_URL=https://paper-api.alpaca.markets`). `--buy`/`--sell` validate the symbol (1–5 uppercase letters) and quantity (> 0) before contacting the broker, price the order from Alpaca's latest trade (`alpaca_get_quote`, falls back to Yahoo) and send nothing unless you type exactly `yes`.
+   - Robinhood (`--broker robinhood`) loads, but is only tested with stub functions. It needs `ROBINHOOD_CLIENT_ID`/`ROBINHOOD_CLIENT_SECRET` in the environment or `config.sh` (`config.robinhood.sh` is not sourced), and its first-run OAuth wait uses `timeout`, which macOS lacks. It trades real money; not verified.
 2. **Missing modules.** `--regime-adapt` looks for `lib/regime_adaptive.sh` and `--dashboard` looks for `lib/dashboard.sh`. Neither exists. The real regime modules are `lib/regime_detector.sh` and `lib/regime_weighting.sh`; there is no dashboard launcher.
 3. **Scoring not wired in.** The CLI always calls the legacy `calculate_confluence_score` (80% technical average, 20% sentiment). The ML/regime/Kalman engine `calculate_confluence_score_v2` (15/35/30/20) is only called by tests and `examples/ml_scoring_integration_example.sh`.
 4. *(Fixed.)* **Demo data.** `fetch_stock_ohlcv` now fetches 60 daily bars from yfinance (`"data_source":"yfinance"`). The random demo series is generated only on the synthetic opt-in and is marked `"data_source":"synthetic"`. Without data and without the opt-in the symbol is skipped; with 0 symbols analyzed the CLI exits 1 and writes no report (it used to count log lines as an analysis and print "Analysis Complete!").
@@ -112,10 +111,10 @@ Still not real data (not fixed by this change): OBV score in `score_stock` is a 
 ```
 StockSwingTrader_Agent.sh (Main Orchestrator)
 │
-├── config.template.sh          (always sourced; config.sh is NOT sourced by the agent)
+├── config.template.sh          (always sourced; then config.sh or SST_CONFIG_FILE if present)
 ├── lib/indicators.sh           RSI, MACD, Bollinger, ATR, OBV, Stochastic, Williams %R, SMA, EMA
 ├── lib/sentiment.sh            Twitter/Reddit/StockTwits placeholders (randomised)
-├── lib/scoring.sh              Indicator scores + confluence (resets SCRIPT_DIR, see issue 1)
+├── lib/scoring.sh              Indicator scores + confluence (own dir var SCORING_LIB_DIR)
 │   ├── lib/ml_predictor.sh  ── lib/ml_inference.py ── lib/models/xgboost_predictor.pkl
 │   ├── lib/regime_weighting.sh
 │   │   ├── lib/regime_detector.sh
@@ -124,8 +123,8 @@ StockSwingTrader_Agent.sh (Main Orchestrator)
 │   │   │   └── lib/kalman_filter.sh
 │   │   └── lib/trading_thresholds.sh
 │   └── lib/kalman_filter.sh ── lib/kalman_inference.py
-├── lib/html_report.sh          generate_html_report (not found at runtime, issue 1)
-├── lib/backtest.sh  ── lib/backtest_engine.py      (--backtest; not found at runtime, issue 1)
+├── lib/html_report.sh          generate_html_report
+├── lib/backtest.sh  ── lib/backtest_engine.py      (--backtest)
 ├── lib/alpaca_broker.sh | lib/robinhood_broker.sh   (--broker; loaded after arg parsing)
 │
 │ Not sourced by the agent:
@@ -143,7 +142,7 @@ StockSwingTrader_Agent.sh (Main Orchestrator)
 
 | Module | File | Language | Key Functions / Entry Points |
 |--------|------|----------|------------------------------|
-| Main Agent | `StockSwingTrader_Agent.sh` | Bash | `main`, `usage`, `display_version`, `analyze_stock`, `fetch_stock_ohlcv`, `calculate_all_indicators`, `score_stock`, `generate_report`, `init_ml_predictor`, `init_regime_adaptive`, `init_kalman_filter`, `init_dashboard`, `init_all_enhancements`, `load_broker_module` |
+| Main Agent | `StockSwingTrader_Agent.sh` | Bash | `main`, `usage`, `display_version`, `analyze_stock`, `fetch_stock_ohlcv`, `calculate_all_indicators`, `score_stock`, `generate_report`, `init_ml_predictor`, `init_regime_adaptive`, `init_kalman_filter`, `init_dashboard`, `init_all_enhancements`, `load_broker_module`, `broker_connect`, `show_broker_account`, `show_broker_positions`, `validate_order_args`, `get_order_price`, `place_buy_order`, `place_sell_order` |
 | Indicators | `lib/indicators.sh` | Bash | `calc_rsi`, `calc_macd`, `calc_bollinger_bands`, `calc_atr`, `calc_obv`, `calc_stochastic`, `calc_williams_r`, `calc_sma`, `calc_ema` |
 | Extra indicators | `lib/indicators_new.sh` | Bash | `calc_rsi_divergence`, `calc_vwma`, `calc_momentum`, `calc_all_new_indicators` |
 | Kalman Filter | `lib/kalman_filter.sh` | Bash | `apply_kalman_filter`, `apply_kalman_filter_fast`, `calc_residual_volatility`, `get_kalman_filtered_prices` |
@@ -162,7 +161,7 @@ StockSwingTrader_Agent.sh (Main Orchestrator)
 | Trade Journal | `lib/trade_journal.sh` | Bash | `log_trade_entry`, `close_trade`, `query_trade_journal`, `show_journal`, `export_backtest_data`, `get_strategy_stats` |
 | Backtesting | `lib/backtest.sh` | Bash | `backtest_strategy`, `backtest_multi_symbol`, `run_backtest_engine`, `generate_backtest_reports`, `generate_portfolio_summary` (library only, no CLI) |
 | Backtest Engine | `lib/backtest_engine.py` | Python | `DataFetcher`, `Indicators`, `MeanReversionStrategy`, `TrendFollowStrategy`, `BacktestEngine`; CLI: `backtest_engine.py CONFIG_JSON` |
-| Alpaca Broker | `lib/alpaca_broker.sh` (+ `lib/alpaca_wrappers.sh`) | Bash | `alpaca_init`, `alpaca_get_account`, `alpaca_get_positions`, `alpaca_place_order`, `alpaca_get_order_status`, `alpaca_cancel_order` |
+| Alpaca Broker | `lib/alpaca_broker.sh` (+ `lib/alpaca_wrappers.sh`) | Bash | `alpaca_init`, `alpaca_get_account`, `alpaca_get_positions` (JSON array), `alpaca_place_order`, `alpaca_get_quote` (latest trade, `last_price`), `alpaca_get_order_status`, `alpaca_cancel_order` |
 | Robinhood Broker | `lib/robinhood_broker.sh` (+ `robinhood_oauth.sh`, `robinhood_mcp_direct.sh`) | Bash | `robinhood_init`, `robinhood_get_account`, `robinhood_get_positions`, `robinhood_place_order`, `robinhood_get_quote` |
 | Reports | `lib/html_report.sh` | Bash | `generate_html_report JSON OUTPUT_FILE` |
 | Backend API | `backend/server.js` | Node.js/Express | `/api/health`, `/api/portfolio`, `/api/quotes/:symbol`, `/api/signals/:symbol`, `/api/indicators/:symbol`, `/api/trades`, `/api/stats`, `GET`/`POST /api/settings`, `/api/backtest` |
@@ -196,7 +195,7 @@ Input: --symbols AAPL,MSFT  (or --top-10, --watchlist FILE, or DEFAULT_WATCHLIST
          analysis has data_source "synthetic")
 ```
 
-ML, regime and Kalman are **not** in this path (issues 1–3).
+ML, regime and Kalman are **not** in this path (issue 3; `--ml`/`--kalman` only load the modules).
 
 ### Library pipeline (`calculate_confluence_score_v2`, used by tests/examples)
 
@@ -631,7 +630,7 @@ v2 (library):  confluence = ML × 0.15 + RegimeWeighted × 0.35 + Technical × 0
   VolumeTrend  OBV blended with Kalman trend (75 up / 25 down, 20% weight)
 ```
 
-To wire v2 into the CLI: fix `SCRIPT_DIR` in `lib/scoring.sh` (use a local variable), compute MR/TF scores, regime and Kalman trend in `analyze_stock`, then call `calculate_confluence_score_v2` instead of `calculate_confluence_score`.
+To wire v2 into the CLI: compute MR/TF scores, regime and Kalman trend in `analyze_stock`, then call `calculate_confluence_score_v2` instead of `calculate_confluence_score`.
 
 ---
 
@@ -639,7 +638,7 @@ To wire v2 into the CLI: fix `SCRIPT_DIR` in `lib/scoring.sh` (use a local varia
 
 From the `case` parser in `main()` and `./StockSwingTrader_Agent.sh --help`:
 
-| Flag | Effect | Works at `532828e`? |
+| Flag | Effect | Works? (after the broker/path fix) |
 |---|---|---|
 | `--symbols A,B` | Analyze listed symbols | Runs on yfinance data; exits 1 if no symbol had data (synthetic only on opt-in) |
 | `--watchlist FILE` | Symbols from file | Needs bash 4 (issue 6) |
@@ -648,15 +647,15 @@ From the `case` parser in `main()` and `./StockSwingTrader_Agent.sh --help`:
 | `--debug` | `DEBUG_MODE=true` | Yes |
 | `--version` | Print version/features | Yes |
 | `--help` | Usage | Yes |
-| `--ml` | Source `lib/ml_predictor.sh` | Skipped (issue 1) |
+| `--ml` | Source `lib/ml_predictor.sh` | Loads; CLI scoring does not use it yet (issue 3) |
 | `--regime-adapt` | Source `lib/regime_adaptive.sh` | Skipped, file missing (issue 2) |
-| `--kalman` | Source `lib/kalman_filter.sh` | Skipped (issue 1) |
+| `--kalman` | Source `lib/kalman_filter.sh` | Loads; CLI scoring does not use it yet (issue 3) |
 | `--dashboard` | Source `lib/dashboard.sh`, call `start_dashboard_servers` | Skipped, file missing (issue 2) |
 | `--full` | `--ml --regime-adapt --kalman --dashboard` | Same as above |
 | `--broker alpaca\|robinhood` | Broker choice (default `alpaca`) | — |
-| `--check-account`, `--view-positions` | Broker account/positions | Module not found (issue 1) |
-| `--buy SYMBOL QTY`, `--sell SYMBOL QTY` | Place order with confirmation | Module not found (issue 1) |
-| `--alpaca`, `--place-buy`, `--place-sell`, `--alpaca-status` | Deprecated Alpaca aliases | Same |
+| `--check-account`, `--view-positions` | Broker account (portfolio value, cash, buying power, status; no account number) / open positions | Yes (Alpaca paper verified live; Robinhood stub-tested only) |
+| `--buy SYMBOL QTY`, `--sell SYMBOL QTY` | Market order after a `yes` confirmation on stdin | Yes (tested against a local Alpaca stub only); invalid symbol/qty or missing args exit 1 before any broker call; any answer other than `yes` cancels |
+| `--alpaca`, `--place-buy`, `--place-sell`, `--alpaca-status` | Deprecated Alpaca aliases (`--alpaca` alone shows account + positions) | Yes, same as above |
 | `--backtest SYMBOLS` | Run `backtest_multi_symbol` | Yes (`AGENT_DIR`); non-zero exit without market data |
 | `--start DATE`, `--end DATE` | Backtest dates (defaults: 2 years ago, today) | — |
 | `--train-pct PCT` | Train split (default 80) | — |
@@ -667,8 +666,13 @@ Verified examples:
 ./StockSwingTrader_Agent.sh --help
 ./StockSwingTrader_Agent.sh --version
 ./StockSwingTrader_Agent.sh --symbols AAPL,MSFT --output-dir /tmp/sst_reports
-./StockSwingTrader_Agent.sh --backtest AAPL --start 2023-01-01 --end 2023-12-31   # correct syntax; fails until issue 1 is fixed
+./StockSwingTrader_Agent.sh --backtest AAPL --start 2023-01-01 --end 2023-12-31   # non-zero exit without market data
+./StockSwingTrader_Agent.sh --check-account      # Alpaca paper keys in config.sh
+./StockSwingTrader_Agent.sh --view-positions
+./StockSwingTrader_Agent.sh --buy AAPL 1         # prints a confirmation; type "yes" to send
 ```
+
+Broker settings: `ALPACA_API_KEY`, `ALPACA_SECRET_KEY` (or `ALPACA_OAUTH_TOKEN`), `ALPACA_BASE_URL` (trading API, default paper), `ALPACA_DATA_URL` (market data, default `https://data.alpaca.markets`), `ALPACA_DATA_FEED` (default `iex`). `SST_CONFIG_FILE` replaces `config.sh` as the local config (the broker tests use it to point at a stub).
 
 The agent logs to `LOG_FILE` (default `logs/agent.log`, relative to the current directory) and creates `logs/`.
 
@@ -689,11 +693,11 @@ pip install xgboost pandas numpy scikit-learn scipy joblib filterpy requests
 ```
 
 Configuration:
-- `config.template.sh` is tracked, has no secrets, and is the only config the agent sources. Its placeholder `API_KEY_ALPHA_VANTAGE`/`API_KEY_FINNHUB`/`API_KEY_NEWSAPI` values override anything exported earlier; Alpaca keys are read from the environment.
+- `config.template.sh` is tracked and has no secrets. The agent sources it, then `config.sh` (or `SST_CONFIG_FILE`) if present, whose values win. Its placeholder `API_KEY_ALPHA_VANTAGE`/`API_KEY_FINNHUB`/`API_KEY_NEWSAPI` values override anything exported earlier; Alpaca keys are read from the environment.
 - `config.sh` and `config.robinhood.sh` are untracked (in `.gitignore`). Create yours with `cp config.template.sh config.sh` and fill in keys. The backend Settings API and the helper scripts (`RUN_TRADING.sh`, `CHECK_ACCOUNT.sh`, `CHECK_ORDERS.sh`) read `config.sh`.
 - To edit `RISK_PER_TRADE`, `MIN_CONFLUENCE_SCORE` and `TRADING_ENABLED` from the dashboard, add `export` lines for them to `config.sh` first.
 
-Environment variables used by the code: `LOG_FILE`, `DEBUG_MODE`, `BROKER_CHOICE`, `ML_TIMEOUT_SECONDS`, `SST_OFFLINE`, `SST_ALLOW_SYNTHETIC`, `REGIME_CACHE_DIR`, `BACKTEST_OUTPUT_DIR`, `DEBUG_BACKTEST`, `PORT`, `SST_BASE_PATH`, `SST_LOG_FILE`, `VITE_API_BASE_URL`.
+Environment variables used by the code: `LOG_FILE`, `DEBUG_MODE`, `BROKER_CHOICE`, `ML_TIMEOUT_SECONDS`, `SST_OFFLINE`, `SST_ALLOW_SYNTHETIC`, `REGIME_CACHE_DIR`, `BACKTEST_OUTPUT_DIR`, `DEBUG_BACKTEST`, `SST_CONFIG_FILE`, `ALPACA_API_KEY`, `ALPACA_SECRET_KEY`, `ALPACA_BASE_URL`, `ALPACA_DATA_URL`, `ALPACA_DATA_FEED`, `PORT`, `SST_BASE_PATH`, `SST_LOG_FILE`, `VITE_API_BASE_URL`.
 
 ---
 
@@ -701,7 +705,7 @@ Environment variables used by the code: `LOG_FILE`, `DEBUG_MODE`, `BROKER_CHOICE
 
 ### Code Style & Conventions
 
-1. **Bash:** `#!/bin/bash`, `set -o pipefail` (agent and `backtest.sh`), `UPPERCASE` globals, `lowercase_with_underscores` functions. Library files are sourced, so do not reassign shared globals such as `SCRIPT_DIR` at file scope (that is the cause of issue 1); use a file-specific name. Document functions with a comment block (description, args, returns, example). Remember macOS ships bash 3.2: avoid `mapfile`, associative arrays and `${var,,}`, or require bash 4 explicitly.
+1. **Bash:** `#!/bin/bash`, `set -o pipefail` (agent and `backtest.sh`), `UPPERCASE` globals, `lowercase_with_underscores` functions. Library files are sourced, so do not reassign shared globals such as `SCRIPT_DIR` or `LIB_DIR` at file scope (that was the cause of issue 1; `tests/test_broker_commands.sh` checks every `lib/*.sh`); use a file-specific name. Do not `set -o errexit` in a sourced file. Document functions with a comment block (description, args, returns, example). Remember macOS ships bash 3.2: avoid `mapfile`, associative arrays and `${var,,}`, or require bash 4 explicitly.
 2. **Python:** PEP 8, type hints where practical, docstrings.
 3. **JSON output:** modules print a JSON object on success and `{"error": "..."}` on failure (there is no common `status`/`code` envelope). Timestamps are ISO 8601 UTC (`date -u +%Y-%m-%dT%H:%M:%SZ`).
 4. **Backend:** pass arguments as arrays to `execFile`; validate symbols and settings before use.
@@ -709,7 +713,7 @@ Environment variables used by the code: `LOG_FILE`, `DEBUG_MODE`, `BROKER_CHOICE
 ### Module Development Workflow
 
 1. Create `lib/my_module.sh`, add a header and functions; if it should run as a script, add a `if [[ "${BASH_SOURCE[0]}" == "${0}" ]]` dispatcher like `lib/ml_predictor.sh`.
-2. Integrate: `source "$SCRIPT_DIR/lib/my_module.sh"` in the agent, add a flag in the `case` parser in `main()`, document it in `usage()`.
+2. Integrate: `source "$AGENT_DIR/lib/my_module.sh"` in the agent, add a flag in the `case` parser in `main()`, document it in `usage()`.
 3. Add a test script in `tests/` and register it in `tests/test_runner.sh` with `add_test "Name" "${SCRIPT_DIR}/test_my_module.sh"`.
 
 ### Goals (not measured)
@@ -720,7 +724,7 @@ These are targets, not verified benchmarks: under 5 s per symbol for the full pi
 
 ## Testing
 
-`bash tests/test_runner.sh` runs 14 suites offline (`SST_OFFLINE=1`) and writes `.agents/tasks/test-report.md`. Last verified result: **14 suites, 468/468 passing**, both in the working copy and on a fresh clone that trained its own model (`python3 lib/train_ml_model.py`, xgboost 3.4.1 / numpy 2.5.4). The ML Scoring Integration suite does not depend on what the trained model predicts: it checks the predictor's contract (schema, confidence range, determinism) and runs the STRONG_BUY/STRONG_SELL threshold tests with a stub predictor.
+`bash tests/test_runner.sh` runs 15 suites offline (`SST_OFFLINE=1`) and writes `.agents/tasks/test-report.md`. Last verified result: **15 suites, 598/598 passing** after the broker/path fix (before it: 14 suites, 468/468, also on a fresh clone that trained its own model with `python3 lib/train_ml_model.py`, xgboost 3.4.1 / numpy 2.5.4). The ML Scoring Integration suite does not depend on what the trained model predicts: it checks the predictor's contract (schema, confidence range, determinism) and runs the STRONG_BUY/STRONG_SELL threshold tests with a stub predictor.
 
 | Suite | File | Runner |
 |---|---|---|
@@ -738,13 +742,17 @@ These are targets, not verified benchmarks: under 5 s per symbol for the full pi
 | MiroFish Cache Adapter | `tests/test_mirofish_adapter.sh` | bash |
 | Phase 1 Integration (CLI) | `tests/test_phase1_integration.sh` | bash |
 | No Silent Fake Data | `tests/test_no_fake_data.sh` | bash |
+| Broker Commands (stubbed) | `tests/test_broker_commands.sh` | bash |
 
 `tests/test_no_fake_data.sh` covers the [data-source rules](#data-sources--synthetic-data). It sets `SST_OFFLINE=0` itself and simulates market data with yfinance stubs put first on `PYTHONPATH`: `tests/stubs/yfinance_empty` (no data), `tests/stubs/yfinance_error` (fetch raises) and `tests/stubs/yfinance_fixture` (deterministic real-shaped bars). No network is used.
+
+`tests/test_broker_commands.sh` never contacts a real broker: Alpaca calls go to `tests/stubs/alpaca_stub_server.py` on 127.0.0.1 through a stub config (`SST_CONFIG_FILE`), Robinhood is exercised with stub functions, and `HOME` is a temp dir. It covers all broker flags and aliases, `yes`/`no`/EOF confirmation (no order on anything but `yes`), invalid symbol/qty, a broker rejection, missing credentials, `--ml`/`--kalman` loading, and that no `lib/*.sh` changes the caller's `SCRIPT_DIR`/`LIB_DIR`/`AGENT_DIR` or enables `errexit`.
 
 Other test scripts not in the runner: `tests/test_alpaca_broker.sh`, `tests/test_robinhood_broker.sh`, `tests/test_regime_simple.sh`.
 
 ```bash
-bash tests/test_runner.sh               # all 14 suites
+bash tests/test_runner.sh               # all 15 suites
+bash tests/test_broker_commands.sh      # broker flags against local stubs
 bash tests/test_ml_scoring_integration.sh
 npm test --prefix backend               # tests/test_backend.js
 npm test --prefix frontend              # tests/test_dashboard.js
@@ -759,7 +767,10 @@ There is no `tests/test_indicators.sh`, `tests/validate_config.sh`, `DEPLOYMENT_
 
 | Issue | Root Cause | Solution |
 |-------|-----------|----------|
-| `WARNING: html_report.sh not found`, `lib/lib/...` in errors | `SCRIPT_DIR` reset in `lib/scoring.sh` | Known issue 1; call modules directly until fixed |
+| `lib/lib/...` in errors, `Failed to load alpaca broker module` | A lib file reassigning `SCRIPT_DIR` (fixed issue 1) | Use a file-specific dir variable in the lib; run `bash tests/test_broker_commands.sh` |
+| `Missing Alpaca API credentials` | No `ALPACA_API_KEY`/`ALPACA_SECRET_KEY` in the environment or `config.sh` | Add paper keys to `config.sh` |
+| `Invalid symbol` / `Invalid quantity` on `--buy`/`--sell` | Symbol not 1–5 uppercase letters, or qty not > 0 | e.g. `--buy AAPL 1` |
+| `Failed to get current price` on `--buy`/`--sell` | No Alpaca latest trade and Yahoo failed (or `SST_OFFLINE=1`) | Check `ALPACA_DATA_URL`/feed and network |
 | `--regime-adapt` / `--dashboard` "module not found" | `regime_adaptive.sh` / `dashboard.sh` do not exist | Use `lib/regime_weighting.sh`; start backend/frontend with npm |
 | `No market data for AAPL` / `Skipping AAPL - unable to fetch data` | yfinance missing, offline or no data, and no synthetic opt-in | Install yfinance / check network; or `SST_ALLOW_SYNTHETIC=1` for marked demo data |
 | `Unknown option: 2022-01-01` | Positional backtest dates | Use `--start` / `--end` |
@@ -794,7 +805,7 @@ python3 -c "import joblib; m = joblib.load('lib/models/xgboost_predictor.pkl'); 
 
 None of these exist in the code yet.
 
-**Fix first:** the nine known issues above (path bug, missing `regime_adaptive.sh`/`dashboard.sh`, wire `calculate_confluence_score_v2` into the CLI, real price data, backend sub-commands, `--watchlist` on bash 3.2, configurable paths, ML batch parsing, `VERSION` file).
+**Fix first:** the open known issues above (missing `regime_adaptive.sh`/`dashboard.sh`, wire `calculate_confluence_score_v2` into the CLI, real price data, backend sub-commands, `--watchlist` on bash 3.2, configurable paths, ML batch parsing, `VERSION` file).
 
 **Short-term:** real market data for the agent and regime detector; training on real data with a CLI; grid search and stops in the backtester; WebSocket updates instead of polling (`ws` is already a backend dependency but unused).
 
@@ -869,8 +880,9 @@ StockSwingTrader-v6.3/
 ├── docs/         STEERING_GUIDE.md (this file), KALMAN_FILTER_GUIDE.md, ROBINHOOD_SETUP.md,
 │                 ALPACA_SETUP_GUIDE.html, STEERING_DEPLOYMENT_SUMMARY.txt
 ├── examples/     ml_scoring_integration_example.sh
-├── tests/        test_runner.sh + 14 registered suites (see Testing), broker tests, mock_data.json,
-│                 stubs/yfinance_{empty,error,fixture}/ (offline yfinance stand-ins)
+├── tests/        test_runner.sh + 15 registered suites (see Testing), broker tests, mock_data.json,
+│                 stubs/yfinance_{empty,error,fixture}/ (offline yfinance stand-ins),
+│                 stubs/alpaca_stub_server.py (local Alpaca API stand-in)
 ├── logs/         agent.log and broker logs (git-ignored)
 └── .agents/tasks/test-report.md      Written by tests/test_runner.sh
 ```
@@ -879,5 +891,5 @@ Copies of this guide that must stay identical: `docs/STEERING_GUIDE.md` (canonic
 
 ---
 
-**Document Last Updated:** 2026-10-30  
+**Document Last Updated:** 2026-10-31  
 **For:** StockSwingTrader v6.3 (commit `532828e`)

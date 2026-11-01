@@ -43,16 +43,16 @@ set -o pipefail
 # Global Configuration
 # ============================================================================
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
-# Project root, captured before any library is sourced: lib/scoring.sh,
-# lib/ml_predictor.sh and lib/backtest.sh reassign SCRIPT_DIR to lib/ when
-# sourced, so new code uses AGENT_DIR instead.
-AGENT_DIR="$SCRIPT_DIR"
+# Project root. All project paths use AGENT_DIR. Library files keep their own
+# file-specific dir variables and do not change SCRIPT_DIR or AGENT_DIR;
+# SCRIPT_DIR is kept as an alias for older scripts.
+AGENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$AGENT_DIR"
 
 # Load configuration template
-if [[ -f "$SCRIPT_DIR/config.template.sh" ]]; then
-    source "$SCRIPT_DIR/config.template.sh"
+if [[ -f "$AGENT_DIR/config.template.sh" ]]; then
+    source "$AGENT_DIR/config.template.sh"
 else
     echo "ERROR: config.template.sh not found" >&2
     exit 2
@@ -61,15 +61,17 @@ fi
 # Load local credentials/overrides (untracked; create with
 # `cp config.template.sh config.sh` and fill in your keys).
 # Sourced after the template so its values replace the placeholders.
-if [[ -f "$SCRIPT_DIR/config.sh" ]]; then
-    source "$SCRIPT_DIR/config.sh"
+# SST_CONFIG_FILE selects another file (tests point it at a stub config so
+# local credentials are never used).
+SST_CONFIG_FILE="${SST_CONFIG_FILE:-$AGENT_DIR/config.sh}"
+if [[ -f "$SST_CONFIG_FILE" ]]; then
+    source "$SST_CONFIG_FILE"
 fi
 
 # Load libraries
-source "$SCRIPT_DIR/lib/indicators.sh" 2>/dev/null || echo "WARNING: indicators.sh not found"
-source "$SCRIPT_DIR/lib/sentiment.sh" 2>/dev/null || echo "WARNING: sentiment.sh not found"
-source "$SCRIPT_DIR/lib/scoring.sh" 2>/dev/null || echo "WARNING: scoring.sh not found"
-# AGENT_DIR: lib/scoring.sh (sourced above) resets SCRIPT_DIR to lib/
+source "$AGENT_DIR/lib/indicators.sh" 2>/dev/null || echo "WARNING: indicators.sh not found"
+source "$AGENT_DIR/lib/sentiment.sh" 2>/dev/null || echo "WARNING: sentiment.sh not found"
+source "$AGENT_DIR/lib/scoring.sh" 2>/dev/null || echo "WARNING: scoring.sh not found"
 source "$AGENT_DIR/lib/html_report.sh" 2>/dev/null || echo "WARNING: html_report.sh not found"
 # Phase 1 (v6.2 port): Kelly sizing + daily risk budget. The MiroFish cache
 # adapter is loaded by lib/scoring.sh.
@@ -136,11 +138,11 @@ log_warn() {
 load_broker_module() {
     case "$BROKER_CHOICE" in
         alpaca)
-            if [[ ! -f "$SCRIPT_DIR/lib/alpaca_broker.sh" ]]; then
-                log_error "Alpaca broker module not found: $SCRIPT_DIR/lib/alpaca_broker.sh"
+            if [[ ! -f "$AGENT_DIR/lib/alpaca_broker.sh" ]]; then
+                log_error "Alpaca broker module not found: $AGENT_DIR/lib/alpaca_broker.sh"
                 return 1
             fi
-            source "$SCRIPT_DIR/lib/alpaca_broker.sh" || {
+            source "$AGENT_DIR/lib/alpaca_broker.sh" || {
                 log_error "Failed to load Alpaca broker module"
                 return 1
             }
@@ -150,15 +152,15 @@ load_broker_module() {
             return 0
             ;;
         robinhood)
-            if [[ ! -f "$SCRIPT_DIR/lib/robinhood_broker.sh" ]]; then
-                log_error "Robinhood broker module not found: $SCRIPT_DIR/lib/robinhood_broker.sh"
+            if [[ ! -f "$AGENT_DIR/lib/robinhood_broker.sh" ]]; then
+                log_error "Robinhood broker module not found: $AGENT_DIR/lib/robinhood_broker.sh"
                 return 1
             fi
-            source "$SCRIPT_DIR/lib/robinhood_oauth.sh" || {
+            source "$AGENT_DIR/lib/robinhood_oauth.sh" || {
                 log_error "Failed to load Robinhood OAuth module"
                 return 1
             }
-            source "$SCRIPT_DIR/lib/robinhood_broker.sh" || {
+            source "$AGENT_DIR/lib/robinhood_broker.sh" || {
                 log_error "Failed to load Robinhood broker module"
                 return 1
             }
@@ -216,10 +218,10 @@ show_broker_account() {
     log_info "Fetching $BROKER_CHOICE account information..."
     
     local get_account_func="${BROKER_PREFIX}get_account"
-    local account_data=$($get_account_func)
-    
-    if [[ -z "$account_data" ]]; then
+    local account_data
+    if ! account_data=$($get_account_func) || [[ -z "$account_data" ]]; then
         log_error "Failed to retrieve account data"
+        [[ -n "$account_data" ]] && echo "$account_data" >&2
         return 1
     fi
     
@@ -229,10 +231,12 @@ show_broker_account() {
     echo "============================================"
     
     if command -v jq &>/dev/null; then
-        echo "Portfolio Value: $(echo "$account_data" | jq -r '.portfolio_value' | xargs printf '\$%.2f')"
-        echo "Cash Balance:    $(echo "$account_data" | jq -r '.cash' | xargs printf '\$%.2f')"
-        echo "Buying Power:    $(echo "$account_data" | jq -r '.buying_power' | xargs printf '\$%.2f')"
-        echo "Account Type:    $(echo "$account_data" | jq -r '.account_type')"
+        # Robinhood has no portfolio_value (uses equity) and Alpaca no
+        # account_type (uses status). The account number is not printed.
+        echo "Portfolio Value: $(echo "$account_data" | jq -r '.portfolio_value // .equity // 0' | xargs printf '\$%.2f')"
+        echo "Cash Balance:    $(echo "$account_data" | jq -r '.cash // 0' | xargs printf '\$%.2f')"
+        echo "Buying Power:    $(echo "$account_data" | jq -r '.buying_power // 0' | xargs printf '\$%.2f')"
+        echo "Account Type:    $(echo "$account_data" | jq -r '.account_type // .status // "n/a"')"
         echo "============================================"
     else
         echo "$account_data"
@@ -260,9 +264,23 @@ show_broker_positions() {
     log_info "Fetching open positions from $BROKER_CHOICE..."
     
     local get_positions_func="${BROKER_PREFIX}get_positions"
-    local positions=$($get_positions_func)
+    local positions
+    if ! positions=$($get_positions_func); then
+        log_error "Failed to retrieve positions"
+        [[ -n "$positions" ]] && echo "$positions" >&2
+        return 1
+    fi
     
-    if [[ -z "$positions" ]]; then
+    # Alpaca returns a JSON array, Robinhood a stream of objects: flatten both
+    # into one array. Field names differ (quantity/qty, entry_price/avg_fill_price).
+    if command -v jq &>/dev/null; then
+        positions=$(echo "$positions" | jq -c -s '[.[] | if type == "array" then .[] else . end]' 2>/dev/null) || {
+            log_error "Unexpected positions response"
+            return 1
+        }
+    fi
+    
+    if [[ -z "$positions" || "$positions" == "[]" ]]; then
         log_warn "No open positions"
         return 0
     fi
@@ -273,13 +291,51 @@ show_broker_positions() {
     echo "============================================"
     
     if command -v jq &>/dev/null; then
-        echo "$positions" | jq -r '.[] | "\(.symbol): \(.qty) shares @ $\(.avg_entry_price)"'
+        echo "$positions" | jq -r '.[] | "\(.symbol): \(.quantity // .qty) shares @ $\(.entry_price // .avg_fill_price // .avg_entry_price)"'
     else
         echo "$positions"
     fi
     
     echo "============================================"
     return 0
+}
+
+# Validate order arguments before anything is sent to a broker
+# Args: SYMBOL QTY
+# Returns: 0 if valid; 1 (with an error) for a symbol that is not 1-5
+#          uppercase letters or a quantity that is not a positive number
+validate_order_args() {
+    local symbol="$1"
+    local qty="$2"
+    
+    if ! [[ "$symbol" =~ ^[A-Z]{1,5}$ ]]; then
+        log_error "Invalid symbol: '$symbol' (must be 1-5 uppercase letters, e.g. AAPL)"
+        return 1
+    fi
+    if ! [[ "$qty" =~ ^[0-9]+(\.[0-9]+)?$ ]] || [[ "$(echo "$qty > 0" | bc -l)" != "1" ]]; then
+        log_error "Invalid quantity: '$qty' (must be a positive number)"
+        return 1
+    fi
+    return 0
+}
+
+# Current price for an order confirmation: the broker's quote
+# (${BROKER_PREFIX}get_quote .last_price), else fetch_current_price
+# Args: SYMBOL
+# Returns: price, or 0 when no price is available
+get_order_price() {
+    local symbol="$1"
+    local quote_func="${BROKER_PREFIX}get_quote"
+    local price=""
+    
+    if declare -F "$quote_func" >/dev/null && command -v jq &>/dev/null; then
+        price=$($quote_func "$symbol" 2>/dev/null | jq -r '.last_price // empty' 2>/dev/null)
+    fi
+    if [[ "$price" =~ ^[0-9]+(\.[0-9]+)?$ ]] && [[ "$(echo "$price > 0" | bc -l)" == "1" ]]; then
+        echo "$price"
+        return 0
+    fi
+    fetch_current_price "$symbol"
 }
 
 # Place a buy order with confirmation (broker-agnostic)
@@ -291,6 +347,7 @@ place_buy_order() {
         log_error "Usage: place_buy_order SYMBOL QTY"
         return 1
     fi
+    validate_order_args "$symbol" "$qty" || return 1
     
     # Check the appropriate INITIALIZED flag based on broker
     if [[ "$BROKER_CHOICE" == "alpaca" ]]; then
@@ -306,8 +363,8 @@ place_buy_order() {
     fi
     
     # Get current price for cost estimate
-    local current_price=$(fetch_current_price "$symbol")
-    if [[ "$current_price" == "0" ]]; then
+    local current_price=$(get_order_price "$symbol")
+    if [[ -z "$current_price" || "$current_price" == "0" ]]; then
         log_error "Failed to get current price for $symbol"
         return 1
     fi
@@ -336,7 +393,12 @@ place_buy_order() {
     log_info "Placing buy order via $BROKER_CHOICE: $qty shares of $symbol"
     
     local place_order_func="${BROKER_PREFIX}place_order"
-    local order=$($place_order_func "$symbol" "$qty" "buy")
+    local order
+    if ! order=$($place_order_func "$symbol" "$qty" "buy"); then
+        # The broker prints its error (e.g. "ERROR: Unprocessable Entity") on stdout
+        [[ -n "$order" ]] && echo "$order" >&2
+        order=""
+    fi
     
     if [[ -n "$order" ]]; then
         log_info "Buy order placed successfully"
@@ -359,6 +421,7 @@ place_sell_order() {
         log_error "Usage: place_sell_order SYMBOL QTY"
         return 1
     fi
+    validate_order_args "$symbol" "$qty" || return 1
     
     # Check the appropriate INITIALIZED flag based on broker
     if [[ "$BROKER_CHOICE" == "alpaca" ]]; then
@@ -374,8 +437,8 @@ place_sell_order() {
     fi
     
     # Get current price for cost estimate
-    local current_price=$(fetch_current_price "$symbol")
-    if [[ "$current_price" == "0" ]]; then
+    local current_price=$(get_order_price "$symbol")
+    if [[ -z "$current_price" || "$current_price" == "0" ]]; then
         log_error "Failed to get current price for $symbol"
         return 1
     fi
@@ -404,7 +467,12 @@ place_sell_order() {
     log_info "Placing sell order via $BROKER_CHOICE: $qty shares of $symbol"
     
     local place_order_func="${BROKER_PREFIX}place_order"
-    local order=$($place_order_func "$symbol" "$qty" "sell")
+    local order
+    if ! order=$($place_order_func "$symbol" "$qty" "sell"); then
+        # The broker prints its error (e.g. "ERROR: Unprocessable Entity") on stdout
+        [[ -n "$order" ]] && echo "$order" >&2
+        order=""
+    fi
     
     if [[ -n "$order" ]]; then
         log_info "Sell order placed successfully"
@@ -799,18 +867,18 @@ init_ml_predictor() {
     
     log_info "Initializing ML predictor module (XGBoost, 15% weight)"
     
-    if [[ ! -f "$SCRIPT_DIR/lib/ml_predictor.sh" ]]; then
-        log_warn "ML predictor module not found: $SCRIPT_DIR/lib/ml_predictor.sh"
+    if [[ ! -f "$AGENT_DIR/lib/ml_predictor.sh" ]]; then
+        log_warn "ML predictor module not found: $AGENT_DIR/lib/ml_predictor.sh"
         log_info "ML predictor will be skipped (+5-10% accuracy improvement unavailable)"
         return 1
     fi
     
-    source "$SCRIPT_DIR/lib/ml_predictor.sh" || {
+    source "$AGENT_DIR/lib/ml_predictor.sh" || {
         log_warn "Failed to load ML predictor module"
         return 1
     }
     
-    log_info "✓ ML predictor initialized (XGBoost, 15% weight in scoring, +5-10% accuracy)"
+    log_info "✓ ML predictor module loaded (lib/ml_predictor.sh; CLI scoring still uses the legacy formula)"
     return 0
 }
 
@@ -822,13 +890,13 @@ init_regime_adaptive() {
     
     log_info "Initializing regime-adaptive weighting module"
     
-    if [[ ! -f "$SCRIPT_DIR/lib/regime_adaptive.sh" ]]; then
-        log_warn "Regime-adaptive module not found: $SCRIPT_DIR/lib/regime_adaptive.sh"
+    if [[ ! -f "$AGENT_DIR/lib/regime_adaptive.sh" ]]; then
+        log_warn "Regime-adaptive module not found: $AGENT_DIR/lib/regime_adaptive.sh"
         log_info "Regime-adaptive weighting will be skipped (+3-5% win rate improvement unavailable)"
         return 1
     fi
     
-    source "$SCRIPT_DIR/lib/regime_adaptive.sh" || {
+    source "$AGENT_DIR/lib/regime_adaptive.sh" || {
         log_warn "Failed to load regime-adaptive module"
         return 1
     }
@@ -845,18 +913,18 @@ init_kalman_filter() {
     
     log_info "Initializing Kalman filter for price smoothing"
     
-    if [[ ! -f "$SCRIPT_DIR/lib/kalman_filter.sh" ]]; then
-        log_warn "Kalman filter module not found: $SCRIPT_DIR/lib/kalman_filter.sh"
+    if [[ ! -f "$AGENT_DIR/lib/kalman_filter.sh" ]]; then
+        log_warn "Kalman filter module not found: $AGENT_DIR/lib/kalman_filter.sh"
         log_info "Kalman filter will be skipped (better price smoothing unavailable)"
         return 1
     fi
     
-    source "$SCRIPT_DIR/lib/kalman_filter.sh" || {
+    source "$AGENT_DIR/lib/kalman_filter.sh" || {
         log_warn "Failed to load Kalman filter module"
         return 1
     }
     
-    log_info "✓ Kalman filter initialized (better price smoothing, fewer false signals)"
+    log_info "✓ Kalman filter module loaded (lib/kalman_filter.sh; CLI scoring still uses the legacy formula)"
     return 0
 }
 
@@ -868,13 +936,13 @@ init_dashboard() {
     
     log_info "Initializing React Dashboard"
     
-    if [[ ! -f "$SCRIPT_DIR/lib/dashboard.sh" ]]; then
-        log_warn "Dashboard module not found: $SCRIPT_DIR/lib/dashboard.sh"
+    if [[ ! -f "$AGENT_DIR/lib/dashboard.sh" ]]; then
+        log_warn "Dashboard module not found: $AGENT_DIR/lib/dashboard.sh"
         log_info "Dashboard will be skipped (UI unavailable)"
         return 1
     fi
     
-    source "$SCRIPT_DIR/lib/dashboard.sh" || {
+    source "$AGENT_DIR/lib/dashboard.sh" || {
         log_warn "Failed to load dashboard module"
         return 1
     }
@@ -1072,6 +1140,8 @@ main() {
     local trading_buy_qty=""
     local trading_sell_symbol=""
     local trading_sell_qty=""
+    local trading_buy_requested=false
+    local trading_sell_requested=false
     
     # Backtest flags
     local backtest_symbols=""
@@ -1172,16 +1242,22 @@ main() {
                 shift
                 ;;
             --buy)
+                trading_buy_requested=true
                 trading_buy_symbol="$2"
                 trading_buy_qty="$3"
                 broker_trading_mode=true
-                shift 3
+                # Missing SYMBOL/QTY: shift what is there (plain `shift 3`
+                # fails without shifting and the parser loops forever)
+                shift $(( $# < 3 ? $# : 3 ))
                 ;;
             --sell)
+                trading_sell_requested=true
                 trading_sell_symbol="$2"
                 trading_sell_qty="$3"
                 broker_trading_mode=true
-                shift 3
+                # Missing SYMBOL/QTY: shift what is there (plain `shift 3`
+                # fails without shifting and the parser loops forever)
+                shift $(( $# < 3 ? $# : 3 ))
                 ;;
             # Legacy Alpaca compatibility flags (deprecated but still supported)
             --alpaca)
@@ -1190,18 +1266,24 @@ main() {
                 shift
                 ;;
             --place-buy)
+                trading_buy_requested=true
                 trading_buy_symbol="$2"
                 trading_buy_qty="$3"
                 BROKER_CHOICE="alpaca"
                 broker_trading_mode=true
-                shift 3
+                # Missing SYMBOL/QTY: shift what is there (plain `shift 3`
+                # fails without shifting and the parser loops forever)
+                shift $(( $# < 3 ? $# : 3 ))
                 ;;
             --place-sell)
+                trading_sell_requested=true
                 trading_sell_symbol="$2"
                 trading_sell_qty="$3"
                 BROKER_CHOICE="alpaca"
                 broker_trading_mode=true
-                shift 3
+                # Missing SYMBOL/QTY: shift what is there (plain `shift 3`
+                # fails without shifting and the parser loops forever)
+                shift $(( $# < 3 ? $# : 3 ))
                 ;;
             --alpaca-status)
                 trading_check_account=true
@@ -1285,6 +1367,22 @@ main() {
     # Handle broker trading commands
     if [[ "$broker_trading_mode" == "true" ]]; then
         log_info "$BROKER_CHOICE broker mode enabled"
+        
+        # Reject bad order arguments before contacting the broker
+        if [[ "$trading_buy_requested" == "true" ]]; then
+            if [[ -z "$trading_buy_symbol" || -z "$trading_buy_qty" ]]; then
+                log_error "Usage: --buy SYMBOL QTY"
+                exit 1
+            fi
+            validate_order_args "$trading_buy_symbol" "$trading_buy_qty" || exit 1
+        fi
+        if [[ "$trading_sell_requested" == "true" ]]; then
+            if [[ -z "$trading_sell_symbol" || -z "$trading_sell_qty" ]]; then
+                log_error "Usage: --sell SYMBOL QTY"
+                exit 1
+            fi
+            validate_order_args "$trading_sell_symbol" "$trading_sell_qty" || exit 1
+        fi
         
         # Load and initialize broker
         if ! load_broker_module; then

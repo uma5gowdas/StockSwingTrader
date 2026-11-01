@@ -10,10 +10,11 @@
 ##############################################################################
 
 # Source configuration
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LIB_DIR="${SCRIPT_DIR}"
-MODELS_DIR="${LIB_DIR}/models"
-PYTHON_SCRIPT="${LIB_DIR}/ml_inference.py"
+# File-specific dir variable: this file is sourced, so it must not change the
+# caller's SCRIPT_DIR / LIB_DIR.
+ML_PREDICTOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MODELS_DIR="${ML_PREDICTOR_DIR}/models"
+PYTHON_SCRIPT="${ML_PREDICTOR_DIR}/ml_inference.py"
 
 ##############################################################################
 # Function: ml_predict_direction

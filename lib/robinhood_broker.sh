@@ -16,12 +16,14 @@ set -o pipefail
 # ============================================================================
 
 # Load OAuth module
-SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
-if [[ ! -f "$SCRIPT_DIR/robinhood_oauth.sh" ]]; then
+# File-specific dir variable: this file is sourced, so it must not change the
+# caller's SCRIPT_DIR.
+ROBINHOOD_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ ! -f "$ROBINHOOD_LIB_DIR/robinhood_oauth.sh" ]]; then
     echo "ERROR: robinhood_oauth.sh not found" >&2
     return 1
 fi
-source "$SCRIPT_DIR/robinhood_oauth.sh"
+source "$ROBINHOOD_LIB_DIR/robinhood_oauth.sh"
 
 # API Configuration
 ROBINHOOD_API_BASE_URL="${ROBINHOOD_API_BASE_URL:-https://api.robinhood.com}"

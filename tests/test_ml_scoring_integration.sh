@@ -19,7 +19,7 @@ export SST_OFFLINE=1
 export ML_TIMEOUT_SECONDS="${ML_TIMEOUT_SECONDS:-20}"
 export REGIME_CACHE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sst_regime_test.XXXXXX")"
 # Stub predictor for the threshold tests: scoring.sh runs
-# "$SCRIPT_DIR/ml_predictor.sh", so a subshell pointing SCRIPT_DIR at this dir
+# "$SCORING_LIB_DIR/ml_predictor.sh", so a subshell pointing SCORING_LIB_DIR at this dir
 # gets a fixed ML result (STUB_ML_DIRECTION / STUB_ML_CONFIDENCE) that does not
 # depend on the locally trained model.
 ML_STUB_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sst_ml_stub.XXXXXX")"
@@ -326,7 +326,7 @@ ml_contract() {
 v2_with_stub_ml() {
     local dir=$1 conf=$2
     shift 2
-    ( SCRIPT_DIR="$ML_STUB_DIR" STUB_ML_DIRECTION="$dir" STUB_ML_CONFIDENCE="$conf" \
+    ( SCORING_LIB_DIR="$ML_STUB_DIR" STUB_ML_DIRECTION="$dir" STUB_ML_CONFIDENCE="$conf" \
         calculate_confluence_score_v2 "$@" </dev/null 2>/dev/null )
 }
 

@@ -7,7 +7,8 @@
 # Supports: Account management, positions, orders, market data
 # ============================================================================
 
-set -o errexit
+# No `set -o errexit`: this file is sourced, and errexit would leak into the
+# caller (the agent) and abort it on any failing command.
 set -o pipefail
 
 # ============================================================================
@@ -19,6 +20,13 @@ ALPACA_API_BASE_URL="${ALPACA_BASE_URL:-https://paper-api.alpaca.markets}/v2"
 ALPACA_API_KEY="${ALPACA_API_KEY:-${APCA_API_KEY_ID:-}}"
 ALPACA_SECRET_KEY="${ALPACA_SECRET_KEY:-${APCA_API_SECRET_KEY:-}}"
 ALPACA_OAUTH_TOKEN="${ALPACA_OAUTH_TOKEN:-${APCA_API_OAUTH_TOKEN:-}}"
+
+# Market data API (latest trade price for order confirmations)
+ALPACA_DATA_API_BASE_URL="${ALPACA_DATA_URL:-https://data.alpaca.markets}/v2"
+ALPACA_DATA_FEED="${ALPACA_DATA_FEED:-iex}"
+
+# jq helper: numeric strings to numbers, null stays null (tonumber fails on null)
+ALPACA_JQ_NUM='def num: if . == null then null else tonumber end;'
 
 # Logging & Debug
 ALPACA_LOG_FILE="${ALPACA_LOG_FILE:-logs/alpaca.log}"
@@ -258,15 +266,16 @@ alpaca_init() {
 # ============================================================================
 
 # Make HTTP request to Alpaca API with retry logic
-# Args: METHOD, ENDPOINT, [DATA], [RETRIES=0]
+# Args: METHOD, ENDPOINT, [DATA], [RETRIES=0], [BASE_URL=ALPACA_API_BASE_URL]
 # Returns: HTTP response body
 alpaca_api_request() {
     local method="$1"
     local endpoint="$2"
     local data="${3:-}"
     local retries="${4:-0}"
+    local base_url="${5:-$ALPACA_API_BASE_URL}"
     
-    local url="${ALPACA_API_BASE_URL}${endpoint}"
+    local url="${base_url}${endpoint}"
     local http_code
     local response
     local headers=""
@@ -331,7 +340,7 @@ alpaca_api_request() {
         local backoff=$((ALPACA_INITIAL_BACKOFF * (ALPACA_BACKOFF_MULTIPLIER ** retries)))
         alpaca_log "WARN" "Rate limited. Retrying in ${backoff}s (attempt $((retries + 1))/$ALPACA_MAX_RETRIES)"
         sleep "$backoff"
-        alpaca_api_request "$method" "$endpoint" "$data" "$((retries + 1))"
+        alpaca_api_request "$method" "$endpoint" "$data" "$((retries + 1))" "$base_url"
         return $?
     fi
     
@@ -376,17 +385,17 @@ alpaca_get_account() {
     fi
     
     local response
-    response=$(alpaca_api_request "GET" "/account") || return 1
+    response=$(alpaca_api_request "GET" "/account") || { echo "$response"; return 1; }
     
     # Parse and display account info
     if command -v jq &>/dev/null; then
-        echo "$response" | jq '{
+        echo "$response" | jq "$ALPACA_JQ_NUM"'{
             account_id: .id,
-            equity: (.equity | tonumber),
-            buying_power: (.buying_power | tonumber),
-            portfolio_value: (.portfolio_value | tonumber),
-            cash: (.cash | tonumber),
-            day_trade_buying_power: (.intraday_adjustments | tonumber // 0),
+            equity: (.equity | num),
+            buying_power: (.buying_power | num),
+            portfolio_value: (.portfolio_value | num),
+            cash: (.cash | num),
+            day_trade_buying_power: (.intraday_adjustments // 0 | num),
             status: .status,
             currency: .currency
         }'
@@ -411,19 +420,19 @@ alpaca_get_positions() {
     fi
     
     local response
-    response=$(alpaca_api_request "GET" "/positions") || return 1
+    response=$(alpaca_api_request "GET" "/positions") || { echo "$response"; return 1; }
     
-    # Parse and format positions
+    # Parse and format positions (JSON array, [] when there are none)
     if command -v jq &>/dev/null; then
-        echo "$response" | jq '.[] | {
+        echo "$response" | jq "$ALPACA_JQ_NUM"'[.[] | {
             symbol: .symbol,
-            quantity: (.qty | tonumber),
-            entry_price: (.avg_fill_price | tonumber),
-            current_price: (.current_price | tonumber),
-            market_value: (.market_value | tonumber),
-            unrealized_pl: (.unrealized_pl | tonumber),
-            unrealized_plpc: (.unrealized_plpc | tonumber)
-        }'
+            quantity: (.qty | num),
+            entry_price: (.avg_entry_price // .avg_fill_price | num),
+            current_price: (.current_price | num),
+            market_value: (.market_value | num),
+            unrealized_pl: (.unrealized_pl | num),
+            unrealized_plpc: (.unrealized_plpc | num)
+        }]'
     else
         echo "$response"
     fi
@@ -451,14 +460,14 @@ alpaca_check_position() {
     response=$(alpaca_api_request "GET" "/positions/$symbol" 2>/dev/null) || return 0
     
     if command -v jq &>/dev/null; then
-        echo "$response" | jq '{
+        echo "$response" | jq "$ALPACA_JQ_NUM"'{
             symbol: .symbol,
-            quantity: (.qty | tonumber),
-            entry_price: (.avg_fill_price | tonumber),
-            current_price: (.current_price | tonumber),
-            market_value: (.market_value | tonumber),
-            unrealized_pl: (.unrealized_pl | tonumber),
-            unrealized_plpc: (.unrealized_plpc | tonumber)
+            quantity: (.qty | num),
+            entry_price: (.avg_entry_price // .avg_fill_price | num),
+            current_price: (.current_price | num),
+            market_value: (.market_value | num),
+            unrealized_pl: (.unrealized_pl | num),
+            unrealized_plpc: (.unrealized_plpc | num)
         }'
     else
         echo "$response"
@@ -513,19 +522,20 @@ EOF
     alpaca_log "INFO" "Placing order: $side $qty shares of $symbol"
     
     local response
-    response=$(alpaca_api_request "POST" "/orders" "$payload") || return 1
+    # On failure, pass the API error text (e.g. "ERROR: Unprocessable Entity") to the caller
+    response=$(alpaca_api_request "POST" "/orders" "$payload") || { echo "$response"; return 1; }
     
     # Format and return order confirmation
     if command -v jq &>/dev/null; then
-        echo "$response" | jq '{
+        echo "$response" | jq "$ALPACA_JQ_NUM"'{
             order_id: .id,
             symbol: .symbol,
-            quantity: (.qty | tonumber),
+            quantity: (.qty | num),
             side: .side,
             type: .order_type,
             status: .status,
             filled_at: .filled_at,
-            filled_avg_price: (.filled_avg_price | tonumber),
+            filled_avg_price: (.filled_avg_price | num),
             created_at: .created_at
         }'
     else
@@ -557,15 +567,15 @@ alpaca_get_order_status() {
     response=$(alpaca_api_request "GET" "/orders/$order_id") || return 1
     
     if command -v jq &>/dev/null; then
-        echo "$response" | jq '{
+        echo "$response" | jq "$ALPACA_JQ_NUM"'{
             order_id: .id,
             symbol: .symbol,
-            quantity: (.qty | tonumber),
+            quantity: (.qty | num),
             side: .side,
             status: .status,
             type: .order_type,
             filled_at: .filled_at,
-            filled_avg_price: (.filled_avg_price | tonumber),
+            filled_avg_price: (.filled_avg_price | num),
             created_at: .created_at,
             updated_at: .updated_at
         }'
@@ -606,6 +616,44 @@ alpaca_cancel_order() {
 }
 
 # ============================================================================
+# API: Market Data
+# ============================================================================
+
+# Get the latest trade price for a symbol (Alpaca market data API,
+# ALPACA_DATA_URL, feed ALPACA_DATA_FEED; default iex works on free accounts)
+# Args: SYMBOL
+# Returns: JSON {symbol, last_price, timestamp} (same last_price field as
+#          robinhood_get_quote)
+alpaca_get_quote() {
+    local symbol="$1"
+    
+    if ! alpaca_validate_symbol "$symbol"; then
+        return 1
+    fi
+    
+    if [[ "$ALPACA_INITIALIZED" != "true" ]]; then
+        echo "ERROR: Alpaca not initialized. Call alpaca_init() first"
+        return 1
+    fi
+    
+    local response
+    response=$(alpaca_api_request "GET" "/stocks/$symbol/trades/latest?feed=$ALPACA_DATA_FEED" "" 0 "$ALPACA_DATA_API_BASE_URL") || return 1
+    
+    if command -v jq &>/dev/null; then
+        echo "$response" | jq -e --arg sym "$symbol" '{
+            symbol: (.symbol // $sym),
+            last_price: .trade.p,
+            timestamp: .trade.t
+        } | select(.last_price != null)' || return 1
+    else
+        echo "$response"
+    fi
+    
+    alpaca_log "INFO" "Quote retrieved for: $symbol"
+    return 0
+}
+
+# ============================================================================
 # Module Export
 # ============================================================================
 
@@ -616,6 +664,7 @@ export -f alpaca_get_account
 export -f alpaca_get_positions
 export -f alpaca_check_position
 export -f alpaca_place_order
+export -f alpaca_get_quote
 export -f alpaca_get_order_status
 export -f alpaca_cancel_order
 export -f alpaca_validate_symbol
