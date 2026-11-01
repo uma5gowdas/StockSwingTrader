@@ -128,12 +128,15 @@ assert_equals "MISSING|null" "$(jget "$out" '.status + "|" + (.score|tostring)')
 t0=$(now_ms)
 for i in $(seq 1 20); do mirofish_get_prediction "SYM$i" >/dev/null; done
 t1=$(now_ms)
-assert_true "20 MISSING lookups take < 1000 ms total ($((t1 - t0)) ms)" test $((t1 - t0)) -lt 1000
+# Wall-clock bound: catches a per-lookup network wait (>= 2 s each, i.e. >= 40 s
+# for 20). 3000 ms leaves headroom for a loaded machine; ~0.9-1.1 s is normal.
+# Whether any HTTP request was made is asserted separately via requests.log.
+assert_true "20 MISSING lookups take < 3000 ms total ($((t1 - t0)) ms)" test $((t1 - t0)) -lt 3000
 export MIROFISH_API_URL="http://127.0.0.1:9"
 t0=$(now_ms)
 for i in $(seq 1 20); do mirofish_get_prediction "SYM$i" >/dev/null; done
 t1=$(now_ms)
-assert_true "unreachable MIROFISH_API_URL is ignored: 20 lookups < 1000 ms ($((t1 - t0)) ms)" test $((t1 - t0)) -lt 1000
+assert_true "unreachable MIROFISH_API_URL is ignored: 20 lookups < 3000 ms ($((t1 - t0)) ms)" test $((t1 - t0)) -lt 3000
 
 write_cache AAPL BULLISH 0.8 "$(iso_now)"
 out=$(mirofish_get_prediction AAPL)
