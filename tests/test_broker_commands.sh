@@ -150,6 +150,8 @@ export ALPACA_BASE_URL="$STUB_URL"
 export ALPACA_DATA_URL="$STUB_URL"
 export ROBINHOOD_API_BASE_URL="http://127.0.0.1:9"
 export ROBINHOOD_OAUTH_BASE_URL="http://127.0.0.1:9"
+export SST_STATE_DIR="$WORK_DIR/state"
+export ALERT_LOG_FILE="$WORK_DIR/alerts.log"
 EOF
 
 NOCRED_CONFIG="$WORK_DIR/config.nocred.sh"
@@ -162,6 +164,8 @@ export APCA_API_SECRET_KEY=""
 export APCA_API_OAUTH_TOKEN=""
 export ALPACA_BASE_URL="$STUB_URL"
 export ALPACA_DATA_URL="$STUB_URL"
+export SST_STATE_DIR="$WORK_DIR/state"
+export ALERT_LOG_FILE="$WORK_DIR/alerts.log"
 EOF
 
 # ============================================================================
@@ -228,12 +232,16 @@ assert_equals "0|robinhood_|ROBINHOOD_INITIALIZED|ok|$PROJECT_DIR" "$rh_load" \
 
 # Robinhood flow with stub functions (no Robinhood network call is possible:
 # every function that would make one is replaced before use)
+# Robinhood is always a LIVE endpoint: orders need ORDER_LIVE_FLAG=true
+# (--live) and a typed "SYMBOL QTY" confirmation. Arg 3 "nolive" leaves the
+# flag unset.
 rh_flow() {
-    local input=$1 action=$2
+    local input=$1 action=$2 live=${3:-live}
     (cd "$WORK_DIR" && printf '%s' "$input" | SST_CONFIG_FILE="$STUB_CONFIG" \
         perl -e 'alarm 30; exec @ARGV' bash -c '
         source "$1" >/dev/null 2>&1 </dev/null
         BROKER_CHOICE=robinhood
+        [[ "$4" == "live" ]] && ORDER_LIVE_FLAG=true
         load_broker_module >/dev/null 2>&1 || exit 90
         RH_ORDERS="$2/rh_orders.log"
         robinhood_api_request() { echo "UNEXPECTED_NETWORK_CALL" >&2; return 1; }
@@ -249,7 +257,7 @@ rh_flow() {
             buy) place_buy_order AAPL 2 ;;
             sell) place_sell_order MSFT 1 ;;
         esac
-    ' _ "$AGENT" "$WORK_DIR" "$action" 2>&1)
+    ' _ "$AGENT" "$WORK_DIR" "$action" "$live" 2>&1)
 }
 
 RH_ORDERS="$WORK_DIR/rh_orders.log"
@@ -267,18 +275,23 @@ ALL_OUTPUT="${ALL_OUTPUT}${out}"$'\n'
 assert_contains "$out" 'MSFT: 3 shares @ $300.5' "robinhood (stubbed) positions listed (object stream)"
 assert_contains "$out" 'AAPL: 1 shares @ $150' "robinhood second position listed"
 
+out=$(rh_flow "AAPL 2"$'\n' buy nolive)
+ALL_OUTPUT="${ALL_OUTPUT}${out}"$'\n'
+assert_contains "$out" "orders need --live" "robinhood buy without --live (ORDER_LIVE_FLAG): refused"
+assert_equals "0" "$(count_lines "$RH_ORDERS")" "robinhood buy without --live: robinhood_place_order not called"
+
 out=$(rh_flow "no"$'\n' buy)
 ALL_OUTPUT="${ALL_OUTPUT}${out}"$'\n'
 assert_contains "$out" "Order cancelled" "robinhood buy + 'no': cancelled"
 assert_equals "0" "$(count_lines "$RH_ORDERS")" "robinhood buy + 'no': robinhood_place_order not called"
 
-out=$(rh_flow "yes"$'\n' buy)
+out=$(rh_flow "AAPL 2"$'\n' buy)
 ALL_OUTPUT="${ALL_OUTPUT}${out}"$'\n'
 assert_contains "$out" 'Current Price:   $50.5' "robinhood buy: price from robinhood_get_quote"
 assert_contains "$out" "BUY ORDER PLACED (ROBINHOOD)" "robinhood buy + 'yes': order placed via stub"
 assert_equals "AAPL 2 buy" "$(cat "$RH_ORDERS" 2>/dev/null)" "robinhood buy + 'yes': stub got AAPL 2 buy"
 
-out=$(rh_flow "yes"$'\n' sell)
+out=$(rh_flow "MSFT 1"$'\n' sell)
 ALL_OUTPUT="${ALL_OUTPUT}${out}"$'\n'
 assert_contains "$out" "SELL ORDER PLACED (ROBINHOOD)" "robinhood sell + 'yes': order placed via stub"
 assert_equals "MSFT 1 sell" "$(tail -1 "$RH_ORDERS" 2>/dev/null)" "robinhood sell + 'yes': stub got MSFT 1 sell"
@@ -289,6 +302,16 @@ assert_equals "MSFT 1 sell" "$(tail -1 "$RH_ORDERS" 2>/dev/null)" "robinhood sel
 
 echo ""
 echo "--- Alpaca CLI commands (local stub) ---"
+
+# Adopt the stub's positions as the reconciliation baseline (orders are
+# blocked on a reconciliation mismatch)
+run_agent "" --reconcile-accept
+assert_equals "0" "$RC" "--reconcile-accept exits 0"
+if [[ -f "$WORK_DIR/state/positions_baseline.json" ]]; then
+    pass "--reconcile-accept creates the baseline file in SST_STATE_DIR"
+else
+    fail "--reconcile-accept creates the baseline file in SST_STATE_DIR" "missing $WORK_DIR/state/positions_baseline.json"
+fi
 
 run_agent "" --check-account
 assert_equals "0" "$RC" "--check-account exits 0"
@@ -340,7 +363,7 @@ assert_equals "$orders_before" "$(count_lines "$ORDER_LOG")" "--sell + 'y': no o
 assert_not_contains "$(cat "$REQ_LOG")" "POST" "no POST request reached the stub before any 'yes'"
 
 # --- orders: confirmation 'yes' sends exactly one order ---
-run_agent "yes"$'\n' --buy AAPL 2
+run_agent "yes"$'\n' --buy AAPL 2 --order-type market --no-bracket
 assert_equals "0" "$RC" "--buy + 'yes' exits 0"
 assert_contains "$OUT" "BUY ORDER PLACED (ALPACA)" "--buy + 'yes': order placed"
 assert_contains "$OUT" '"order_id": "stub-order-0001"' "--buy + 'yes': order id shown"
@@ -368,7 +391,7 @@ assert_equals "NVDA|1|sell" "$(tail -1 "$ORDER_LOG" | jq -r '"\(.symbol)|\(.qty)
     "--place-sell payload NVDA 1 sell"
 
 orders_before=$(count_lines "$ORDER_LOG")
-run_agent "no"$'\n' --place-sell NVDA 1
+run_agent "no"$'\n' --place-sell AAPL 1
 assert_contains "$OUT" "Order cancelled" "--place-sell + 'no' cancels"
 assert_equals "$orders_before" "$(count_lines "$ORDER_LOG")" "--place-sell + 'no': no order sent"
 

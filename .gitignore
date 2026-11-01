@@ -52,6 +52,10 @@ build/
 # Real credentials stay local (copy from config.template.sh)
 config.robinhood.sh
 config.alpaca.sh
+# Live keys: untracked, selected with SST_CONFIG_FILE
+config.live.sh
+# Order ledger, reconciliation baseline, kill switch (lib/order_safety.sh)
+.state/
 
 # Git worktrees
 .worktrees/

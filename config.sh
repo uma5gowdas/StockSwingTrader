@@ -2,7 +2,11 @@
 # ============================================================================
 # StockSwingTrader Configuration - ALPACA INTEGRATION
 # ============================================================================
-# Security: Keep this file private! Add to .gitignore if using version control
+# Tracked in git (private repository). PAPER ONLY: keep ALPACA_BASE_URL on
+# paper-api.alpaca.markets. The agent refuses broker commands when the
+# endpoint is live and the active config file is tracked in git. Live keys
+# go in an untracked config.live.sh selected with SST_CONFIG_FILE (see
+# config.template.sh, "Alpaca Paper Trading Configuration" and "Live safety").
 
 # ============================================================================
 # ALPACA API CREDENTIALS (Paper Trading)

@@ -76,6 +76,18 @@ source "$AGENT_DIR/lib/html_report.sh" 2>/dev/null || echo "WARNING: html_report
 # Phase 1 (v6.2 port): Kelly sizing + daily risk budget. The MiroFish cache
 # adapter is loaded by lib/scoring.sh.
 source "$AGENT_DIR/lib/kelly_sizing.sh" 2>/dev/null || echo "WARNING: kelly_sizing.sh not found"
+# Live safety (Step 1): pre-trade checks + alerts (loads lib/alerts.sh and
+# lib/risk_management.sh). Must be sourced before load_broker_module: it
+# loads alpaca_broker.sh, and re-sourcing that resets ALPACA_INITIALIZED.
+source "$AGENT_DIR/lib/order_safety.sh" 2>/dev/null || echo "WARNING: order_safety.sh not found"
+
+# Order flow options (set by --order-type, --limit-price, --no-bracket,
+# --live, --allow-mismatch)
+ORDER_TYPE_OVERRIDE="${ORDER_TYPE_OVERRIDE:-}"
+ORDER_LIMIT_PRICE="${ORDER_LIMIT_PRICE:-}"
+ORDER_NO_BRACKET="${ORDER_NO_BRACKET:-false}"
+ORDER_LIVE_FLAG="${ORDER_LIVE_FLAG:-false}"
+RECONCILE_ALLOW_MISMATCH="${RECONCILE_ALLOW_MISMATCH:-false}"
 
 # Broker selection (default: Alpaca for backward compatibility)
 BROKER_CHOICE="${BROKER_CHOICE:-alpaca}"
@@ -338,152 +350,396 @@ get_order_price() {
     fetch_current_price "$symbol"
 }
 
-# Place a buy order with confirmation (broker-agnostic)
-place_buy_order() {
-    local symbol="$1"
-    local qty="$2"
-    
+# Endpoint mode of the selected broker (paper | local | live); also sets and
+# exports SST_ENDPOINT_MODE (used in alert lines)
+current_endpoint_mode() {
+    SST_ENDPOINT_MODE=$(broker_endpoint_mode "$BROKER_CHOICE" "${ALPACA_BASE_URL:-}")
+    export SST_ENDPOINT_MODE
+    echo "$SST_ENDPOINT_MODE"
+}
+
+# Refuse broker commands when the endpoint is live and the active config file
+# is tracked in git (config.sh must stay on paper)
+# Returns: 0 ok; 1 + error
+check_live_config_guard() {
+    current_endpoint_mode >/dev/null
+    if [[ "$SST_ENDPOINT_MODE" == "live" ]] && config_file_is_tracked "$SST_CONFIG_FILE"; then
+        log_error "LIVE endpoint refused: $(basename "$SST_CONFIG_FILE") is tracked in git and must stay on paper; put live keys in an untracked file (e.g. config.live.sh) and select it with SST_CONFIG_FILE"
+        send_alert critical error "Live endpoint with a git-tracked config refused" \
+            "$(jq -cn --arg f "$(basename "$SST_CONFIG_FILE")" '{config_file:$f}')"
+        return 1
+    fi
+    return 0
+}
+
+# Order checks that need no broker contact (run before the broker is loaded
+# and again inside place_guarded_order)
+# Args: SIDE SYMBOL QTY
+# Returns: 0 ok; 1 + error (arguments, --limit-price, kill switch, live
+#          guard, MAX_ORDER_QTY)
+order_prechecks() {
+    local side="$1" symbol="$2" qty="$3" ks mode
+
     if [[ -z "$symbol" ]] || [[ -z "$qty" ]]; then
+        log_error "Usage: place_${side}_order SYMBOL QTY"
+        return 1
+    fi
+    validate_order_args "$symbol" "$qty" || return 1
+    if [[ -n "$ORDER_LIMIT_PRICE" ]]; then
+        if ! [[ "$ORDER_LIMIT_PRICE" =~ ^[0-9]+(\.[0-9]+)?$ ]] || ! _os_gt "$ORDER_LIMIT_PRICE" 0; then
+            log_error "Invalid --limit-price: '$ORDER_LIMIT_PRICE' (must be a number > 0)"
+            return 1
+        fi
+    fi
+
+    if ks=$(kill_switch_active); then
+        log_error "KILL SWITCH ACTIVE since $(echo "$ks" | jq -r '.ts // "?"'): $(echo "$ks" | jq -r '.reason // ""'). No new orders. Run --resume to clear."
+        send_alert warn halt "Order refused by the kill switch: $side $qty $symbol" "$ks"
+        return 1
+    fi
+
+    current_endpoint_mode >/dev/null
+    mode="$SST_ENDPOINT_MODE"
+    if [[ "$mode" == "live" ]]; then
+        check_live_config_guard || return 1
+        if [[ "$ORDER_LIVE_FLAG" != "true" ]]; then
+            log_error "LIVE endpoint ($BROKER_CHOICE): orders need --live and a typed confirmation. Refused: $side $qty $symbol"
+            send_alert warn error "Live order refused (no --live): $side $qty $symbol" ""
+            return 1
+        fi
+    fi
+
+    local reason
+    if ! reason=$(check_order_qty_cap "$qty" "$symbol" "$side"); then
+        log_error "$reason"
+        return 1
+    fi
+    return 0
+}
+
+# Place an order through every pre-trade check (broker-agnostic)
+# Order of checks (first failure returns 1): arguments, kill switch, live
+# guard, MAX_ORDER_QTY (no broker contact); then for Alpaca market hours,
+# reconciliation (unless --allow-mismatch), daily loss halt; positions (caps,
+# no short), duplicates (ledger + open orders), reference price, limit price,
+# daily notional, PDT warning, bracket levels (buys). Then the confirmation
+# ("yes"; LIVE: type "SYMBOL QTY") and, under the order lock, ledger +
+# submit + alerts.
+# Args: SIDE (buy|sell) SYMBOL QTY
+# Returns: 0 placed or cancelled; 1 refused / failed
+place_guarded_order() {
+    local side="$1" symbol="$2" qty="$3"
+    local side_uc broker_uc mode mode_label reason
+    side_uc=$(echo "$side" | tr '[:lower:]' '[:upper:]')
+    broker_uc=$(echo "$BROKER_CHOICE" | tr '[:lower:]' '[:upper:]')
+
+    order_prechecks "$side" "$symbol" "$qty" || return 1
+    current_endpoint_mode >/dev/null
+    mode="$SST_ENDPOINT_MODE"
+    mode_label=$(endpoint_mode_label "$mode")
+
+    # Check the appropriate INITIALIZED flag based on broker
+    if [[ "$BROKER_CHOICE" == "alpaca" ]]; then
+        if [[ "$ALPACA_INITIALIZED" != "true" ]]; then
+            log_error "Broker not initialized"
+            return 1
+        fi
+    elif [[ "$BROKER_CHOICE" == "robinhood" ]]; then
+        if [[ "$ROBINHOOD_INITIALIZED" != "true" ]]; then
+            log_error "Broker not initialized"
+            return 1
+        fi
+    fi
+
+    local account="" open_orders="[]" orders_today="[]"
+    if [[ "$BROKER_CHOICE" == "alpaca" ]]; then
+        if ! reason=$(check_market_hours); then
+            log_error "$reason"
+            return 1
+        fi
+        [[ -n "$reason" ]] && echo "$reason"
+
+        if [[ "${RECONCILE_ON_STARTUP:-true}" == "true" ]]; then
+            local report rrc
+            report=$(reconcile_with_broker)
+            rrc=$?
+            if [[ $rrc -ne 0 ]]; then
+                echo "$report"
+                if [[ "$RECONCILE_ALLOW_MISMATCH" == "true" ]]; then
+                    log_warn "Reconciliation mismatch overridden with --allow-mismatch; continuing"
+                    send_alert warn reconcile_mismatch "Order continues despite a reconciliation mismatch (--allow-mismatch): $side $qty $symbol" ""
+                else
+                    log_error "Order refused: broker state does not match the local baseline + order ledger. Review with --reconcile, adopt with --reconcile-accept, or override once with --allow-mismatch"
+                    return 1
+                fi
+            fi
+        fi
+
+        if ! account=$(alpaca_get_account 2>/dev/null) || ! echo "$account" | jq -e . >/dev/null 2>&1; then
+            log_error "Order refused: could not read the account"
+            return 1
+        fi
+        if ! reason=$(check_daily_loss_halt "$account" "$side"); then
+            log_error "$reason"
+            return 1
+        fi
+        [[ -n "$reason" ]] && echo "$reason"
+    else
+        echo "NOTICE: market hours, reconciliation, daily loss and PDT checks are not available for $BROKER_CHOICE (skipped)"
+        account=$(${BROKER_PREFIX}get_account 2>/dev/null)
+    fi
+
+    local positions
+    if ! positions=$(${BROKER_PREFIX}get_positions 2>/dev/null); then
+        log_error "Order refused: could not read positions"
+        return 1
+    fi
+
+    if [[ "$BROKER_CHOICE" == "alpaca" ]]; then
+        if ! open_orders=$(alpaca_get_open_orders 2>/dev/null); then
+            log_error "Order refused: could not read open orders"
+            return 1
+        fi
+    fi
+    if ! reason=$(check_duplicate_order "$symbol" "$side" "$open_orders"); then
+        log_error "$reason"
+        return 1
+    fi
+    if [[ "$side" == "sell" ]] && echo "$open_orders" | jq -e --arg s "$symbol" \
+        'any(.[]; .symbol == $s and any((.legs // [])[]; .side == "sell"))' >/dev/null 2>&1; then
+        log_warn "Open bracket legs (take profit / stop loss) hold $symbol shares; this sell may be rejected until they are cancelled"
+    fi
+
+    # Get current price for cost estimate
+    local current_price=$(get_order_price "$symbol")
+    if [[ -z "$current_price" || "$current_price" == "0" ]]; then
+        log_error "Failed to get current price for $symbol"
+        return 1
+    fi
+
+    # Order type and prices
+    local order_type="${ORDER_TYPE_OVERRIDE:-${ORDER_TYPE:-limit}}" limit_price="" tif=""
+    if [[ "$BROKER_CHOICE" != "alpaca" && "$order_type" != "market" ]]; then
+        echo "NOTICE: $BROKER_CHOICE orders are sent as market orders (limit/bracket not supported here)"
+        order_type="market"
+    fi
+    if [[ "$order_type" == "limit" ]]; then
+        if [[ -n "$ORDER_LIMIT_PRICE" ]]; then
+            limit_price=$(_os_round "$ORDER_LIMIT_PRICE")
+        else
+            limit_price=$(compute_limit_price "$side" "$current_price")
+        fi
+        if [[ -z "$limit_price" ]]; then
+            log_error "Could not compute a limit price for $symbol"
+            return 1
+        fi
+    fi
+    local cap_price="${limit_price:-$current_price}"
+    if ! reason=$(check_order_caps "$side" "$symbol" "$qty" "$cap_price" "$positions"); then
+        log_error "$reason"
+        return 1
+    fi
+    local notional
+    notional=$(echo "$reason" | jq -r '.notional // 0' 2>/dev/null)
+
+    # Bracket (buys): stop / take profit from ATR+regime (real bars) or percent
+    local bracket=false stop_price="" take_profit="" stop_info=""
+    if [[ "$BROKER_CHOICE" == "alpaca" && "$side" == "buy" && "${ORDER_BRACKET:-true}" == "true" && "$ORDER_NO_BRACKET" != "true" ]]; then
+        local levels
+        levels=$(order_bracket_levels "$symbol" "$cap_price" buy)
+        stop_price=$(echo "$levels" | jq -r '.stop_price // empty' 2>/dev/null)
+        take_profit=$(echo "$levels" | jq -r '.take_profit_price // empty' 2>/dev/null)
+        if [[ -z "$stop_price" || -z "$take_profit" ]]; then
+            log_error "Could not compute bracket levels for $symbol (use --no-bracket to send a plain order)"
+            return 1
+        fi
+        stop_info=$(echo "$levels" | jq -r '"\(.stop_pct)%, \(.method)" + (if .regime then ", regime \(.regime)" else "" end)')
+        bracket=true
+    fi
+
+    if [[ "$BROKER_CHOICE" == "alpaca" ]]; then
+        if [[ "$bracket" == "true" ]]; then
+            tif="${BRACKET_TIME_IN_FORCE:-gtc}"
+        elif [[ "$order_type" == "limit" ]]; then
+            tif="${ORDER_TIME_IN_FORCE:-day}"
+        else
+            tif="day"
+        fi
+        if ! orders_today=$(alpaca_get_orders_since "$(_os_trading_day)" 2>/dev/null); then
+            orders_today="[]"
+        fi
+        check_pdt_warning "$side" "$symbol" "$account" "$orders_today" "$bracket"
+    fi
+
+    local client_order_id
+    client_order_id=$(generate_client_order_id "$symbol" "$side")
+
+    local estimated=$(echo "$qty * $current_price" | bc)
+    local limit_txt="n/a (market)" stop_txt="none" tp_txt="none"
+    [[ -n "$limit_price" ]] && limit_txt="\$$limit_price"
+    [[ -n "$stop_price" ]] && stop_txt="\$$stop_price ($stop_info)"
+    [[ -n "$take_profit" ]] && tp_txt="\$$take_profit"
+    echo ""
+    echo "============================================"
+    echo "${side_uc} ORDER CONFIRMATION (${broker_uc})"
+    echo "============================================"
+    if [[ "$side" == "buy" ]]; then
+        echo "Symbol:          $symbol"
+        echo "Quantity:        $qty shares"
+        echo "Current Price:   \$$current_price"
+        echo "Estimated Cost:  \$$estimated"
+        echo "Order Type:      $order_type$( [[ "$bracket" == "true" ]] && echo " (bracket)")"
+        echo "Limit Price:     $limit_txt"
+        echo "Stop Loss:       $stop_txt"
+        echo "Take Profit:     $tp_txt"
+        echo "Time in Force:   ${tif:-n/a}"
+        echo "Client Order ID: $client_order_id"
+        echo "Mode:            $mode_label"
+    else
+        echo "Symbol:             $symbol"
+        echo "Quantity:           $qty shares"
+        echo "Current Price:      \$$current_price"
+        echo "Estimated Proceeds: \$$estimated"
+        echo "Order Type:         $order_type"
+        echo "Limit Price:        $limit_txt"
+        echo "Stop Loss:          none"
+        echo "Take Profit:        none"
+        echo "Time in Force:      ${tif:-n/a}"
+        echo "Client Order ID:    $client_order_id"
+        echo "Mode:               $mode_label"
+    fi
+    echo "============================================"
+    echo ""
+    local confirmation=""
+    if [[ "$mode" == "live" ]]; then
+        echo "LIVE ORDER: real money."
+        echo "Type the symbol and quantity to confirm (e.g. $symbol $qty):"
+        read -r confirmation
+        if [[ "$confirmation" != "$symbol $qty" ]]; then
+            log_info "${side_uc} order cancelled (typed confirmation did not match)"
+            echo "Order cancelled"
+            return 0
+        fi
+    else
+        echo "Proceed with order? (yes/no)"
+        read -r confirmation
+        if [[ "$confirmation" != "yes" ]]; then
+            log_info "$(echo "${side:0:1}" | tr '[:lower:]' '[:upper:]')${side:1} order cancelled"
+            echo "Order cancelled"
+            return 0
+        fi
+    fi
+
+    if ! reason=$(order_lock_acquire); then
+        log_error "$reason"
+        return 1
+    fi
+
+    order_ledger_append "$(jq -cn --argjson e "$(date +%s)" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --arg day "$(_os_trading_day)" --arg cid "$client_order_id" --arg b "$BROKER_CHOICE" --arg m "$mode" \
+        --arg s "$symbol" --arg side "$side" --arg q "$qty" --arg t "$order_type" --arg lp "$limit_price" \
+        --arg sp "$stop_price" --arg tp "$take_profit" --arg n "${notional:-0}" '
+        {ts_epoch: $e, ts: $ts, trading_day: $day, client_order_id: $cid, broker: $b, mode: $m,
+         symbol: $s, side: $side, qty: ($q | tonumber), type: $t,
+         limit_price: (if $lp == "" then null else $lp end),
+         stop_price: (if $sp == "" then null else $sp end),
+         take_profit_price: (if $tp == "" then null else $tp end),
+         notional: ($n | tonumber), status: "submitted", broker_order_id: null}')"
+
+    log_info "Placing $side order via $BROKER_CHOICE: $qty shares of $symbol ($order_type, bracket $bracket, client order id $client_order_id)"
+
+    local order rc=0
+    if [[ "$BROKER_CHOICE" == "alpaca" ]]; then
+        if [[ "$bracket" == "true" ]]; then
+            order=$(alpaca_place_bracket_order "$symbol" "$qty" "$side" "$limit_price" "$stop_price" "$take_profit" \
+                "$client_order_id" "$order_type" "$tif") || rc=$?
+        else
+            order=$(alpaca_place_order "$symbol" "$qty" "$side" "$order_type" "$limit_price" "$client_order_id" \
+                "$( [[ "$order_type" == "limit" ]] && echo "$tif")") || rc=$?
+        fi
+    else
+        order=$(${BROKER_PREFIX}place_order "$symbol" "$qty" "$side") || rc=$?
+    fi
+    [[ $rc -eq 0 && -z "$order" ]] && rc=1
+
+    local details
+    details=$(jq -cn --arg cid "$client_order_id" --arg s "$symbol" --arg side "$side" --arg q "$qty" \
+        --arg t "$order_type" --arg lp "$limit_price" --arg sp "$stop_price" --arg tp "$take_profit" \
+        '{client_order_id:$cid, symbol:$s, side:$side, qty:($q|tonumber), type:$t, limit_price:$lp, stop_price:$sp, take_profit_price:$tp}')
+
+    if [[ $rc -eq 0 ]]; then
+        local status broker_id ledger_status=accepted
+        status=$(echo "$order" | jq -r '.status // empty' 2>/dev/null | head -1)
+        broker_id=$(echo "$order" | jq -r '.order_id // .id // empty' 2>/dev/null | head -1)
+        [[ "$status" == "filled" ]] && ledger_status=filled
+        order_ledger_update "$client_order_id" "$ledger_status" "$broker_id"
+        order_lock_release
+        send_alert info order_placed "$side_uc $qty $symbol placed ($order_type, $client_order_id)" "$details"
+        [[ "$ledger_status" == "filled" ]] && \
+            send_alert info order_filled "$side_uc $qty $symbol filled ($client_order_id)" "$details"
+        log_info "$(echo "${side:0:1}" | tr '[:lower:]' '[:upper:]')${side:1} order placed successfully"
+        echo ""
+        echo "✓ ${side_uc} ORDER PLACED (${broker_uc})"
+        echo "$order"
+        return 0
+    fi
+
+    # The broker prints its error (e.g. "ERROR: Unprocessable Entity") on stdout
+    [[ -n "$order" ]] && echo "$order" >&2
+    if [[ "$order" == *"outcome unknown"* ]]; then
+        order_ledger_update "$client_order_id" unknown
+        send_alert critical error "$side_uc $qty $symbol: order outcome unknown ($client_order_id); check open orders" "$details"
+    else
+        order_ledger_update "$client_order_id" rejected
+        send_alert warn order_rejected "$side_uc $qty $symbol rejected ($client_order_id)" "$details"
+    fi
+    order_lock_release
+    log_error "Failed to place $side order"
+    return 1
+}
+
+# Place a buy order with confirmation (broker-agnostic; see place_guarded_order)
+# Args: SYMBOL QTY
+place_buy_order() {
+    if [[ -z "$1" ]] || [[ -z "$2" ]]; then
         log_error "Usage: place_buy_order SYMBOL QTY"
         return 1
     fi
-    validate_order_args "$symbol" "$qty" || return 1
-    
-    # Check the appropriate INITIALIZED flag based on broker
-    if [[ "$BROKER_CHOICE" == "alpaca" ]]; then
-        if [[ "$ALPACA_INITIALIZED" != "true" ]]; then
-            log_error "Broker not initialized"
-            return 1
-        fi
-    elif [[ "$BROKER_CHOICE" == "robinhood" ]]; then
-        if [[ "$ROBINHOOD_INITIALIZED" != "true" ]]; then
-            log_error "Broker not initialized"
-            return 1
-        fi
-    fi
-    
-    # Get current price for cost estimate
-    local current_price=$(get_order_price "$symbol")
-    if [[ -z "$current_price" || "$current_price" == "0" ]]; then
-        log_error "Failed to get current price for $symbol"
-        return 1
-    fi
-    
-    local estimated_cost=$(echo "$qty * $current_price" | bc)
-    
-    echo ""
-    echo "============================================"
-    echo "BUY ORDER CONFIRMATION ($(echo "$BROKER_CHOICE" | tr '[:lower:]' '[:upper:]'))"
-    echo "============================================"
-    echo "Symbol:          $symbol"
-    echo "Quantity:        $qty shares"
-    echo "Current Price:   \$$current_price"
-    echo "Estimated Cost:  \$$estimated_cost"
-    echo "============================================"
-    echo ""
-    echo "Proceed with order? (yes/no)"
-    read -r confirmation
-    
-    if [[ "$confirmation" != "yes" ]]; then
-        log_info "Buy order cancelled"
-        echo "Order cancelled"
-        return 0
-    fi
-    
-    log_info "Placing buy order via $BROKER_CHOICE: $qty shares of $symbol"
-    
-    local place_order_func="${BROKER_PREFIX}place_order"
-    local order
-    if ! order=$($place_order_func "$symbol" "$qty" "buy"); then
-        # The broker prints its error (e.g. "ERROR: Unprocessable Entity") on stdout
-        [[ -n "$order" ]] && echo "$order" >&2
-        order=""
-    fi
-    
-    if [[ -n "$order" ]]; then
-        log_info "Buy order placed successfully"
-        echo ""
-        echo "✓ BUY ORDER PLACED ($(echo "$BROKER_CHOICE" | tr '[:lower:]' '[:upper:]'))"
-        echo "$order"
-        return 0
-    else
-        log_error "Failed to place buy order"
-        return 1
-    fi
+    place_guarded_order buy "$1" "$2"
 }
 
-# Place a sell order with confirmation (broker-agnostic)
+# Place a sell order with confirmation (broker-agnostic; see place_guarded_order)
+# Args: SYMBOL QTY
 place_sell_order() {
-    local symbol="$1"
-    local qty="$2"
-    
-    if [[ -z "$symbol" ]] || [[ -z "$qty" ]]; then
+    if [[ -z "$1" ]] || [[ -z "$2" ]]; then
         log_error "Usage: place_sell_order SYMBOL QTY"
         return 1
     fi
-    validate_order_args "$symbol" "$qty" || return 1
-    
-    # Check the appropriate INITIALIZED flag based on broker
-    if [[ "$BROKER_CHOICE" == "alpaca" ]]; then
-        if [[ "$ALPACA_INITIALIZED" != "true" ]]; then
-            log_error "Broker not initialized"
-            return 1
-        fi
-    elif [[ "$BROKER_CHOICE" == "robinhood" ]]; then
-        if [[ "$ROBINHOOD_INITIALIZED" != "true" ]]; then
-            log_error "Broker not initialized"
-            return 1
-        fi
+    place_guarded_order sell "$1" "$2"
+}
+
+# Startup reconciliation for read-only Alpaca commands (warning only)
+# Returns: 0 always
+startup_reconcile_warning() {
+    [[ "$BROKER_CHOICE" == "alpaca" && "${RECONCILE_ON_STARTUP:-true}" == "true" ]] || return 0
+    local report
+    if ! report=$(reconcile_with_broker); then
+        echo "$report"
+        log_warn "Reconciliation mismatch (warning only for this command); review with --reconcile"
     fi
-    
-    # Get current price for cost estimate
-    local current_price=$(get_order_price "$symbol")
-    if [[ -z "$current_price" || "$current_price" == "0" ]]; then
-        log_error "Failed to get current price for $symbol"
-        return 1
-    fi
-    
-    local estimated_proceeds=$(echo "$qty * $current_price" | bc)
-    
-    echo ""
-    echo "============================================"
-    echo "SELL ORDER CONFIRMATION ($(echo "$BROKER_CHOICE" | tr '[:lower:]' '[:upper:]'))"
-    echo "============================================"
-    echo "Symbol:             $symbol"
-    echo "Quantity:           $qty shares"
-    echo "Current Price:      \$$current_price"
-    echo "Estimated Proceeds: \$$estimated_proceeds"
-    echo "============================================"
-    echo ""
-    echo "Proceed with order? (yes/no)"
-    read -r confirmation
-    
-    if [[ "$confirmation" != "yes" ]]; then
-        log_info "Sell order cancelled"
-        echo "Order cancelled"
-        return 0
-    fi
-    
-    log_info "Placing sell order via $BROKER_CHOICE: $qty shares of $symbol"
-    
-    local place_order_func="${BROKER_PREFIX}place_order"
-    local order
-    if ! order=$($place_order_func "$symbol" "$qty" "sell"); then
-        # The broker prints its error (e.g. "ERROR: Unprocessable Entity") on stdout
-        [[ -n "$order" ]] && echo "$order" >&2
-        order=""
-    fi
-    
-    if [[ -n "$order" ]]; then
-        log_info "Sell order placed successfully"
-        echo ""
-        echo "✓ SELL ORDER PLACED ($(echo "$BROKER_CHOICE" | tr '[:lower:]' '[:upper:]'))"
-        echo "$order"
-        return 0
-    else
-        log_error "Failed to place sell order"
-        return 1
-    fi
+    return 0
+}
+
+# --reconcile: report; exit code 0 match, 3 mismatch, 1 broker data unavailable
+run_reconcile_command() {
+    local rc
+    reconcile_with_broker
+    rc=$?
+    case $rc in
+        0) return 0 ;;
+        1) return 3 ;;
+        *) return 1 ;;
+    esac
 }
 
 # ============================================================================
@@ -1116,6 +1372,13 @@ FEATURES:
     • Account management, position tracking, order placement
     • Rate limiting and retry logic
 
+  Order Safety (live safety, Step 1):
+    • Limit orders with bracket stop loss / take profit by default, client order ids
+    • Kill switch (--halt / --resume), hard caps, daily loss halt, duplicate guard
+    • Reconciliation against a local baseline + order ledger (--reconcile)
+    • Market hours policy, PDT warning, paper/live guard (--live + typed confirmation)
+    • Alerts to logs/alerts.log, optional Slack / email
+
 VERSION: 6.3
 STATUS: Production-ready with optional enhancements
 
@@ -1193,8 +1456,41 @@ Usage: ./StockSwingTrader_Agent.sh [OPTIONS]
     
     --check-account                  Display account balance and details
     --view-positions                 List all open positions
-    --buy SYMBOL QTY                 Place a buy order with confirmation
-    --sell SYMBOL QTY                Place a sell order with confirmation
+    --buy SYMBOL QTY                 Place a buy order with confirmation (default: limit order
+                                     + bracket stop loss / take profit; see ORDER SAFETY)
+    --sell SYMBOL QTY                Place a sell order with confirmation (limit by default)
+
+=== ORDER SAFETY (live safety, Step 1) ===
+
+    Every --buy/--sell passes: kill switch, live guard, MAX_ORDER_QTY (before any
+    broker contact), market hours, reconciliation, daily loss halt, position and
+    notional caps (no short selling), duplicate guard, PDT warning. Blocks are
+    written to logs/alerts.log (Slack / email optional, off by default).
+
+    --order-type limit|market        Order type (default ORDER_TYPE=limit: reference price
+                                     +/- LIMIT_OFFSET_PCT 0.2%)
+    --limit-price PRICE              Explicit limit price (limit orders)
+    --no-bracket                     Send a plain order without the bracket stop loss /
+                                     take profit (default ORDER_BRACKET=true, buys, gtc)
+    --live                           Required for orders on a LIVE endpoint (anything but
+                                     paper-api.alpaca.markets or 127.0.0.1; Robinhood is
+                                     always live); you then type "SYMBOL QTY" to confirm.
+                                     Refused when the active config file is tracked in git.
+    --allow-mismatch                 Place the order even if reconciliation found a mismatch
+                                     (prints a warning and sends an alert)
+    --halt [REASON]                  Engage the kill switch: no new orders (no broker call)
+    --resume                         Release the kill switch
+    --safety-status                  Show mode, kill switch, caps, today's notional, ledger,
+                                     baseline and alert channels (no broker call)
+    --reconcile                      Compare broker positions / open orders with the local
+                                     baseline + order ledger (exit 0 match, 3 mismatch)
+    --reconcile-accept               Adopt the broker's current positions as the baseline
+
+    Config caps (config.template.sh "Live safety"): MAX_ORDER_QTY=100,
+    MAX_ORDER_NOTIONAL=2500, MAX_DAILY_NOTIONAL=10000, MAX_OPEN_POSITIONS=5,
+    DAILY_LOSS_LIMIT_PCT (empty = DEFAULT_RISK_LEVEL 2/5/10%),
+    DUPLICATE_ORDER_WINDOW_SECONDS=300, OUTSIDE_HOURS_POLICY=refuse|queue,
+    PDT_EQUITY_THRESHOLD=25000, RECONCILE_ON_STARTUP=true, SST_STATE_DIR (.state/)
 
 === BACKTESTING OPTIONS ===
 
@@ -1234,7 +1530,11 @@ Broker Trading:
     ./StockSwingTrader_Agent.sh --buy AAPL 10
     ./StockSwingTrader_Agent.sh --sell MSFT 5
     ./StockSwingTrader_Agent.sh --broker robinhood --check-account
-    ./StockSwingTrader_Agent.sh --broker robinhood --buy AAPL 10
+    ./StockSwingTrader_Agent.sh --broker robinhood --buy AAPL 10 --live
+    ./StockSwingTrader_Agent.sh --buy AAPL 2 --order-type market --no-bracket
+    ./StockSwingTrader_Agent.sh --reconcile-accept
+    ./StockSwingTrader_Agent.sh --halt "news event"
+    ./StockSwingTrader_Agent.sh --safety-status
 
 EOF
 }
@@ -1255,6 +1555,12 @@ main() {
     local trading_sell_qty=""
     local trading_buy_requested=false
     local trading_sell_requested=false
+    local trading_reconcile=false
+    local trading_reconcile_accept=false
+    
+    # Local safety commands (no broker): halt | resume | safety-status
+    local local_command=""
+    local local_halt_reason=""
     
     # Backtest flags
     local backtest_symbols=""
@@ -1348,6 +1654,61 @@ main() {
                 SCORING_MODE=legacy
                 export SCORING_MODE
                 log_info "Legacy scoring enabled (--legacy-score: 80% technical average + 20% sentiment)"
+                shift
+                ;;
+            --order-type)
+                ORDER_TYPE_OVERRIDE="$2"
+                if ! [[ "$ORDER_TYPE_OVERRIDE" =~ ^(limit|market)$ ]]; then
+                    log_error "Invalid --order-type: '${2:-}' (use limit or market)"
+                    exit 1
+                fi
+                shift 2
+                ;;
+            --limit-price)
+                ORDER_LIMIT_PRICE="$2"
+                if ! [[ "$ORDER_LIMIT_PRICE" =~ ^[0-9]+(\.[0-9]+)?$ ]] || ! _os_gt "$ORDER_LIMIT_PRICE" 0; then
+                    log_error "Invalid --limit-price: '${2:-}' (must be a number > 0)"
+                    exit 1
+                fi
+                shift 2
+                ;;
+            --no-bracket)
+                ORDER_NO_BRACKET=true
+                shift
+                ;;
+            --live)
+                ORDER_LIVE_FLAG=true
+                shift
+                ;;
+            --allow-mismatch)
+                RECONCILE_ALLOW_MISMATCH=true
+                shift
+                ;;
+            --halt)
+                local_command="halt"
+                if [[ $# -ge 2 && "$2" != --* ]]; then
+                    local_halt_reason="$2"
+                    shift 2
+                else
+                    shift
+                fi
+                ;;
+            --resume)
+                local_command="resume"
+                shift
+                ;;
+            --safety-status)
+                local_command="safety-status"
+                shift
+                ;;
+            --reconcile)
+                trading_reconcile=true
+                broker_trading_mode=true
+                shift
+                ;;
+            --reconcile-accept)
+                trading_reconcile_accept=true
+                broker_trading_mode=true
                 shift
                 ;;
             --check-account)
@@ -1447,6 +1808,39 @@ main() {
     log_info "Broker: $BROKER_CHOICE"
     log_info "Debug mode: $DEBUG_MODE"
     
+    # Local safety commands: no broker is loaded or contacted
+    if [[ -n "$local_command" ]]; then
+        current_endpoint_mode >/dev/null
+        case "$local_command" in
+            halt)
+                kill_switch_engage "${local_halt_reason:-manual halt (--halt)}" >/dev/null || {
+                    log_error "Could not write the kill switch file: $(kill_switch_file)"
+                    exit 1
+                }
+                echo "KILL SWITCH ENGAGED: ${local_halt_reason:-manual halt (--halt)}"
+                echo "No new orders until --resume ($(kill_switch_file))"
+                exit 0
+                ;;
+            resume)
+                if kill_switch_active >/dev/null; then
+                    kill_switch_release >/dev/null || exit 1
+                    echo "Kill switch released; orders are allowed again"
+                else
+                    echo "Kill switch was not active"
+                fi
+                exit 0
+                ;;
+            safety-status)
+                if [[ "$BROKER_CHOICE" == "alpaca" ]]; then
+                    safety_status_report "$BROKER_CHOICE" "${ALPACA_BASE_URL:-}"
+                else
+                    safety_status_report "$BROKER_CHOICE" ""
+                fi
+                exit 0
+                ;;
+        esac
+    fi
+    
     # Initialize enabled enhancements
     if [[ "$ENABLE_ALL_ENHANCEMENTS" == "true" ]]; then
         init_all_enhancements
@@ -1503,6 +1897,21 @@ main() {
             validate_order_args "$trading_sell_symbol" "$trading_sell_qty" || exit 1
         fi
         
+        # Endpoint mode, printed once; a LIVE endpoint with a git-tracked
+        # config file is refused for every broker command
+        current_endpoint_mode >/dev/null
+        echo "Mode: $(endpoint_mode_label "$SST_ENDPOINT_MODE") ($BROKER_CHOICE)"
+        check_live_config_guard || exit 1
+        
+        # Order checks that need no broker (kill switch, live guard,
+        # MAX_ORDER_QTY) run before the broker is contacted
+        if [[ "$trading_buy_requested" == "true" ]]; then
+            order_prechecks buy "$trading_buy_symbol" "$trading_buy_qty" || exit 1
+        fi
+        if [[ "$trading_sell_requested" == "true" ]]; then
+            order_prechecks sell "$trading_sell_symbol" "$trading_sell_qty" || exit 1
+        fi
+        
         # Load and initialize broker
         if ! load_broker_module; then
             log_error "Failed to load $BROKER_CHOICE broker module"
@@ -1516,12 +1925,24 @@ main() {
         fi
         
         # Handle individual trading commands
+        if [[ "$trading_reconcile_accept" == "true" ]]; then
+            reconcile_accept
+            return $?
+        fi
+        
+        if [[ "$trading_reconcile" == "true" ]]; then
+            run_reconcile_command
+            return $?
+        fi
+        
         if [[ "$trading_check_account" == "true" ]]; then
+            startup_reconcile_warning
             show_broker_account
             return $?
         fi
         
         if [[ "$trading_view_positions" == "true" ]]; then
+            startup_reconcile_warning
             show_broker_positions
             return $?
         fi
@@ -1537,6 +1958,7 @@ main() {
         fi
         
         # If no specific command, show account and positions
+        startup_reconcile_warning
         show_broker_account
         echo ""
         show_broker_positions
