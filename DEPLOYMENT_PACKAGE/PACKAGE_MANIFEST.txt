@@ -20,7 +20,18 @@ DEPLOYMENT_PACKAGE/
 ├── StockSwingTrader_Agent.sh          Main orchestrator script
 ├── config.template.sh                 Configuration template
 ├── requirements.txt                   Python dependencies
+├── requirements-agents.txt            Agent layer pins (Python 3.12 venv .venv-agents)
 ├── .gitignore                        Git ignore rules
+│
+├── agents/                           Agent layer (python -m agents), Phase 0-1
+│   ├── __init__.py, __main__.py, cli.py, config.py, envelope.py, cache.py, fixtures.py
+│   ├── schemas/                      envelope.schema.json, gate.schema.json
+│   ├── llm/                          base.py, providers.py, budget.py ($0, LLM_PROVIDER=none)
+│   ├── data/                         alpaca.py (GET-only bars), bars.py, yf_fallback.py
+│   ├── technical/                    talib_features.py, agent.py, bash_compat.py
+│   ├── signals/                      base.py, mean_reversion.py, trend_follow.py, v2_confluence.py
+│   └── validate/                     agent.py, engine.py, walkforward.py, stats.py, benchmarks.py,
+│                                     trials.py, gate.py, report.py, universe.py
 │
 ├── lib/                              Core modules
 │   ├── ml_predictor.sh               ML inference wrapper
@@ -43,6 +54,7 @@ DEPLOYMENT_PACKAGE/
 │   ├── trading_thresholds.sh         Strategy threshold constants
 │   ├── kelly_sizing.sh               Kelly sizing + daily risk budget (--kelly)
 │   ├── mirofish_adapter.sh           MiroFish cache adapter (--mirofish)
+│   ├── agent_adapter.sh              Agent cache + gate reader (weights default 0)
 │   │
 │   ├── backtest.sh                   Backtesting framework
 │   ├── backtest_engine.py            Backtest engine
@@ -111,7 +123,7 @@ CORE MODULES CHECKLIST
     [✓] lib/indicators.sh (15,107 bytes)
     [✓] lib/strategy_mean_reversion.sh (10,965 bytes)
     [✓] lib/strategy_trend_follow.sh (10,853 bytes)
-    [✓] lib/scoring.sh (42,154 bytes)
+    [✓] lib/scoring.sh (45,935 bytes)
     [✓] lib/sentiment.sh (14,935 bytes)
     [✓] lib/risk_management.sh (14,760 bytes)
     [✓] lib/trade_journal.sh (12,248 bytes)
@@ -120,6 +132,48 @@ CORE MODULES CHECKLIST
 [✓] Phase 1 Modules (ported from v6.2, off by default):
     [✓] lib/kelly_sizing.sh (15,850 bytes)
     [✓] lib/mirofish_adapter.sh (8,675 bytes)
+[✓] Agent Layer (Phase 0-1, off by default; no tests/ or fixtures in the package):
+    [✓] lib/agent_adapter.sh (16,579 bytes)
+    [✓] requirements-agents.txt (1,295 bytes)
+    [✓] config.template.sh (19,411 bytes)
+    [✓] .gitignore (751 bytes)
+    [✓] agents/ (36 files, no __pycache__):
+        [✓] agents/__init__.py (406 bytes)
+        [✓] agents/__main__.py (155 bytes)
+        [✓] agents/cache.py (3,697 bytes)
+        [✓] agents/cli.py (6,149 bytes)
+        [✓] agents/config.py (5,336 bytes)
+        [✓] agents/data/__init__.py (264 bytes)
+        [✓] agents/data/alpaca.py (12,638 bytes)
+        [✓] agents/data/bars.py (3,207 bytes)
+        [✓] agents/data/yf_fallback.py (1,473 bytes)
+        [✓] agents/envelope.py (4,543 bytes)
+        [✓] agents/fixtures.py (1,282 bytes)
+        [✓] agents/llm/__init__.py (480 bytes)
+        [✓] agents/llm/base.py (719 bytes)
+        [✓] agents/llm/budget.py (3,051 bytes)
+        [✓] agents/llm/providers.py (5,258 bytes)
+        [✓] agents/schemas/envelope.schema.json (3,033 bytes)
+        [✓] agents/schemas/gate.schema.json (5,425 bytes)
+        [✓] agents/signals/__init__.py (1,063 bytes)
+        [✓] agents/signals/base.py (3,257 bytes)
+        [✓] agents/signals/mean_reversion.py (3,270 bytes)
+        [✓] agents/signals/trend_follow.py (1,744 bytes)
+        [✓] agents/signals/v2_confluence.py (5,839 bytes)
+        [✓] agents/technical/__init__.py (446 bytes)
+        [✓] agents/technical/agent.py (5,943 bytes)
+        [✓] agents/technical/bash_compat.py (48,284 bytes)
+        [✓] agents/technical/talib_features.py (6,164 bytes)
+        [✓] agents/validate/__init__.py (568 bytes)
+        [✓] agents/validate/agent.py (22,241 bytes)
+        [✓] agents/validate/benchmarks.py (2,718 bytes)
+        [✓] agents/validate/engine.py (11,217 bytes)
+        [✓] agents/validate/gate.py (6,986 bytes)
+        [✓] agents/validate/report.py (11,452 bytes)
+        [✓] agents/validate/stats.py (6,537 bytes)
+        [✓] agents/validate/trials.py (2,860 bytes)
+        [✓] agents/validate/universe.py (841 bytes)
+        [✓] agents/validate/walkforward.py (4,673 bytes)
 [✓] Broker Integration Modules:
     [✓] lib/alpaca_broker.sh (36,593 bytes)
     [✓] lib/alpaca_wrappers.sh (7,962 bytes)
@@ -132,7 +186,7 @@ CORE MODULES CHECKLIST
     [✓] lib/html_report.sh (23,272 bytes)
 
 [✓] Main Orchestrator:
-    [✓] StockSwingTrader_Agent.sh (82,575 bytes)
+    [✓] StockSwingTrader_Agent.sh (85,347 bytes)
 
 ================================================================================
 DEPENDENCIES

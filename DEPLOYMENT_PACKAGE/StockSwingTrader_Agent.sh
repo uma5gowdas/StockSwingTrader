@@ -881,6 +881,52 @@ extract_closes() {
     echo "$closes"
 }
 
+# Optional Technical Agent regime (plan D14; off by default)
+# Args: symbol, v2_inputs_json
+# Returns: v2_inputs_json, unchanged unless AGENT_TECHNICAL_ENABLED=true.
+#   Enabled (needs AGENTS_ENABLED=true too, else agent_get says DISABLED):
+#   reads the cache written by `python -m agents technical run` (run it
+#   beforehand, e.g. nightly; the scan never runs Python agents). Status OK,
+#   features.regime_adx one of sideways|trending_bull|trending_bear|volatile
+#   and the cache not synthetic (synthetic allowed only with SST_OFFLINE=1)
+#   -> v2_inputs + {regime: <regime_adx>, regime_source: "technical_agent",
+#   regime_bash: <old regime>}; otherwise v2_inputs + {regime_source: "bash",
+#   technical_agent_status: <status>}. No network.
+# Example: AGENTS_ENABLED=true AGENT_TECHNICAL_ENABLED=true ./StockSwingTrader_Agent.sh --symbols AAPL
+apply_technical_agent_regime() {
+    local symbol=$1 v2_inputs=$2
+    if [[ "${AGENT_TECHNICAL_ENABLED:-false}" != "true" ]] || [[ "$v2_inputs" == "null" ]] \
+        || ! declare -f agent_get >/dev/null; then
+        echo "$v2_inputs"
+        return 0
+    fi
+    local t status regime_adx synthetic out
+    t=$(agent_get technical "$symbol" 2>/dev/null)
+    status=$(echo "$t" | jq -r '.status // "INVALID"' 2>/dev/null)
+    regime_adx=$(echo "$t" | jq -r '.features.regime_adx // empty' 2>/dev/null)
+    synthetic=$(echo "$t" | jq -r '.synthetic // false' 2>/dev/null)
+    [[ -n "$status" ]] || status="INVALID"
+    if [[ "$status" == "OK" && "$synthetic" == "true" && "${SST_OFFLINE:-0}" != "1" ]]; then
+        status="SYNTHETIC"
+    fi
+    case "$regime_adx" in
+        sideways|trending_bull|trending_bear|volatile) ;;
+        *) [[ "$status" == "OK" ]] && status="NO_REGIME" ;;
+    esac
+    if [[ "$status" == "OK" ]]; then
+        out=$(echo "$v2_inputs" | jq -c --arg r "$regime_adx" \
+            '. + {regime: $r, regime_source: "technical_agent", regime_bash: .regime}' 2>/dev/null)
+    else
+        out=$(echo "$v2_inputs" | jq -c --arg s "$status" \
+            '. + {regime_source: "bash", technical_agent_status: $s}' 2>/dev/null)
+    fi
+    if [[ -n "$out" ]]; then
+        echo "$out"
+    else
+        echo "$v2_inputs"
+    fi
+}
+
 # Calculate all technical indicators for a stock
 calculate_all_indicators() {
     local symbol=$1
@@ -955,6 +1001,7 @@ calculate_all_indicators() {
             "${rsi_value:-50}" "${macd_v:-0}" "${signal_v:-0}" "${bb_u:-0}" "${bb_l:-0}" 2>/dev/null)
         [[ -z "$v2_inputs" ]] && v2_inputs="null"
     fi
+    v2_inputs=$(apply_technical_agent_regime "$symbol" "$v2_inputs")
 
     # Output all indicators as JSON
     echo "{
@@ -1447,6 +1494,12 @@ Usage: ./StockSwingTrader_Agent.sh [OPTIONS]
     --mirofish                       Use MiroFish scan cache (cache/mirofish/<SYMBOL>.json) if fresh (<36h);
                                      no network calls; skipped instantly when absent (also: MIROFISH_ENABLED=true)
     --phase1                         Enable --kelly and --mirofish (--full does not include them)
+=== AGENT LAYER (optional, default off; environment / config.sh) ===
+    AGENTS_ENABLED=true AGENT_TECHNICAL_ENABLED=true
+                                     Use the Technical Agent regime (real ADX14) from
+                                     cache/agents/technical/<date>/<SYMBOL>.json for v2 scoring.
+                                     Run `.venv-agents/bin/python -m agents technical run --symbols ...`
+                                     beforehand (nightly); the scan never runs Python agents.
 
 === BROKER & TRADING OPTIONS ===
 

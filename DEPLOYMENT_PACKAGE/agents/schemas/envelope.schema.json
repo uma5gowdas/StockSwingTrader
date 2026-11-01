@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stockswingtrader.local/schemas/envelope.schema.json",
+  "title": "StockSwingTrader agent envelope",
+  "description": "Common JSON envelope written by every agent to cache/agents/<agent>/<as_of>/<SYMBOL>.json (six-agent plan section 5.2). Rule checks not expressible here (available=false implies score null and data_sources []; synthetic implies a warning) are enforced by agents.envelope.validate_envelope.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "agent", "agent_version", "symbol", "as_of", "generated_at", "ttl_hours",
+    "available", "reason", "data_sources", "synthetic", "score", "direction",
+    "confidence", "veto", "features", "evidence", "llm", "validation", "warning"
+  ],
+  "properties": {
+    "agent": {"enum": ["market", "fundamental", "technical", "quant", "validate", "portfolio"]},
+    "agent_version": {"type": "string", "minLength": 1},
+    "symbol": {"type": "string", "pattern": "^[A-Z0-9.-]{1,10}$"},
+    "as_of": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+    "generated_at": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"},
+    "ttl_hours": {"type": "number", "exclusiveMinimum": 0},
+    "available": {"type": "boolean"},
+    "reason": {"type": ["string", "null"]},
+    "data_sources": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "synthetic": {"type": "boolean"},
+    "score": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+    "direction": {"enum": ["bullish", "bearish", "neutral", null]},
+    "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+    "veto": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["active", "code", "detail"],
+      "properties": {
+        "active": {"type": "boolean"},
+        "code": {"type": ["string", "null"]},
+        "detail": {"type": ["string", "null"]}
+      }
+    },
+    "features": {"type": "object"},
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type", "ref"],
+        "properties": {
+          "type": {"type": "string"},
+          "ref": {"type": "string"},
+          "url": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "llm": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "model", "tokens", "cost_usd", "cached"],
+      "properties": {
+        "mode": {"enum": ["none", "ollama", "cloud"]},
+        "model": {"type": ["string", "null"]},
+        "tokens": {"type": "integer", "minimum": 0},
+        "cost_usd": {"type": "number", "minimum": 0},
+        "cached": {"type": "boolean"}
+      }
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gate_id", "passed"],
+      "properties": {
+        "gate_id": {"type": ["string", "null"]},
+        "passed": {"type": "boolean"}
+      }
+    },
+    "warning": {"type": ["string", "null"]}
+  }
+}

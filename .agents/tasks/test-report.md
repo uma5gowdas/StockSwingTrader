@@ -1,6 +1,6 @@
 # StockSwingTrader v6.3 - Test Report
 
-**Generated:** 2026-10-31 21:41:47  
+**Generated:** 2026-11-01 02:36:26  
 **Command:** `bash tests/test_runner.sh`  
 **Result:** ✅ All suites passed
 
@@ -8,9 +8,9 @@
 
 | Metric | Value |
 |--------|-------|
-| Suites | 18 (18 passed, 0 failed) |
-| Total Tests | 960 |
-| Tests Passed | **960** |
+| Suites | 26 (26 passed, 0 failed, 0 skipped) |
+| Total Tests | 1580 |
+| Tests Passed | **1580** |
 | Tests Failed | **0** |
 | Success Rate | 100% |
 
@@ -18,24 +18,32 @@
 
 | Suite | Status | Time | Details |
 |-------|--------|------|---------|
-| ML Predictor | ✅ PASS | 25945ms | 29 passed, 0 failed |
-| Regime Weighting | ✅ PASS | 28836ms | 30 passed, 0 failed |
-| Kalman Filter | ✅ PASS | 3203ms | 18 passed, 0 failed |
-| Backtest | ✅ PASS | 6775ms | 34 passed, 0 failed |
-| ML Scoring Integration | ✅ PASS | 31313ms | 29 passed, 0 failed |
-| Regime Detector | ✅ PASS | 31105ms | 20 passed, 0 failed |
-| Scoring Integration (Python) | ✅ PASS | 96ms | 32 passed, 0 failed |
-| Dashboard Components | ✅ PASS | 1934ms | 27 passed, 0 failed |
-| Backend API | ✅ PASS | 654ms | 17 passed, 0 failed |
-| Kelly Sizing & Risk Budget | ✅ PASS | 9140ms | 51 passed, 0 failed |
-| Sentiment (deterministic) | ✅ PASS | 3419ms | 36 passed, 0 failed |
-| MiroFish Cache Adapter | ✅ PASS | 12529ms | 42 passed, 0 failed |
-| Phase 1 Integration (CLI) | ✅ PASS | 190297ms | 38 passed, 0 failed |
-| No Silent Fake Data | ✅ PASS | 126023ms | 71 passed, 0 failed |
-| Broker Commands (stubbed) | ✅ PASS | 82336ms | 136 passed, 0 failed |
-| V2 CLI Scoring | ✅ PASS | 144496ms | 81 passed, 0 failed |
-| Order Execution (stubbed) | ✅ PASS | 40838ms | 81 passed, 0 failed |
-| Live Safety (stubbed) | ✅ PASS | 189308ms | 188 passed, 0 failed |
+| ML Predictor | ✅ PASS | 25479ms | 29 passed, 0 failed |
+| Regime Weighting | ✅ PASS | 35052ms | 30 passed, 0 failed |
+| Kalman Filter | ✅ PASS | 3758ms | 18 passed, 0 failed |
+| Backtest | ✅ PASS | 8110ms | 34 passed, 0 failed |
+| ML Scoring Integration | ✅ PASS | 36387ms | 29 passed, 0 failed |
+| Regime Detector | ✅ PASS | 37600ms | 20 passed, 0 failed |
+| Scoring Integration (Python) | ✅ PASS | 94ms | 32 passed, 0 failed |
+| Dashboard Components | ✅ PASS | 1958ms | 27 passed, 0 failed |
+| Backend API | ✅ PASS | 793ms | 17 passed, 0 failed |
+| Kelly Sizing & Risk Budget | ✅ PASS | 6989ms | 51 passed, 0 failed |
+| Sentiment (deterministic) | ✅ PASS | 3871ms | 36 passed, 0 failed |
+| MiroFish Cache Adapter | ✅ PASS | 13804ms | 42 passed, 0 failed |
+| Phase 1 Integration (CLI) | ✅ PASS | 199613ms | 38 passed, 0 failed |
+| No Silent Fake Data | ✅ PASS | 116967ms | 71 passed, 0 failed |
+| Broker Commands (stubbed) | ✅ PASS | 76043ms | 137 passed, 0 failed |
+| V2 CLI Scoring | ✅ PASS | 142557ms | 81 passed, 0 failed |
+| Order Execution (stubbed) | ✅ PASS | 37416ms | 81 passed, 0 failed |
+| Live Safety (stubbed) | ✅ PASS | 177417ms | 188 passed, 0 failed |
+| Agents: Contract | ✅ PASS | 3617ms | 24 passed, 0 failed |
+| Agents: Data Clients | ✅ PASS | 9129ms | 20 passed, 0 failed |
+| Agent Adapter (bash) | ✅ PASS | 10941ms | 83 passed, 0 failed |
+| Scoring + Agents (zero-weight identity) | ✅ PASS | 207098ms | 90 passed, 0 failed |
+| Agents: Technical | ✅ PASS | 6684ms | 21 passed, 0 failed |
+| Agents: Parity vs bash | ✅ PASS | 144334ms | 322 passed, 0 failed |
+| Agents: Validation | ✅ PASS | 30737ms | 36 passed, 0 failed |
+| Agents: CLI (offline) | ✅ PASS | 59744ms | 23 passed, 0 failed |
 
 Counts are taken from each suite's own summary output. A suite passes only
 when it exits 0 with at least one passed test and zero failures.
@@ -59,6 +67,14 @@ when it exits 0 with at least one passed test and zero failures.
 | Phase 1 Integration (CLI) | tests/test_phase1_integration.sh | bash | StockSwingTrader_Agent.sh --kelly/--mirofish/--phase1, help, --backtest syntax, MiroFish-enabled timing |
 | No Silent Fake Data | tests/test_no_fake_data.sh | bash | data_source rules with yfinance stubs (no data, error, fixture) |
 | Broker Commands (stubbed) | tests/test_broker_commands.sh | bash | --check-account/--view-positions/--buy/--sell and deprecated aliases against a local Alpaca stub, Robinhood with stub functions, confirmation yes/no, invalid input, --ml/--kalman loading, libs keep SCRIPT_DIR |
+| Agents: Contract | tests/test_agents_contract.py | .venv-agents python (SKIP without venv) | agents/ envelope schema + rules, atomic cache writes, path guards, config masking, assert_paper, LLM providers + $0 budget, CLI exit codes |
+| Agents: Data Clients | tests/test_agents_data.py | .venv-agents python (SKIP without venv) | agents/data Alpaca bars client against a 127.0.0.1 stub (pagination, GET only, host whitelist, sip->iex, retry, stale, timeout, cache), offline fixtures, yfinance fallback off |
+| Agent Adapter (bash) | tests/test_agent_adapter.sh | bash | lib/agent_adapter.sh statuses, gates, latest dir, ttl, weight clamp/cap, components reasons, no network |
+| Scoring + Agents (zero-weight identity) | tests/test_scoring_agents.sh | bash | v2 goldens captured at 970af57 unchanged (agents off, and on with weights 0), applied weight math, gate/staleness reasons, sentiment ordering, Technical Agent scan hook (regime_adx) |
+| Agents: Technical | tests/test_agents_technical.py | .venv-agents python (SKIP without venv) | TA-Lib features (ranges, ADX14), regime_adx rule table, trend_state, envelopes (synthetic, < 60 bars unavailable), technical run/status CLI exit codes |
+| Agents: Parity vs bash | tests/test_agents_parity.sh | bash + .venv-agents python (SKIP without venv) | TA-Lib vs bash indicator tolerances, bash_compat port exact vs bash (indicators, 40 score_* edge inputs), v2 port vs 65 stored bash windows, 3 live bash recomputes |
+| Agents: Validation | tests/test_agents_validate.py | .venv-agents python (SKIP without venv) | stats (Sharpe, DSR, PSR, PBO/CSCV), walk-forward folds, vectorbt gate engine (next-open fills, ATR stop, TP), legacy parity vs lib/backtest_engine.py, gate criteria + schema, report HTML, trial log, v2 replay vs bash_compat |
+| Agents: CLI (offline) | tests/test_agents_cli.sh | bash + .venv-agents python (SKIP without venv) | validate gate --offline (4 synthetic gate files, report), agent_gate_get contract, missing data exit 2, validate parity --offline, technical run exit 2, validate status, no network |
 
 ## Environment
 
@@ -67,3 +83,4 @@ when it exits 0 with at least one passed test and zero failures.
 - **Python:** Python 3.13.12
 - **Node:** v25.6.1
 - **Offline mode:** SST_OFFLINE=1 (synthetic/seeded data, no network)
+- **Agent venv:** /Users/P3291917/Builds/6/StockSwingTrader-v6.3/.venv-agents (Python 3.12.12)
