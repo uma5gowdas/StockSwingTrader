@@ -63,3 +63,6 @@ config.live.sh
 .venv-agents/
 # Qlib/MLflow file store guard (the quant agent writes cache/agents/quant/mlruns)
 mlruns/
+
+# Local credentials: each user creates their own (cp config.template.sh config.sh)
+config.sh
