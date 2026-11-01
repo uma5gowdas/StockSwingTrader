@@ -1,6 +1,6 @@
 # StockSwingTrader v6.3 - Test Report
 
-**Generated:** 2026-10-31 20:58:23  
+**Generated:** 2026-10-31 21:17:36  
 **Command:** `bash tests/test_runner.sh`  
 **Result:** ✅ All suites passed
 
@@ -18,24 +18,24 @@
 
 | Suite | Status | Time | Details |
 |-------|--------|------|---------|
-| ML Predictor | ✅ PASS | 23728ms | 29 passed, 0 failed |
-| Regime Weighting | ✅ PASS | 28806ms | 30 passed, 0 failed |
-| Kalman Filter | ✅ PASS | 3008ms | 18 passed, 0 failed |
-| Backtest | ✅ PASS | 7107ms | 34 passed, 0 failed |
-| ML Scoring Integration | ✅ PASS | 32758ms | 29 passed, 0 failed |
-| Regime Detector | ✅ PASS | 29516ms | 20 passed, 0 failed |
-| Scoring Integration (Python) | ✅ PASS | 97ms | 32 passed, 0 failed |
-| Dashboard Components | ✅ PASS | 1838ms | 27 passed, 0 failed |
-| Backend API | ✅ PASS | 710ms | 17 passed, 0 failed |
-| Kelly Sizing & Risk Budget | ✅ PASS | 5671ms | 51 passed, 0 failed |
-| Sentiment (deterministic) | ✅ PASS | 3324ms | 36 passed, 0 failed |
-| MiroFish Cache Adapter | ✅ PASS | 12392ms | 42 passed, 0 failed |
-| Phase 1 Integration (CLI) | ✅ PASS | 173328ms | 38 passed, 0 failed |
-| No Silent Fake Data | ✅ PASS | 99187ms | 71 passed, 0 failed |
-| Broker Commands (stubbed) | ✅ PASS | 67558ms | 136 passed, 0 failed |
-| V2 CLI Scoring | ✅ PASS | 129748ms | 81 passed, 0 failed |
-| Order Execution (stubbed) | ✅ PASS | 33096ms | 81 passed, 0 failed |
-| Live Safety (stubbed) | ✅ PASS | 153832ms | 188 passed, 0 failed |
+| ML Predictor | ✅ PASS | 30189ms | 29 passed, 0 failed |
+| Regime Weighting | ✅ PASS | 33734ms | 30 passed, 0 failed |
+| Kalman Filter | ✅ PASS | 3193ms | 18 passed, 0 failed |
+| Backtest | ✅ PASS | 8156ms | 34 passed, 0 failed |
+| ML Scoring Integration | ✅ PASS | 36674ms | 29 passed, 0 failed |
+| Regime Detector | ✅ PASS | 31983ms | 20 passed, 0 failed |
+| Scoring Integration (Python) | ✅ PASS | 112ms | 32 passed, 0 failed |
+| Dashboard Components | ✅ PASS | 1939ms | 27 passed, 0 failed |
+| Backend API | ✅ PASS | 617ms | 17 passed, 0 failed |
+| Kelly Sizing & Risk Budget | ✅ PASS | 6151ms | 51 passed, 0 failed |
+| Sentiment (deterministic) | ✅ PASS | 3541ms | 36 passed, 0 failed |
+| MiroFish Cache Adapter | ✅ PASS | 12834ms | 42 passed, 0 failed |
+| Phase 1 Integration (CLI) | ✅ PASS | 173282ms | 38 passed, 0 failed |
+| No Silent Fake Data | ✅ PASS | 99389ms | 71 passed, 0 failed |
+| Broker Commands (stubbed) | ✅ PASS | 67856ms | 136 passed, 0 failed |
+| V2 CLI Scoring | ✅ PASS | 129597ms | 81 passed, 0 failed |
+| Order Execution (stubbed) | ✅ PASS | 34678ms | 81 passed, 0 failed |
+| Live Safety (stubbed) | ✅ PASS | 162786ms | 188 passed, 0 failed |
 
 Counts are taken from each suite's own summary output. A suite passes only
 when it exits 0 with at least one passed test and zero failures.
