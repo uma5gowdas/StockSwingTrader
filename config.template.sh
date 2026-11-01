@@ -148,6 +148,12 @@ export AGENT_MAX_TOTAL_WEIGHT="${AGENT_MAX_TOTAL_WEIGHT:-0.30}"    # Cap on the 
 export AGENT_QUANT_WEIGHT="${AGENT_QUANT_WEIGHT:-0}"               # 0..0.30, gate quant_rank
 export AGENT_FUNDAMENTAL_WEIGHT="${AGENT_FUNDAMENTAL_WEIGHT:-0}"   # 0..0.30, gate fundamental_quality
 export AGENT_MARKET_WEIGHT="${AGENT_MARKET_WEIGHT:-0}"             # 0..0.30, gate market_news_score
+# AGENT_TECHNICAL_ENABLED=true (with AGENTS_ENABLED=true): the scan replaces
+# v2_inputs.regime with the Technical Agent's features.regime_adx (bash regime
+# rules with a real ADX14) when cache/agents/technical/<date>/<SYMBOL>.json is
+# OK and not synthetic; v2_inputs.regime_source says which one was used. Run
+# `.venv-agents/bin/python -m agents technical run --symbols ...` beforehand
+# (e.g. nightly); the scan never runs Python agents itself.
 export AGENT_TECHNICAL_ENABLED="${AGENT_TECHNICAL_ENABLED:-false}" # Technical agent cache feeds the scan
 export AGENT_BARS_FEED="${AGENT_BARS_FEED:-sip}"                   # sip (403 -> iex retry) | iex
 export AGENT_BARS_ADJUSTMENT="${AGENT_BARS_ADJUSTMENT:-all}"       # raw | split | dividend | all

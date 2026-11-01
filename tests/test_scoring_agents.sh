@@ -228,6 +228,63 @@ assert_equals "0|$(awk 'BEGIN { printf "%.1f", 3500 / 85 * 0.9 }')|$(awk 'BEGIN 
     "$(jget "$out" '[.components.ml_confidence, .components.regime_score, .components.technical_score, .components.volume_trend_score] | map(.weight_percent | tostring) | join("|")')" "ML unavailable weights 41.2/35.3/23.5 scaled by 0.9"
 
 # ============================================================================
+# 5. Technical Agent scan hook (D14): v2_inputs.regime from features.regime_adx
+# ============================================================================
+echo ""
+echo "Technical Agent scan hook:"
+TCACHE="$WORK_DIR/tcache"
+# mk_tech DIR SYMBOL REGIME_ADX [SYNTHETIC] [GENERATED_AT]: technical envelope
+mk_tech() {
+    local dir=$1 sym=$2 rg=$3 syn=${4:-false} t=${5:-$(iso_now)}
+    mkdir -p "$dir/technical/$TODAY"
+    jq -n --arg s "$sym" --arg d "$TODAY" --arg t "$t" --arg rg "$rg" --argjson syn "$syn" '
+        {agent:"technical", agent_version:"0.1.0", symbol:$s, as_of:$d, generated_at:$t, ttl_hours:36,
+         available:true, reason:null, data_sources:(if $syn then ["fixture"] else ["alpaca:sip"] end),
+         synthetic:$syn, score:55, direction:"neutral", confidence:0.5,
+         veto:{active:false, code:null, detail:null}, features:{regime_adx:$rg, adx_14:31.2},
+         evidence:[], llm:{mode:"none", model:null, tokens:0, cost_usd:0, cached:false},
+         validation:{gate_id:null, passed:false},
+         warning:(if $syn then "fixture" else null end)}' > "$dir/technical/$TODAY/$sym.json"
+}
+mk_tech "$TCACHE" AAPL volatile
+exp=$(expected e1_analyze_stock_AAPL)
+assert_equals "false" "$(jget "$exp" '.v2_inputs | has("regime_source")')" "golden (agents off): v2_inputs has no regime_source key"
+on=$(bash "$RUN" analyze AGENTS_ENABLED=true AGENT_TECHNICAL_ENABLED=true AGENT_CACHE_DIR="$TCACHE")
+assert_equals "volatile|technical_agent|$(jget "$exp" .v2_inputs.regime)" "$(jget "$on" '.v2_inputs | "\(.regime)|\(.regime_source)|\(.regime_bash)"')" "enabled + OK cache: v2_inputs.regime = features.regime_adx (volatile), regime_bash kept"
+assert_equals "volatile" "$(jget "$on" .confluence_v2.components.regime_score.regime)" "enabled + OK cache: v2 regime component uses the agent regime"
+off=$(bash "$RUN" analyze AGENT_CACHE_DIR="$TCACHE")
+assert_equals "$exp" "$off" "AGENT_TECHNICAL_ENABLED unset (cache present): analyze_stock golden identical"
+assert_equals "false" "$(jget "$off" '.v2_inputs | has("regime_source")')" "disabled: v2_inputs has no regime_source key"
+dis=$(bash "$RUN" analyze AGENT_TECHNICAL_ENABLED=true AGENT_CACHE_DIR="$TCACHE")
+assert_equals "$(jget "$exp" .v2_inputs.regime)|bash|DISABLED" "$(jget "$dis" '.v2_inputs | "\(.regime)|\(.regime_source)|\(.technical_agent_status)"')" "AGENT_TECHNICAL_ENABLED=true without AGENTS_ENABLED: bash regime, status DISABLED"
+assert_equals "$(echo "$exp" | jq -S -c 'del(.v2_inputs, .indicators.v2_inputs)')" "$(echo "$dis" | jq -S -c 'del(.v2_inputs, .indicators.v2_inputs)')" "DISABLED: everything but the two v2_inputs keys identical to the golden"
+
+# Direct cases of apply_technical_agent_regime (pure jq/file reads, no network)
+hook() {  # hook OFFLINE CACHE_DIR [ENV...] -> v2_inputs after the hook
+    local offline=$1 dir=$2
+    shift 2
+    : > "$WORK_DIR/empty_config.sh"
+    mkdir -p "$WORK_DIR/hookcwd"
+    env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" LANG=C LC_ALL=C SST_OFFLINE="$offline" \
+        SST_CONFIG_FILE="$WORK_DIR/empty_config.sh" REGIME_CACHE_DIR="$WORK_DIR/regime" \
+        SST_STATE_DIR="$WORK_DIR/state" ALERT_LOG_FILE="$WORK_DIR/alerts.log" LOG_FILE=/dev/null \
+        AGENTS_ENABLED=true AGENT_TECHNICAL_ENABLED=true AGENT_CACHE_DIR="$dir" "$@" /bin/bash -c '
+        cd "$2" || exit 1
+        source "$1/StockSwingTrader_Agent.sh" >/dev/null 2>&1
+        apply_technical_agent_regime AAPL "{\"obv_score\":61,\"regime\":\"sideways\"}"' _ "$PROJECT_DIR" "$WORK_DIR/hookcwd"
+}
+assert_equals '{"obv_score":61,"regime":"volatile","regime_source":"technical_agent","regime_bash":"sideways"}' "$(hook 0 "$TCACHE")" "hook: OK real-data cache -> regime replaced"
+d="$WORK_DIR/tsyn"; mk_tech "$d" AAPL trending_bear true
+assert_equals "sideways|bash|SYNTHETIC" "$(jget "$(hook 0 "$d")" '"\(.regime)|\(.regime_source)|\(.technical_agent_status)"')" "hook: synthetic cache online -> bash regime, status SYNTHETIC"
+assert_equals "trending_bear|technical_agent" "$(jget "$(hook 1 "$d")" '"\(.regime)|\(.regime_source)"')" "hook: synthetic cache with SST_OFFLINE=1 -> agent regime"
+d="$WORK_DIR/tbad"; mk_tech "$d" AAPL bogus
+assert_equals "sideways|bash|NO_REGIME" "$(jget "$(hook 0 "$d")" '"\(.regime)|\(.regime_source)|\(.technical_agent_status)"')" "hook: regime_adx not a known regime -> bash regime, NO_REGIME"
+d="$WORK_DIR/tstale"; mk_tech "$d" AAPL volatile false "$(iso_hours_ago 40)"
+assert_equals "sideways|bash|STALE" "$(jget "$(hook 0 "$d")" '"\(.regime)|\(.regime_source)|\(.technical_agent_status)"')" "hook: 40 h old cache -> bash regime, STALE"
+assert_equals "sideways|bash|MISSING" "$(jget "$(hook 0 "$WORK_DIR/tnone")" '"\(.regime)|\(.regime_source)|\(.technical_agent_status)"')" "hook: no cache file -> bash regime, MISSING"
+assert_equals '{"obv_score":61,"regime":"sideways"}' "$(hook 0 "$TCACHE" AGENT_TECHNICAL_ENABLED=false)" "hook: AGENT_TECHNICAL_ENABLED=false -> v2_inputs unchanged (no new keys)"
+
+# ============================================================================
 # Summary
 # ============================================================================
 echo ""

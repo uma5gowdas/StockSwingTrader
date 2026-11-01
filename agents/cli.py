@@ -27,6 +27,20 @@ COMMANDS = ("run", "status", "train", "gate")
 HANDLERS: Dict[Tuple[str, str], Callable[[argparse.Namespace], int]] = {}
 
 
+def _lazy(module: str, func: str) -> Callable[[argparse.Namespace], int]:
+    """Handler that imports MODULE only when called (keeps heavy imports such
+    as talib/vectorbt out of `status` and unrelated commands)."""
+    def handler(args: argparse.Namespace) -> int:
+        import importlib
+
+        return getattr(importlib.import_module(module), func)(args)
+    return handler
+
+
+HANDLERS[("technical", "run")] = _lazy("agents.technical.agent", "cli_run")
+HANDLERS[("technical", "status")] = _lazy("agents.technical.agent", "cli_status")
+
+
 def emit(obj) -> None:
     """Print OBJ as one JSON document on stdout."""
     sys.stdout.write(json.dumps(obj, indent=2, sort_keys=False, default=str) + "\n")
