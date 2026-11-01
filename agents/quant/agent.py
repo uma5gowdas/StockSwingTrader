@@ -3,8 +3,16 @@
   ingest   raw Alpaca bars (with VWAP) for the quant universe -> raw store,
            then the Qlib bin store (calendar, instruments, OHLCV + vwap +
            factor + the 14 legacy sst_* features)
-  status   agent status, raw store and Qlib store summary (no network)
-Exit codes: 0 ok, 1 error, 2 data unavailable. Never prints a key value.
+  train    train the model arms (lgbm, xgb14, xgb_full) on rolling folds +
+           the live model (agents/quant/train.py); --arms, --offline
+  predict  live model -> one envelope per rank symbol in
+           cache/agents/quant/<as_of>/<SYM>.json (agents/quant/predict.py);
+           --as-of, --symbols, --offline, --arms (first item)
+  status   agent status, raw store, Qlib store, models, predictions and the
+           latest envelopes (no network, no qlib import)
+Exit codes: 0 ok, 1 error, 2 data / store / model unavailable. Never prints a
+key value. Qlib, LightGBM and xgboost write progress to stdout; train and
+predict send it to stderr so stdout stays one JSON document.
 """
 
 from __future__ import annotations
@@ -87,14 +95,125 @@ def cli_ingest(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _quiet_stdout():
+    import contextlib
+    import sys
+
+    return contextlib.redirect_stdout(sys.stderr)
+
+
+def cli_train(args: argparse.Namespace) -> int:
+    from agents.cli import EXIT_ERROR, EXIT_OK, EXIT_UNAVAILABLE, emit
+    from agents.fixtures import is_offline
+    from agents.quant.train import StoreUnavailable, parse_arms, run_train
+
+    offline = bool(getattr(args, "offline", False)) or is_offline()
+    try:
+        arms = parse_arms(getattr(args, "arms", None))
+    except ValueError as exc:
+        emit({"error": "invalid_arms", "detail": str(exc)})
+        return EXIT_ERROR
+    try:
+        with _quiet_stdout():
+            summary = run_train(arms, offline=offline)
+    except StoreUnavailable as exc:
+        emit({"error": "store_unavailable", "detail": str(exc)})
+        return EXIT_UNAVAILABLE
+    emit(summary)
+    return EXIT_OK
+
+
+def cli_predict(args: argparse.Namespace) -> int:
+    from agents.cli import EXIT_ERROR, EXIT_OK, EXIT_UNAVAILABLE, emit, parse_symbols
+    from agents.fixtures import is_offline
+    from agents.quant.predict import PredictionsUnavailable, run_predict
+    from agents.quant.train import StoreUnavailable, parse_arms
+
+    offline = bool(getattr(args, "offline", False)) or is_offline()
+    try:
+        syms = parse_symbols(getattr(args, "symbols", None))
+        arm = parse_arms(getattr(args, "arms", None) or "lgbm")[0]
+    except ValueError as exc:
+        emit({"error": "invalid_argument", "detail": str(exc)})
+        return EXIT_ERROR
+    try:
+        with _quiet_stdout():
+            out = run_predict(as_of=getattr(args, "as_of", None), offline=offline, symbols=syms or None, arm=arm)
+    except StoreUnavailable as exc:
+        emit({"error": "store_unavailable", "detail": str(exc)})
+        return EXIT_UNAVAILABLE
+    except PredictionsUnavailable as exc:
+        emit({"error": "predictions_unavailable", "detail": str(exc)})
+        return EXIT_UNAVAILABLE
+    emit(out)
+    return EXIT_OK if out["written"] else EXIT_UNAVAILABLE
+
+
+def _models_summary() -> Any:
+    from datetime import date
+
+    from agents.quant.train import read_latest
+
+    m = read_latest()
+    if not m:
+        return None
+    arms = {}
+    for arm, info in (m.get("arms") or {}).items():
+        end = (info.get("live") or {}).get("train_end")
+        arms[arm] = {"live_train_end": end, "folds": len(info.get("folds") or []),
+                     "n_features": info.get("n_features"),
+                     "age_days": (date.today() - date.fromisoformat(end)).days if end else None}
+    return {"train_run_id": m.get("train_run_id"), "generated_at": m.get("generated_at"),
+            "mode": m.get("mode"), "synthetic": m.get("synthetic"), "arms": arms}
+
+
+def _predictions_summary() -> Any:
+    from agents.quant.train import predictions_dir
+
+    base = predictions_dir()
+    files = sorted(base.glob("*.parquet")) if base.is_dir() else []
+    if not files:
+        return None
+    import pandas as pd
+
+    out = {}
+    for p in files:
+        try:
+            df = pd.read_parquet(p, columns=["datetime"])
+            dts = pd.to_datetime(df["datetime"])
+            out[p.stem] = {"file": str(p), "rows": int(len(df)),
+                           "start": dts.min().strftime("%Y-%m-%d") if len(df) else None,
+                           "end": dts.max().strftime("%Y-%m-%d") if len(df) else None}
+        except Exception as exc:  # unreadable file: report, do not fail status
+            out[p.stem] = {"file": str(p), "error": type(exc).__name__}
+    return out
+
+
+def _envelopes_summary() -> Any:
+    import re
+
+    from agents.cache import cache_root
+
+    base = cache_root() / AGENT
+    dirs = sorted(p for p in base.iterdir() if p.is_dir() and re.fullmatch(r"\d{4}-\d{2}-\d{2}", p.name)) \
+        if base.is_dir() else []
+    if not dirs:
+        return None
+    return {"latest_as_of": dirs[-1].name, "count": len(list(dirs[-1].glob("*.json"))),
+            "as_of_dirs": len(dirs)}
+
+
 def status() -> Dict[str, Any]:
     from agents.quant import raw, store
 
     return {
         "raw": raw.raw_status(),
         "store": _store_summary(store.read_store_meta()),
-        # filled in by later Phase 2 steps (train / predict / evaluate)
-        "models": None, "predictions": None, "evaluation": None,
+        "models": _models_summary(),
+        "predictions": _predictions_summary(),
+        "envelopes": _envelopes_summary(),
+        # filled in by a later Phase 2 step (evaluate)
+        "evaluation": None,
     }
 
 
