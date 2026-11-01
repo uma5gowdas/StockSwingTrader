@@ -7,7 +7,19 @@
     "AAA",
     "BBB",
     "CCC",
-    "SPY"
+    "SPY",
+    "QAA",
+    "QBB",
+    "QCC",
+    "QDD",
+    "QEE",
+    "QFF",
+    "QGG",
+    "QHH",
+    "QII",
+    "QJJ",
+    "QKK",
+    "QLL"
   ],
   "start": "2019-01-02",
   "end": "2022-11-01",
@@ -18,5 +30,24 @@
     "trend_down",
     "high_volatility"
   ],
-  "note": "Generated bars, not market data"
+  "note": "Generated bars, not market data",
+  "quant_panel": {
+    "symbols": [
+      "QAA",
+      "QBB",
+      "QCC",
+      "QDD",
+      "QEE",
+      "QFF",
+      "QGG",
+      "QHH",
+      "QII",
+      "QJJ",
+      "QKK",
+      "QLL"
+    ],
+    "rng": "numpy.random.default_rng(seed + 1000 + i) per symbol, i = position in symbols",
+    "model": "random walk with per-symbol drift (no regime segments)",
+    "note": "Offline cross-section for the quant agent (with AAA, BBB, CCC ranked; SPY benchmark)"
+  }
 }

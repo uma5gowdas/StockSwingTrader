@@ -7,7 +7,10 @@ Writes (relative to this file):
                                (trend-up, sideways oscillation, trend-down,
                                high volatility) so mean-reversion and trend-
                                following both trade
-  bars/meta.json               {synthetic: true, generator, seed, ...}
+  bars/QAA..QLL.csv            quant cross-section (12 random walks with
+                               per-symbol drift; own rng SEED + 1000 + i,
+                               generated last so the files above are unchanged)
+  bars/meta.json               {synthetic: true, generator, seed, ..., quant_panel}
   alpaca/bars_page1.json       Alpaca v2 multi-symbol bars (AAA, BBB), page 1
   alpaca/bars_page2.json       page 2 (next_page_token null)
   alpaca/bars_stale.json       AAA bars that end 10 business days early
@@ -35,6 +38,8 @@ SYMBOLS = {  # symbol: (start price, volatility scale, base volume)
     "CCC": (200.0, 0.8, 1_200_000),
     "SPY": (250.0, 0.6, 60_000_000),
 }
+# Quant panel (Phase 2): separate seeds, same calendar
+QUANT_SYMBOLS = ("QAA", "QBB", "QCC", "QDD", "QEE", "QFF", "QGG", "QHH", "QII", "QJJ", "QKK", "QLL")
 HERE = os.path.dirname(os.path.abspath(__file__))
 NY = ZoneInfo("America/New_York")
 
@@ -57,6 +62,20 @@ def make_series(rng, start_price, vol_scale, base_volume, n):
             ret = 0.0002 + rng.normal(0, 0.028 * vol_scale)
         price = max(price * (1.0 + ret), 1.0)
         closes[i] = price
+    opens = np.empty(n)
+    opens[0] = closes[0] * (1 + rng.normal(0, 0.002))
+    opens[1:] = closes[:-1] * (1 + rng.normal(0, 0.004 * vol_scale, n - 1))
+    spread = np.abs(rng.normal(0, 0.008 * vol_scale, n)) + 0.002
+    highs = np.maximum(opens, closes) * (1 + spread)
+    lows = np.minimum(opens, closes) * (1 - spread)
+    volume = (base_volume * (1 + 0.3 * np.abs(rng.normal(0, 1, n)))).astype(np.int64)
+    return opens, highs, lows, closes, volume
+
+
+def make_random_walk(rng, start_price, vol_scale, base_volume, drift, n):
+    """Plain random walk with DRIFT per day (quant panel symbols)."""
+    rets = drift + rng.normal(0, 0.012 * vol_scale, n)
+    closes = np.maximum(start_price * np.cumprod(1.0 + rets), 1.0)
     opens = np.empty(n)
     opens[0] = closes[0] * (1 + rng.normal(0, 0.002))
     opens[1:] = closes[:-1] * (1 + rng.normal(0, 0.004 * vol_scale, n - 1))
@@ -107,7 +126,6 @@ def main():
         "segments": ["trend_up", "sideways_oscillation", "trend_down", "high_volatility"],
         "note": "Generated bars, not market data",
     }
-    write(os.path.join(HERE, "bars", "meta.json"), json.dumps(meta, indent=2) + "\n")
 
     # Alpaca v2 multi-symbol responses: last 40 bars of AAA and BBB, 2 pages
     tail = {s: alpaca_rows(frames[s].iloc[-40:]) for s in ("AAA", "BBB")}
@@ -116,7 +134,26 @@ def main():
     stale = {"bars": {"AAA": alpaca_rows(frames["AAA"].iloc[-40:-10])}, "next_page_token": None}
     for name, obj in (("bars_page1", page1), ("bars_page2", page2), ("bars_stale", stale)):
         write(os.path.join(HERE, "alpaca", "%s.json" % name), json.dumps(obj, indent=1) + "\n")
-    print(json.dumps({"bars": list(SYMBOLS), "end": meta["end"], "alpaca_last": tail["AAA"][-1]["t"]}))
+
+    # Quant cross-section (Phase 2): generated AFTER everything above, each with
+    # its own default_rng(SEED + 1000 + i), so the files above are unchanged.
+    for i, sym in enumerate(QUANT_SYMBOLS):
+        qrng = np.random.default_rng(SEED + 1000 + i)
+        o, h, l, c, v = make_random_walk(qrng, 20.0 + 15.0 * i, 0.7 + 0.08 * i,
+                                         800_000 + 250_000 * i, 0.0004 * ((i % 5) - 2), N_DAYS)
+        lines = ["date,open,high,low,close,volume"]
+        for j, d in enumerate(dates):
+            lines.append("%s,%.4f,%.4f,%.4f,%.4f,%d" % (d.strftime("%Y-%m-%d"), o[j], h[j], l[j], c[j], v[j]))
+        write(os.path.join(HERE, "bars", "%s.csv" % sym), "\n".join(lines) + "\n")
+    meta["symbols"] = list(SYMBOLS) + list(QUANT_SYMBOLS)
+    meta["quant_panel"] = {
+        "symbols": list(QUANT_SYMBOLS),
+        "rng": "numpy.random.default_rng(seed + 1000 + i) per symbol, i = position in symbols",
+        "model": "random walk with per-symbol drift (no regime segments)",
+        "note": "Offline cross-section for the quant agent (with AAA, BBB, CCC ranked; SPY benchmark)",
+    }
+    write(os.path.join(HERE, "bars", "meta.json"), json.dumps(meta, indent=2) + "\n")
+    print(json.dumps({"bars": meta["symbols"], "end": meta["end"], "alpaca_last": tail["AAA"][-1]["t"]}))
 
 
 if __name__ == "__main__":
