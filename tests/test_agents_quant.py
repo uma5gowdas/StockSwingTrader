@@ -4,6 +4,9 @@
 Quant data pipeline (Phase 2, FEAT-001): universe file, raw Alpaca bar store
 (offline fixtures and a 127.0.0.1 Alpaca stub), the 14 legacy features, the
 Qlib bin store (round trip through qlib.data.D.features) and the CLI.
+Quant model (FEAT-002): folds + embargo, metrics (IC, Newey-West t, top-k),
+handlers (label, feature count, no look-ahead), tiny training on a planted
+signal (QUANT_TEST_FAST=1), predictions -> envelopes, train/predict CLI.
 Every test runs with a temp AGENT_CACHE_DIR; socket connects to anything but
 loopback raise.
 """
@@ -418,11 +421,11 @@ class QlibRoundTripTests(unittest.TestCase):
         raw.ingest(syms, offline=True)
         cls.bars = raw.load_raw(syms)
         store.build_store(cls.bars, universe.rank_universe(True), universe.benchmarks(True))
-        import qlib
-        from qlib.constant import REG_US
+        from agents.quant.qlib_env import init_qlib
 
-        qlib.init(provider_uri=str(store.store_dir()), region=REG_US, kernels=1,
-                  expression_cache=None, dataset_cache=None)
+        # same settings as qlib.init(provider_uri=store, region=REG_US, kernels=1,
+        # expression_cache=None, dataset_cache=None); MLflow file store in the temp dir
+        init_qlib(store.store_dir(), mlruns=Path(cls.tmp) / "mlruns", force=True)
 
     @classmethod
     def tearDownClass(cls):
@@ -501,6 +504,312 @@ class QuantCliTests(TempCacheMixin, unittest.TestCase):
         out = json.loads(p.stdout)
         self.assertEqual(out["error"], "market_data_unavailable")
         self.assertFalse((Path(self.tmp) / "quant" / "qlib_data").exists())
+
+
+# ---------------------------------------------------------------------------
+# FEAT-002: folds, metrics, handlers, training, predictions
+# ---------------------------------------------------------------------------
+from agents.envelope import validate_envelope  # noqa: E402
+from agents.quant import folds as qfolds  # noqa: E402
+from agents.quant import metrics as qmetrics  # noqa: E402
+from agents.quant.handler import LABEL_EXPR  # noqa: E402
+
+
+class FoldTests(unittest.TestCase):
+    CAL = pd.bdate_range("2016-01-04", "2026-10-30")
+
+    def idx(self, ts):
+        return int(self.CAL.get_loc(ts))
+
+    def check_embargo(self, segs, embargo=7, warmup=60):
+        for s in segs:
+            self.assertEqual(s.train[0], self.CAL[warmup])
+            self.assertLess(self.idx(s.train[1]) + embargo, self.idx(s.valid[0]), s.name)
+            self.assertLess(self.idx(s.valid[1]) + embargo, self.idx(s.test[0]), s.name)
+            self.assertLessEqual(s.valid[0], s.valid[1])
+            self.assertLessEqual(s.test[0], s.test[1])
+
+    def test_yearly_folds(self):
+        segs = qfolds.yearly_folds(self.CAL, first_test_year=2018)
+        self.assertEqual([s.name for s in segs], [str(y) for y in range(2018, 2027)])
+        self.check_embargo(segs)
+        first = segs[0]
+        self.assertEqual(first.test[0], pd.Timestamp("2018-01-01"))
+        self.assertEqual(first.valid[0], pd.Timestamp("2017-01-02"))
+        for a, b in zip(segs, segs[1:]):  # test years do not overlap
+            self.assertLess(a.test[1], b.test[0])
+        last = segs[-1]
+        self.assertEqual(last.test[1], self.CAL[-1])  # partial last year
+        self.assertLess(len(self.CAL[(self.CAL >= last.test[0]) & (self.CAL <= last.test[1])]), 260)
+        self.assertEqual(sorted(first.segments()), ["test", "train", "valid"])
+
+    def test_year_without_sessions_skipped(self):
+        cal = self.CAL[self.CAL.year != 2020]
+        segs = qfolds.yearly_folds(cal, first_test_year=2018)
+        self.assertNotIn("2020", [s.name for s in segs])
+        self.assertIn("2021", [s.name for s in segs])
+
+    def test_live_and_offline_folds(self):
+        live = qfolds.live_segment(self.CAL)
+        self.assertEqual(live.valid[1], self.CAL[-1])
+        self.assertEqual(self.idx(live.valid[0]), len(self.CAL) - 252)
+        self.assertLess(self.idx(live.train[1]) + 7, self.idx(live.valid[0]))
+        cal = pd.bdate_range("2019-01-02", periods=1000)
+        off = qfolds.bar_folds_offline(cal)
+        self.assertEqual([s.name for s in off], ["bar1", "bar2"])
+        self.assertEqual(off[-1].test[1], cal[-1])
+        for s in off:
+            n_test = len(cal[(cal >= s.test[0]) & (cal <= s.test[1])])
+            self.assertEqual(n_test, 126)
+            self.assertLess(int(cal.get_loc(s.valid[1])) + 7, int(cal.get_loc(s.test[0])))
+            self.assertLess(int(cal.get_loc(s.train[1])) + 7, int(cal.get_loc(s.valid[0])))
+        self.assertLess(off[0].test[1], off[1].test[0])
+        with self.assertRaises(ValueError):
+            qfolds.live_segment(cal[:200])
+
+
+class MetricsTests(unittest.TestCase):
+    def panel(self, dates, scores, labels):
+        rows = []
+        for d, sc, lb in zip(dates, scores, labels):
+            for i, (a, b) in enumerate(zip(sc, lb)):
+                rows.append({"datetime": d, "instrument": "S%02d" % i, "score": a, "label": b})
+        return pd.DataFrame(rows)
+
+    def test_daily_ic_known_spearman(self):
+        d = pd.bdate_range("2021-01-04", periods=3)
+        df = self.panel(d, [[1, 2, 3, 4, 5]] * 2 + [[1, 2, 3, 4]],
+                        [[1, 3, 2, 5, 4], [5, 4, 3, 2, 1], [1, 2, 3, 4]])
+        ic = qmetrics.daily_ic(df)
+        self.assertEqual(len(ic), 2)  # 4-name date dropped
+        self.assertAlmostEqual(ic["rank_ic"].iloc[0], 0.8)
+        self.assertAlmostEqual(ic["rank_ic"].iloc[1], -1.0)
+        self.assertAlmostEqual(ic["ic"].iloc[0], float(np.corrcoef([1, 2, 3, 4, 5], [1, 3, 2, 5, 4])[0, 1]))
+        self.assertEqual(list(ic["n"]), [5, 5])
+
+    def test_newey_west_hand_computed(self):
+        # x = [1,-1,2,0,3], lag 1: mean 1, gamma0 2, gamma1 -1, w 0.5 -> var 1, se sqrt(1/5), t sqrt(5)
+        self.assertAlmostEqual(qmetrics.newey_west_t([1, -1, 2, 0, 3], lag=1), 5 ** 0.5)
+        x = np.random.default_rng(3).normal(0.1, 1, 300)
+        e = x - x.mean()
+        var = e @ e / 300 + sum(2 * (1 - l / 5.0) * (e[l:] @ e[:-l]) / 300 for l in range(1, 5))
+        self.assertAlmostEqual(qmetrics.newey_west_t(x, lag=4), x.mean() / (var / 300) ** 0.5)
+        self.assertIsNone(qmetrics.newey_west_t([1.0]))
+
+    def test_topk_and_quintile_sign(self):
+        rng = np.random.default_rng(7)
+        d = pd.bdate_range("2021-01-04", periods=40)
+        labels = [list(rng.normal(0, 0.02, 30)) for _ in d]
+        df = self.panel(d, labels, labels)  # score == label
+        top = qmetrics.topk_spread(df, 5)
+        self.assertEqual((top["k"], top["n_days"]), (5, 40))
+        self.assertGreater(top["mean_excess"], 0)
+        self.assertEqual(top["hit_rate"], 1.0)
+        self.assertAlmostEqual(top["annualised"], top["mean_excess"] * 252 / 5, places=5)
+        self.assertGreater(qmetrics.quintile_spread(df)["mean_excess"], 0)
+        ev = qmetrics.evaluate_arm(df)
+        self.assertAlmostEqual(ev["ic"]["rank_ic_mean"], 1.0)
+        self.assertEqual(ev["ic"]["n_days"], 40)
+        self.assertEqual([t["k"] for t in ev["topk"]], [5, 10, 20])
+        self.assertEqual(ev["per_year"][0]["year"], 2021)
+        self.assertEqual(ev["ic"]["pct_positive"], 1.0)
+        rev = qmetrics.summarize_ic(qmetrics.daily_ic(df.assign(score=-df["score"])))
+        self.assertAlmostEqual(rev["rank_ic_mean"], -1.0)
+        self.assertEqual(qmetrics.summarize_ic(qmetrics.daily_ic(df.iloc[:0]))["n_days"], 0)
+
+
+def planted_panel(n_symbols=12, n_days=700, seed=11):
+    """{SYM: BarsResult}: the high-low range at t grows with the planted
+    future return open[t+6]/open[t+1]-1, so price_range / KLEN carry it."""
+    from agents.fixtures import FIXTURE_WARNING
+
+    idx = pd.bdate_range("2019-01-02", periods=n_days)
+    out = {}
+    for i in range(n_symbols):
+        rng = np.random.default_rng(seed + i)
+        opens = 40.0 * (1 + i) * np.exp(np.cumsum(rng.normal(0, 0.015, n_days)))
+        fwd = np.full(n_days, np.nan)
+        fwd[:-6] = opens[6:] / opens[1:-5] - 1
+        rngp = 0.02 * np.exp(8 * np.nan_to_num(fwd, nan=0.0))
+        close = opens * (1 + rng.normal(0, 0.003, n_days))
+        high = np.maximum(opens, close) * (1 + rngp / 2)
+        low = np.minimum(opens, close) * (1 - rngp / 2)
+        vol = rng.integers(500_000, 2_000_000, n_days).astype(float)
+        df = pd.DataFrame({"open": opens, "high": high, "low": low, "close": close, "volume": vol}, index=idx)
+        df.index.name = "date"
+        out["P%sX" % chr(ord("A") + i)] = BarsResult(df, "fixture", True, FIXTURE_WARNING)
+    return out
+
+
+class QuantModelTests(unittest.TestCase):
+    """Qlib-backed tests in one TestCase (one qlib import)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="sst_agents_quant_model.")
+        cls._env = mock.patch.dict(os.environ, {"SST_OFFLINE": "1", "QUANT_TEST_FAST": "1", "QUANT_N_JOBS": "2",
+                                                "AGENT_CACHE_DIR": os.path.join(cls.tmp, "fix")}, clear=False)
+        cls._env.start()
+        syms = universe.all_symbols(True)
+        raw.ingest(syms, offline=True)
+        cls.fix_bars = raw.load_raw(syms)
+        store.build_store(cls.fix_bars, universe.rank_universe(True), universe.benchmarks(True))
+        cls.fix_store = store.store_dir()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._env.stop()
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def use_cache(self, name):
+        os.environ["AGENT_CACHE_DIR"] = os.path.join(self.tmp, name)
+
+    def init(self, store_path):
+        from agents.quant.qlib_env import init_qlib
+
+        init_qlib(store_path, mlruns=Path(self.tmp) / "mlruns_misc", force=True)
+
+    def test_label_and_feature_counts(self):
+        from qlib.data.dataset.handler import DataHandlerLP
+
+        from agents.quant.handler import feature_count, make_handler
+
+        self.init(self.fix_store)
+        h = make_handler("sst14", ["QAA"], "2019-01-02", "2022-11-01")
+        lab = h.fetch(col_set="label", data_key=DataHandlerLP.DK_R).xs("QAA", level="instrument").iloc[:, 0]
+        o = self.fix_bars["QAA"].df["open"].to_numpy(dtype=np.float32).astype(float)
+        for t in (0, 100, 500, 990):
+            self.assertAlmostEqual(float(lab.iloc[t]), o[t + 6] / o[t + 1] - 1, places=5)
+        self.assertTrue(np.isnan(lab.iloc[-1]))
+        self.assertEqual(LABEL_EXPR, "Ref($open, -6) / Ref($open, -1) - 1")
+        self.assertEqual(feature_count(h), 14)
+        h2 = make_handler("alpha158_sst14", ["QAA", "QBB"], "2022-01-03", "2022-11-01")
+        self.assertEqual(feature_count(h2), 172)
+        cols = list(h2.fetch(col_set="feature").columns)
+        self.assertIn("SST_PRICE_RANGE", cols)
+        self.assertIn("KLEN", cols)
+        with self.assertRaises(ValueError):
+            make_handler("nope", ["QAA"], "2022-01-03", "2022-11-01")
+
+    def test_no_look_ahead_in_features(self):
+        from agents.quant.handler import make_handler
+
+        t = pd.Timestamp("2021-06-30")
+        changed = {}
+        for s, r in self.fix_bars.items():
+            df = r.df.copy()
+            m = df.index > t
+            df.loc[m, ["open", "high", "low", "close", "vwap"]] *= 1.6
+            df.loc[m, "volume"] = df.loc[m, "volume"] * 0.3 + 1
+            changed[s] = BarsResult(df, r.data_source, r.synthetic, r.warning)
+        self.use_cache("changed")
+        store.build_store(changed, universe.rank_universe(True), universe.benchmarks(True))
+        alt_store = store.store_dir()
+        frames = []
+        for path in (self.fix_store, alt_store):
+            self.init(path)
+            h = make_handler("alpha158_sst14", ["QAA", "QCC"], "2019-01-02", "2022-11-01")
+            frames.append(h.fetch(col_set="feature"))
+        a, b = frames
+        da = a.index.get_level_values("datetime")
+        pd.testing.assert_frame_equal(a[da <= t], b[b.index.get_level_values("datetime") <= t])
+        self.assertFalse(a[da > t].equals(b[b.index.get_level_values("datetime") > t]))
+
+    def test_train_predict_planted_signal(self):
+        from agents.quant import predict as qpredict
+        from agents.quant import train as qtrain
+
+        self.use_cache("planted")
+        bars = planted_panel()
+        rank = sorted(bars)
+        store.build_store(bars, rank, [])
+        summary = qtrain.run_train(["lgbm", "xgb14"], offline=True)
+        root = Path(os.environ["AGENT_CACHE_DIR"]) / "quant"
+        for arm in ("lgbm", "xgb14"):
+            self.assertGreater(summary["arms"][arm]["rank_ic_mean"], 0.05, arm)
+            self.assertEqual(summary["arms"][arm]["folds"], 2)
+            p = pd.read_parquet(root / "predictions" / ("%s.parquet" % arm))
+            self.assertEqual(list(p.columns), ["datetime", "instrument", "score", "label", "fold"])
+            self.assertEqual(sorted(p["fold"].unique()), ["bar1", "bar2"])
+            self.assertEqual(set(p["instrument"]), set(rank))
+        self.assertEqual(summary["arms"]["lgbm"]["n_features"], 172)
+        self.assertEqual(summary["arms"]["xgb14"]["n_features"], 14)
+        self.assertIs(summary["synthetic"], True)
+        self.assertTrue(summary["warning"])
+        rid = summary["train_run_id"]
+        self.assertEqual(json.loads((root / "models" / "latest.json").read_text())["train_run_id"], rid)
+        man = json.loads((root / "models" / rid / "train_manifest.json").read_text())
+        for k in ("train_run_id", "generated_at", "offline", "synthetic", "store", "calendar", "arms", "label",
+                  "embargo", "n_jobs", "versions"):
+            self.assertIn(k, man)
+        self.assertEqual(man["label"]["expr"], LABEL_EXPR)
+        self.assertEqual((man["embargo"], man["n_jobs"]), (7, 2))
+        arm = man["arms"]["lgbm"]
+        self.assertEqual(arm["params"]["num_boost_round"], 20)
+        for f in arm["folds"]:
+            self.assertTrue(Path(f["model_path"]).is_file())
+            self.assertGreaterEqual(f["seconds"], 0)
+            self.assertGreater(f["n_train"], 0)
+        self.assertTrue(Path(arm["live"]["model_path"]).is_file())
+        self.assertEqual(arm["live"]["train_end"], man["calendar"]["end"])
+        self.assertEqual(man["versions"]["qlib"], "0.9.7")
+        mlruns = root / "mlruns"
+        self.assertTrue(list(mlruns.glob("*/*/meta.yaml")), "no MLflow recorder under the temp cache")
+        self.assertFalse((Path(PROJECT_DIR) / "mlruns").exists())
+        self.assertEqual(os.environ.get("MLFLOW_DISABLE_TELEMETRY"), "true")  # no MLflow telemetry call
+
+        out = qpredict.run_predict(offline=True, symbols=rank + ["ZZZ"])
+        self.assertEqual(out["as_of"], man["calendar"]["end"])
+        self.assertEqual(sorted(out["written"]), rank)
+        self.assertEqual(out["unavailable"], {"ZZZ": "not_in_quant_universe"})
+        envs = {}
+        for f in out["files"]:
+            e = json.loads(Path(f).read_text())
+            validate_envelope(e)
+            envs[e["symbol"]] = e
+        live = [envs[s] for s in rank]
+        pcts = sorted(e["score"] for e in live)
+        self.assertEqual((pcts[0], pcts[-1]), (0.0, 100.0))
+        best = max(live, key=lambda e: e["features"]["prediction"])
+        self.assertEqual((best["score"], best["features"]["rank"], best["direction"]), (100.0, 1, "bullish"))
+        worst = min(live, key=lambda e: e["features"]["prediction"])
+        self.assertEqual((worst["score"], worst["direction"], worst["confidence"]), (0.0, "bearish", 1.0))
+        for e in live:
+            self.assertEqual((e["agent"], e["synthetic"], e["ttl_hours"]), ("quant", True, 84.0))
+            self.assertIn("SYNTHETIC", e["warning"])
+            self.assertEqual(e["validation"], {"gate_id": "quant_rank", "passed": False})
+            self.assertEqual(e["features"]["universe_size"], 12)
+            self.assertEqual(e["features"]["model_id"], "lgbm-" + rid)
+            self.assertEqual(e["features"]["label"], LABEL_EXPR)
+            self.assertAlmostEqual(e["confidence"], abs(e["score"] - 50) / 50, places=4)
+        self.assertFalse(envs["ZZZ"]["available"])
+
+        # stale store -> every envelope unavailable 'stale_data'
+        stale = qpredict.run_predict(as_of="2023-06-30", offline=True)
+        self.assertEqual(stale["written"], [])
+        self.assertEqual(set(stale["unavailable"].values()), {"stale_data"})
+
+
+class QuantTrainCliTests(TempCacheMixin, unittest.TestCase):
+    def run_cli(self, *args):
+        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": self.tmp, "AGENT_CACHE_DIR": self.tmp,
+               "SST_OFFLINE": "1", "SST_CONFIG_FILE": os.path.join(self.tmp, "none.sh"), "QUANT_TEST_FAST": "1"}
+        return subprocess.run([sys.executable, "-m", "agents", *args], cwd=PROJECT_DIR, env=env,
+                              stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=300)
+
+    def test_train_without_store_and_predict_without_models(self):
+        p = self.run_cli("quant", "train", "--offline")
+        self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
+        self.assertEqual(json.loads(p.stdout)["error"], "store_unavailable")
+        p = self.run_cli("quant", "train", "--offline", "--arms", "lgbm,nope")
+        self.assertEqual(p.returncode, 1, p.stdout)
+        self.assertEqual(json.loads(p.stdout)["error"], "invalid_arms")
+        raw.ingest(universe.all_symbols(True), offline=True)
+        store.build_store(raw.load_raw(universe.all_symbols(True)), universe.rank_universe(True),
+                          universe.benchmarks(True))
+        p = self.run_cli("quant", "predict", "--offline")
+        self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
+        self.assertEqual(json.loads(p.stdout)["error"], "predictions_unavailable")
 
 
 if __name__ == "__main__":

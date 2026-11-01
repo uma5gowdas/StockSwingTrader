@@ -91,6 +91,7 @@ add_test "Agents: Parity vs bash" "${SCRIPT_DIR}/test_agents_parity.sh" venv
 add_test "Agents: Validation" "${SCRIPT_DIR}/test_agents_validate.py" venv
 add_test "Agents: CLI (offline)" "${SCRIPT_DIR}/test_agents_cli.sh" venv
 add_test "Agents: Quant" "${SCRIPT_DIR}/test_agents_quant.py" venv
+add_test "Agents: Quant pipeline (offline)" "${SCRIPT_DIR}/test_agents_quant_pipeline.sh" venv
 
 # ============================================================================
 # Utility Functions
@@ -290,7 +291,8 @@ when it exits 0 with at least one passed test and zero failures.
 | Agents: Parity vs bash | tests/test_agents_parity.sh | bash + .venv-agents python (SKIP without venv) | TA-Lib vs bash indicator tolerances, bash_compat port exact vs bash (indicators, 40 score_* edge inputs), v2 port vs 65 stored bash windows, 3 live bash recomputes |
 | Agents: Validation | tests/test_agents_validate.py | .venv-agents python (SKIP without venv) | stats (Sharpe, DSR, PSR, PBO/CSCV), walk-forward folds, vectorbt gate engine (next-open fills, ATR stop, TP), legacy parity vs lib/backtest_engine.py, gate criteria + schema, report HTML, trial log, v2 replay vs bash_compat |
 | Agents: CLI (offline) | tests/test_agents_cli.sh | bash + .venv-agents python (SKIP without venv) | validate gate --offline (4 synthetic gate files, report), agent_gate_get contract, missing data exit 2, validate parity --offline, technical run exit 2, validate status, no network |
-| Agents: Quant | tests/test_agents_quant.py | .venv-agents python (SKIP without venv) | quant universe file, raw store (offline fixtures, resume/refresh, 127.0.0.1 Alpaca stub: GET only, vwap, 429 retry, paper assert, failed batch), 14 legacy features vs lib/ml_inference.py (no look-ahead), Qlib bin store layout + qlib D.features round trip, quant ingest/status CLI, quant run not_implemented |
+| Agents: Quant | tests/test_agents_quant.py | .venv-agents python (SKIP without venv) | quant universe file, raw store (offline fixtures, resume/refresh, 127.0.0.1 Alpaca stub: GET only, vwap, 429 retry, paper assert, failed batch), 14 legacy features vs lib/ml_inference.py (no look-ahead), Qlib bin store layout + qlib D.features round trip, quant ingest/status CLI, quant run not_implemented; folds + embargo, IC / Newey-West t / top-k metrics, handlers (label, 172/14 features, no look-ahead), planted-signal training (lgbm, xgb14), predictions -> envelopes, train/predict CLI exit codes |
+| Agents: Quant pipeline (offline) | tests/test_agents_quant_pipeline.sh | bash + .venv-agents python (SKIP without venv) | quant ingest -> train (lgbm, xgb14) -> predict --offline, artefacts under the temp cache (no ./mlruns), envelopes for every offline rank symbol, lib/agent_adapter.sh agent_get OK + components reason synthetic, no network |
 
 ## Environment
 
