@@ -232,6 +232,78 @@ class TestGateEngine(unittest.TestCase):
         self.assertEqual(len(res["returns"]), 5)
 
 
+class TestGateEngineSlots(unittest.TestCase):
+    """sizing={'mode': 'slots', 'slots': k} (Phase 2 quant top-k signals)."""
+
+    P = {"stop_atr_mult": 2, "take_profit_pct": 50}
+
+    def _rotation(self, k=2, n_syms=5):
+        # Real fixture bars; every 5 bars the top k rotate (one name in, one out)
+        bars = {s: FIXTURES[s].iloc[:200] for s in ("AAA", "BBB", "CCC", "SPY")}
+        names = list(bars)[:n_syms]
+        frames = {}
+        for j, s in enumerate(names):
+            e = pd.Series(False, index=bars[s].index)
+            x = pd.Series(False, index=bars[s].index)
+            for r, i in enumerate(range(0, 195, 5)):
+                top = {names[(r + q) % len(names)] for q in range(k)}
+                if s in top:
+                    e.iloc[i] = True
+                else:
+                    x.iloc[i] = True
+            frames[s] = SignalFrame(e, x, pd.Series(np.nan, index=bars[s].index))
+        return bars, frames
+
+    def test_default_path_unchanged(self):
+        bars, frames = self._rotation()
+        a = E.gate_backtest(bars, frames, self.P, COSTS, init_cash=10000)
+        b = E.gate_backtest(bars, frames, self.P, COSTS, init_cash=10000, sizing=None)
+        self.assertTrue(a["returns"].equals(b["returns"]))
+        self.assertEqual(a["trades"], b["trades"])
+        self.assertNotIn("sizing", a)
+
+    def test_slots_never_more_than_k_and_cash_never_negative(self):
+        for k in (1, 2, 3):
+            bars, frames = self._rotation(k=k, n_syms=4)
+            res = E.gate_backtest(bars, frames, self.P, COSTS, init_cash=10000, sizing={"mode": "slots", "slots": k})
+            pf = res["portfolio"]
+            held = (pf.assets() > 0).sum(axis=1)
+            self.assertLessEqual(int(held.max()), k, k)
+            self.assertEqual(int(held.max()), k, "all k slots get used")
+            self.assertGreaterEqual(float(pf.cash().min()), -1e-6, k)
+            self.assertAlmostEqual(float(res["equity"].iloc[0]), 10000.0, places=6)
+            self.assertEqual(res["sizing"], {"mode": "slots", "slots": k, "slot_cash": 10000.0 / k})
+            # every entry buys at most one slot (valued at the open, before slippage) of integer shares
+            t = pf.trades.values
+            cost = t["size"] * t["entry_price"]
+            self.assertTrue(((cost <= 10000.0 / k * (1 + COSTS["slippage_per_side"]) + 1e-6)
+                             & (t["size"] == np.floor(t["size"]))).all())
+
+    def test_exit_filled_before_entry_on_the_same_bar(self):
+        # k = 1: all cash in A; at bar 2 A exits and B enters -> both fill at bar 3's open
+        df = _bars([100] * 8, [101] * 8, [99] * 8, [100] * 8)
+        fa = _frame(df, entries=[0], exits=[2])
+        fb = _frame(df, entries=[2])
+        res = E.gate_backtest({"A": df, "B": df}, {"A": fa, "B": fb}, self.P, COSTS, init_cash=10000,
+                              sizing={"mode": "slots", "slots": 1})
+        t = res["portfolio"].trades.values
+        b = t[t["col"] == 1]
+        self.assertEqual(len(b), 1)
+        self.assertEqual(int(b[0]["entry_idx"]), 3)
+        self.assertGreater(float(b[0]["size"]) * 100, 9000.0, "B got a full slot, so A was sold first")
+        a = t[t["col"] == 0]
+        self.assertEqual(int(a[0]["exit_idx"]), 3)
+        self.assertGreaterEqual(float(res["portfolio"].cash().min()), -1e-6)
+        self.assertAlmostEqual(res["per_symbol"]["A"]["total_return"], float(a[0]["pnl"]) / 10000.0)
+
+    def test_bad_sizing(self):
+        df = _bars([100] * 4, [101] * 4, [99] * 4, [100] * 4)
+        with self.assertRaises(ValueError):
+            E.gate_backtest({"A": df}, {"A": _frame(df)}, self.P, COSTS, sizing={"mode": "slots", "slots": 0})
+        with self.assertRaises(ValueError):
+            E.gate_backtest({"A": df}, {"A": _frame(df)}, self.P, COSTS, sizing={"mode": "kelly"})
+
+
 class TestLegacyParity(unittest.TestCase):
     def test_parity_on_fixtures(self):
         totals = {"mean_reversion": 0, "trend_follow": 0}

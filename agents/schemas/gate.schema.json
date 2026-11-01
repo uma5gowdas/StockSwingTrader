@@ -67,6 +67,7 @@
           "oos_return": {"$ref": "#/$defs/num"},
           "spy_return": {"$ref": "#/$defs/num"},
           "ew_return": {"$ref": "#/$defs/num"},
+          "baseline_return": {"$ref": "#/$defs/num"},
           "trades": {"type": "integer", "minimum": 0}
         }
       }
@@ -101,7 +102,10 @@
         "n_trials": {"type": "integer", "minimum": 1},
         "grid_size": {"type": "integer", "minimum": 1},
         "n_evaluations": {"type": "integer", "minimum": 0},
-        "full_sample_default_sharpe": {"$ref": "#/$defs/num"}
+        "full_sample_default_sharpe": {"$ref": "#/$defs/num"},
+        "baseline_signal_id": {"type": ["string", "null"]},
+        "pct_folds_beating_baseline": {"$ref": "#/$defs/num"},
+        "baseline_folds": {"type": ["integer", "null"], "minimum": 0}
       }
     },
     "criteria": {
@@ -116,6 +120,16 @@
     "costs": {"type": "object"},
     "config_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "reasons": {"type": "array", "items": {"type": "string", "minLength": 1}},
-    "warning": {"type": ["string", "null"]}
+    "warning": {"type": ["string", "null"]},
+    "inputs": {
+      "type": "object",
+      "description": "Phase 2 quant signals: which predictions the signal used.",
+      "properties": {
+        "arm": {"type": ["string", "null"]},
+        "predictions_file": {"type": ["string", "null"]},
+        "train_run_id": {"type": ["string", "null"]},
+        "rank_universe_size": {"type": ["integer", "null"], "minimum": 0}
+      }
+    }
   }
 }

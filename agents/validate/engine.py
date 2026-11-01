@@ -29,6 +29,18 @@ gate_backtest(bars, frames, params, costs)  (plan D17)
     itself, and when a stop and a signal exit fall on the same bar the stop
     is taken (stop-first; conservative, since the signal exit would fill at
     that bar's open).
+
+gate_backtest(..., sizing={'mode': 'slots', 'slots': k})  (Phase 2, Q12)
+    Opt-in sizing for the quant top-k signals: one shared cash pool
+    (cash_sharing=True, group_by=True, call_seq='auto' so exits on a bar are
+    filled before entries), init_cash = the total (not per symbol), every
+    entry buys integer shares worth init_cash / k at the open before
+    slippage (size_type='value'; partial when less cash is left). The slot size is fixed: no compounding
+    inside a window; each fold window starts with fresh cash (as without
+    sizing). The cap of k open positions comes from the signal (at most k
+    entries per rebalance, exits for every name that left the top k).
+    per_symbol total_return = that column's trade P&L / (init_cash / k).
+    sizing=None is exactly the per-symbol mode above.
 """
 
 from __future__ import annotations
@@ -195,13 +207,14 @@ def stop_fraction(frame: SignalFrame, close: pd.Series, stop_atr_mult: float) ->
 
 def gate_backtest(bars: Dict[str, pd.DataFrame], frames: Dict[str, SignalFrame], params: Dict[str, Any],
                   costs: Optional[Dict[str, Any]] = None, init_cash: float = GATE_INIT_CASH,
-                  index: Optional[pd.Index] = None) -> Dict[str, Any]:
+                  index: Optional[pd.Index] = None, sizing: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Gate-mode backtest over the symbols of FRAMES (bars aligned on INDEX,
     default the intersection of the bar indexes).
 
     Returns {returns: daily group returns Series, equity: group value Series,
     trades: number of trades (closed + open), closed_trades, per_symbol:
-    {SYM: {trades, total_return}}}.
+    {SYM: {trades, total_return}}}. SIZING: None (equal cash per symbol, all
+    in) or {'mode': 'slots', 'slots': k} (shared cash, k fixed slots).
     """
     vbt = _vbt()
     costs = costs or gate_costs()
@@ -226,6 +239,8 @@ def gate_backtest(bars: Dict[str, pd.DataFrame], frames: Dict[str, SignalFrame],
     exits = pd.DataFrame(ext, index=index)
     sl_stop = pd.DataFrame(sl, index=index)
     tp = float(params.get("take_profit_pct", 8)) / 100.0
+    if sizing is not None:
+        return _gate_backtest_slots(vbt, syms, cols, entries, exits, sl_stop, tp, costs, init_cash, sizing)
     per_cash = float(init_cash) / max(len(syms), 1)
     pf = vbt.Portfolio.from_signals(
         cols["close"], entries, exits, price=cols["open"], open=cols["open"], high=cols["high"],
@@ -246,3 +261,30 @@ def gate_backtest(bars: Dict[str, pd.DataFrame], frames: Dict[str, SignalFrame],
                          "total_return": float(v.iloc[-1] / per_cash - 1.0) if len(v) else 0.0}
     return {"returns": returns, "equity": value, "trades": int(len(rec)),
             "closed_trades": int((rec["status"] == 1).sum()), "per_symbol": per_symbol, "portfolio": pf}
+
+
+def _gate_backtest_slots(vbt, syms, cols, entries, exits, sl_stop, tp, costs, init_cash, sizing) -> Dict[str, Any]:
+    """Shared-cash slot sizing (see the module docstring)."""
+    if sizing.get("mode") != "slots":
+        raise ValueError("unknown sizing mode: %r" % (sizing.get("mode"),))
+    k = int(sizing.get("slots") or 0)
+    if k < 1:
+        raise ValueError("slots must be >= 1")
+    slot = float(init_cash) / k
+    pf = vbt.Portfolio.from_signals(
+        cols["close"], entries, exits, price=cols["open"], open=cols["open"], high=cols["high"],
+        low=cols["low"], sl_stop=sl_stop, tp_stop=tp,
+        stop_entry_price="fillprice", stop_exit_price="stopmarket",
+        fees=float(costs["fees_per_side"]), slippage=float(costs["slippage_per_side"]),
+        size=slot, size_type="value", size_granularity=1, init_cash=float(init_cash),
+        cash_sharing=True, group_by=True, call_seq="auto",
+        accumulate=False, direction="longonly", freq="1D")
+    rec = pf.trades.values
+    per_symbol = {}
+    for j, s in enumerate(syms):
+        r = rec[rec["col"] == j]
+        per_symbol[s] = {"trades": int(len(r)),
+                         "total_return": float(r["pnl"].sum() / slot) if len(r) else 0.0}
+    return {"returns": pf.returns(), "equity": pf.value(), "trades": int(len(rec)),
+            "closed_trades": int((rec["status"] == 1).sum()), "per_symbol": per_symbol, "portfolio": pf,
+            "sizing": {"mode": "slots", "slots": k, "slot_cash": slot}}

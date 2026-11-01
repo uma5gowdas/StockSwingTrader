@@ -8,8 +8,12 @@ Thresholds (env-overridable):
   GATE_MAX_DD_MULT         1.2    oos_max_dd <= 1.2 x spy_max_dd
   GATE_MIN_OOS_TRADES      100    oos_trades >= 100
   GATE_MIN_POSITIVE_FOLDS  0.60   share of folds with oos_return > 0 >= 0.60
-  baseline_improvement     not_applicable for the four base signals
-                           (recorded, not counted)
+  GATE_MIN_BASELINE_FOLDS  0.60   baseline_improvement: share of folds whose OOS
+                           return beats the baseline signal's OOS return on
+                           the same folds >= 0.60; applicable only when the
+                           metrics carry baseline_signal_id (Phase 2 quant
+                           signals); otherwise not_applicable (the four base
+                           signals; recorded, not counted)
 A missing metric (None) fails its criterion.
 passed = every applicable criterion passed AND synthetic is false AND every
 symbol (and the benchmark) has real data. Reasons list each failure
@@ -44,6 +48,7 @@ GATE_DEFAULTS = {
     "GATE_MAX_DD_MULT": 1.2,
     "GATE_MIN_OOS_TRADES": 100,
     "GATE_MIN_POSITIVE_FOLDS": 0.60,
+    "GATE_MIN_BASELINE_FOLDS": 0.60,
 }
 CRITERIA = ("min_oos_sharpe", "vs_spy_sharpe", "min_dsr", "max_pbo", "max_drawdown_vs_spy",
             "min_oos_trades", "min_positive_folds", "baseline_improvement")
@@ -90,6 +95,13 @@ def _crit(value, threshold, op: str) -> Dict[str, Any]:
 def evaluate_criteria(metrics: Dict[str, Any], th: Optional[Dict[str, float]] = None) -> Dict[str, Dict[str, Any]]:
     """Criteria dict {name: {value, threshold, op, passed, applicable}}."""
     th = th or thresholds()
+    base_min = th.get("GATE_MIN_BASELINE_FOLDS", GATE_DEFAULTS["GATE_MIN_BASELINE_FOLDS"])
+    if metrics.get("baseline_signal_id"):
+        baseline = _crit(metrics.get("pct_folds_beating_baseline"), base_min, ">=")
+        baseline["note"] = "share of folds with OOS return > %s's OOS return" % metrics["baseline_signal_id"]
+    else:
+        baseline = {"value": None, "threshold": None, "op": "n/a", "passed": None, "applicable": False,
+                    "note": "not_applicable: base signal (no added component to compare)"}
     spy_sr = _num(metrics.get("spy_sharpe"))
     spy_dd = _num(metrics.get("spy_max_dd"))
     return {
@@ -102,9 +114,7 @@ def evaluate_criteria(metrics: Dict[str, Any], th: Optional[Dict[str, float]] = 
                                      None if spy_dd is None else spy_dd * th["GATE_MAX_DD_MULT"], "<="),
         "min_oos_trades": _crit(metrics.get("oos_trades"), th["GATE_MIN_OOS_TRADES"], ">="),
         "min_positive_folds": _crit(metrics.get("pct_positive_folds"), th["GATE_MIN_POSITIVE_FOLDS"], ">="),
-        "baseline_improvement": {"value": None, "threshold": None, "op": "n/a", "passed": None,
-                                 "applicable": False,
-                                 "note": "not_applicable: base signal (no added component to compare)"},
+        "baseline_improvement": baseline,
     }
 
 
