@@ -50,7 +50,6 @@ build/
 !.env.example
 
 # Real credentials stay local (copy from config.template.sh)
-config.sh
 config.robinhood.sh
 config.alpaca.sh
 
