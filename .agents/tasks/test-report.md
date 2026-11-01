@@ -1,49 +1,52 @@
 # StockSwingTrader v6.3 - Test Report
 
-**Generated:** 2026-11-01 03:29:31  
+**Generated:** 2026-11-01 15:25:12  
 **Command:** `bash tests/test_runner.sh`  
-**Result:** ✅ All suites passed
+**Result:** ❌ 1 suite(s) failed
 
 ## Summary
 
 | Metric | Value |
 |--------|-------|
-| Suites | 26 (26 passed, 0 failed, 0 skipped) |
-| Total Tests | 1582 |
-| Tests Passed | **1582** |
-| Tests Failed | **0** |
-| Success Rate | 100% |
+| Suites | 29 (28 passed, 1 failed, 0 skipped) |
+| Total Tests | 1879 |
+| Tests Passed | **1878** |
+| Tests Failed | **1** |
+| Success Rate | 99% |
 
 ## Results by Suite
 
 | Suite | Status | Time | Details |
 |-------|--------|------|---------|
-| ML Predictor | ✅ PASS | 26469ms | 29 passed, 0 failed |
-| Regime Weighting | ✅ PASS | 44208ms | 30 passed, 0 failed |
-| Kalman Filter | ✅ PASS | 4602ms | 18 passed, 0 failed |
-| Backtest | ✅ PASS | 7744ms | 34 passed, 0 failed |
-| ML Scoring Integration | ✅ PASS | 36816ms | 29 passed, 0 failed |
-| Regime Detector | ✅ PASS | 42085ms | 20 passed, 0 failed |
-| Scoring Integration (Python) | ✅ PASS | 100ms | 32 passed, 0 failed |
-| Dashboard Components | ✅ PASS | 2041ms | 27 passed, 0 failed |
-| Backend API | ✅ PASS | 754ms | 17 passed, 0 failed |
-| Kelly Sizing & Risk Budget | ✅ PASS | 7666ms | 51 passed, 0 failed |
-| Sentiment (deterministic) | ✅ PASS | 4172ms | 36 passed, 0 failed |
-| MiroFish Cache Adapter | ✅ PASS | 13318ms | 42 passed, 0 failed |
-| Phase 1 Integration (CLI) | ✅ PASS | 203138ms | 38 passed, 0 failed |
-| No Silent Fake Data | ✅ PASS | 114961ms | 71 passed, 0 failed |
-| Broker Commands (stubbed) | ✅ PASS | 77473ms | 137 passed, 0 failed |
-| V2 CLI Scoring | ✅ PASS | 150932ms | 81 passed, 0 failed |
-| Order Execution (stubbed) | ✅ PASS | 42890ms | 81 passed, 0 failed |
-| Live Safety (stubbed) | ✅ PASS | 197093ms | 188 passed, 0 failed |
-| Agents: Contract | ✅ PASS | 5547ms | 26 passed, 0 failed |
-| Agents: Data Clients | ✅ PASS | 8957ms | 20 passed, 0 failed |
-| Agent Adapter (bash) | ✅ PASS | 12072ms | 83 passed, 0 failed |
-| Scoring + Agents (zero-weight identity) | ✅ PASS | 215543ms | 90 passed, 0 failed |
-| Agents: Technical | ✅ PASS | 8336ms | 21 passed, 0 failed |
-| Agents: Parity vs bash | ✅ PASS | 135288ms | 322 passed, 0 failed |
-| Agents: Validation | ✅ PASS | 25212ms | 36 passed, 0 failed |
-| Agents: CLI (offline) | ✅ PASS | 53744ms | 23 passed, 0 failed |
+| ML Predictor | ✅ PASS | 23552ms | 29 passed, 0 failed |
+| Regime Weighting | ✅ PASS | 69666ms | 30 passed, 0 failed |
+| Kalman Filter | ✅ PASS | 6274ms | 18 passed, 0 failed |
+| Backtest | ✅ PASS | 6938ms | 34 passed, 0 failed |
+| ML Scoring Integration | ✅ PASS | 32393ms | 29 passed, 0 failed |
+| Regime Detector | ✅ PASS | 71872ms | 20 passed, 0 failed |
+| Scoring Integration (Python) | ✅ PASS | 131ms | 32 passed, 0 failed |
+| Dashboard Components | ✅ PASS | 1894ms | 27 passed, 0 failed |
+| Backend API | ✅ PASS | 559ms | 17 passed, 0 failed |
+| Kelly Sizing & Risk Budget | ✅ PASS | 10098ms | 51 passed, 0 failed |
+| Sentiment (deterministic) | ✅ PASS | 6114ms | 36 passed, 0 failed |
+| MiroFish Cache Adapter | ✅ PASS | 13961ms | 42 passed, 0 failed |
+| Phase 1 Integration (CLI) | ❌ FAIL | 327032ms | 37 passed, 1 failed (exit code 1) |
+| No Silent Fake Data | ✅ PASS | 137505ms | 71 passed, 0 failed |
+| Broker Commands (stubbed) | ✅ PASS | 128986ms | 137 passed, 0 failed |
+| V2 CLI Scoring | ✅ PASS | 245325ms | 81 passed, 0 failed |
+| Order Execution (stubbed) | ✅ PASS | 62505ms | 81 passed, 0 failed |
+| Live Safety (stubbed) | ✅ PASS | 265965ms | 188 passed, 0 failed |
+| Agents: Contract | ✅ PASS | 18715ms | 26 passed, 0 failed |
+| Agents: Data Clients | ✅ PASS | 11461ms | 20 passed, 0 failed |
+| Agent Adapter (bash) | ✅ PASS | 23118ms | 83 passed, 0 failed |
+| Scoring + Agents (zero-weight identity) | ✅ PASS | 363574ms | 90 passed, 0 failed |
+| Agents: Technical | ✅ PASS | 16236ms | 21 passed, 0 failed |
+| Agents: Parity vs bash | ✅ PASS | 212688ms | 322 passed, 0 failed |
+| Agents: Validation | ✅ PASS | 34843ms | 40 passed, 0 failed |
+| Agents: CLI (offline) | ✅ PASS | 78982ms | 23 passed, 0 failed |
+| Agents: Quant | ✅ PASS | 123042ms | 46 passed, 0 failed |
+| Agents: Quant pipeline (offline) | ✅ PASS | 149279ms | 89 passed, 0 failed |
+| Agents: Quant blend parity (bash) | ✅ PASS | 113525ms | 158 passed, 0 failed |
 
 Counts are taken from each suite's own summary output. A suite passes only
 when it exits 0 with at least one passed test and zero failures.
@@ -75,6 +78,9 @@ when it exits 0 with at least one passed test and zero failures.
 | Agents: Parity vs bash | tests/test_agents_parity.sh | bash + .venv-agents python (SKIP without venv) | TA-Lib vs bash indicator tolerances, bash_compat port exact vs bash (indicators, 40 score_* edge inputs), v2 port vs 65 stored bash windows, 3 live bash recomputes |
 | Agents: Validation | tests/test_agents_validate.py | .venv-agents python (SKIP without venv) | stats (Sharpe, DSR, PSR, PBO/CSCV), walk-forward folds, vectorbt gate engine (next-open fills, ATR stop, TP), legacy parity vs lib/backtest_engine.py, gate criteria + schema, report HTML, trial log, v2 replay vs bash_compat |
 | Agents: CLI (offline) | tests/test_agents_cli.sh | bash + .venv-agents python (SKIP without venv) | validate gate --offline (4 synthetic gate files, report), agent_gate_get contract, missing data exit 2, validate parity --offline, technical run exit 2, validate status, no network |
+| Agents: Quant | tests/test_agents_quant.py | .venv-agents python (SKIP without venv) | quant universe file, raw store (offline fixtures, resume/refresh, 127.0.0.1 Alpaca stub: GET only, vwap, 429 retry, paper assert, failed batch), 14 legacy features vs lib/ml_inference.py (no look-ahead), Qlib bin store layout + qlib D.features round trip, quant ingest/status CLI, quant run not_implemented; folds + embargo, IC / Newey-West t / top-k metrics, handlers (label, 172/14 features, no look-ahead), planted-signal training (lgbm, xgb14), predictions -> envelopes, train/predict CLI exit codes; top-k / quant_rank signal builders, quant_rank at w 0 == v2_confluence, baseline criterion, go / no-go rule, evaluate report, gate/evaluate CLI exit codes |
+| Agents: Quant pipeline (offline) | tests/test_agents_quant_pipeline.sh | bash + .venv-agents python (SKIP without venv) | quant ingest -> train (lgbm, xgb14) -> predict --offline, artefacts under the temp cache (no ./mlruns), envelopes for every offline rank symbol, lib/agent_adapter.sh agent_get OK + components reason synthetic; v2 goldens identical with the quant envelope at AGENT_QUANT_WEIGHT=0 (shadow), 0.15 applies; quant evaluate --offline (go false, synthetic gates, banner); no network |
+| Agents: Quant blend parity (bash) | tests/test_agents_quant_blend.sh | bash + .venv-agents python (SKIP without venv) | bash_compat agent_blend vs bash calculate_confluence_score_v2 with an applied quant agent (score, recommendation, whole JSON; q 10/50/85, ML absent/unavailable, sentiment), AGENT_QUANT_WEIGHT=0 shadow identity |
 
 ## Environment
 

@@ -1,7 +1,21 @@
 """Single CLI: python -m agents <agent> <command> [options].
 
 Agents:   market | fundamental | technical | quant | validate | portfolio
-Commands: run | status | train | gate   (validate adds its own, e.g. parity)
+Commands: run | status | train | gate   (validate adds its own, e.g. parity;
+          quant adds ingest, predict, evaluate; `quant run` is not implemented)
+  quant ingest [--symbols ...] [--start] [--end] [--refresh] [--offline]
+               raw Alpaca bars (+ vwap) -> cache/agents/quant/raw, then the
+               Qlib bin store cache/agents/quant/qlib_data
+  quant train [--arms lgbm,xgb14,xgb_full] [--offline]
+               rolling-fold training + live model per arm (Qlib, LightGBM,
+               XGBoost); OOS predictions cache/agents/quant/predictions
+  quant predict [--as-of] [--symbols] [--arms lgbm] [--offline]
+               live model -> envelopes cache/agents/quant/<as_of>/<SYM>.json
+  quant evaluate [--offline] [--report-dir DIR] [--start]
+               IC metrics, gates xgb_topk / quant_topk / quant_rank and the
+               go / no-go report cache/agents/quant/eval/<run_id>/
+  quant status raw store / Qlib store / models / predictions / evaluation /
+               quant gates summary
 Exit codes: 0 ok, 1 error (incl. not_implemented), 2 data unavailable.
 
 `python -m agents status` (top level or any agent) prints the agent version,
@@ -42,6 +56,11 @@ HANDLERS[("technical", "status")] = _lazy("agents.technical.agent", "cli_status"
 HANDLERS[("validate", "gate")] = _lazy("agents.validate.agent", "cli_gate")
 HANDLERS[("validate", "parity")] = _lazy("agents.validate.agent", "cli_parity")
 HANDLERS[("validate", "status")] = _lazy("agents.validate.agent", "cli_status")
+HANDLERS[("quant", "ingest")] = _lazy("agents.quant.agent", "cli_ingest")
+HANDLERS[("quant", "status")] = _lazy("agents.quant.agent", "cli_status")
+HANDLERS[("quant", "train")] = _lazy("agents.quant.agent", "cli_train")
+HANDLERS[("quant", "predict")] = _lazy("agents.quant.agent", "cli_predict")
+HANDLERS[("quant", "evaluate")] = _lazy("agents.quant.agent", "cli_evaluate")
 
 
 def emit(obj) -> None:
@@ -75,6 +94,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--signals", help="Comma-separated signal ids")
     p.add_argument("--benchmark", help="Benchmark symbol (default SPY)")
     p.add_argument("--report-dir", dest="report_dir", help="Directory for reports")
+    p.add_argument("--refresh", action="store_true", help="quant ingest: refetch symbols that are current")
+    p.add_argument("--arms", help="quant: comma-separated model arms")
     p.add_argument("--version", action="store_true", help="Print the agent layer version")
     return p
 

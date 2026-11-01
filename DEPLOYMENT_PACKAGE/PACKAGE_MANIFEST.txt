@@ -23,13 +23,17 @@ DEPLOYMENT_PACKAGE/
 ├── requirements-agents.txt            Agent layer pins (Python 3.12 venv .venv-agents)
 ├── .gitignore                        Git ignore rules
 │
-├── agents/                           Agent layer (python -m agents), Phase 0-1
+├── agents/                           Agent layer (python -m agents), Phase 0-2
 │   ├── __init__.py, __main__.py, cli.py, config.py, envelope.py, cache.py, fixtures.py
 │   ├── schemas/                      envelope.schema.json, gate.schema.json
 │   ├── llm/                          base.py, providers.py, budget.py ($0, LLM_PROVIDER=none)
 │   ├── data/                         alpaca.py (GET-only bars), bars.py, yf_fallback.py
 │   ├── technical/                    talib_features.py, agent.py, bash_compat.py
-│   ├── signals/                      base.py, mean_reversion.py, trend_follow.py, v2_confluence.py
+│   ├── signals/                      base.py, mean_reversion.py, trend_follow.py, v2_confluence.py,
+│   │                                 quant.py (xgb_topk, quant_topk, quant_rank)
+│   ├── quant/                        Phase 2 Qlib quant agent: universe.py + universe.txt, raw.py,
+│   │                                 store.py, legacy_features.py, qlib_env.py, handler.py, folds.py,
+│   │                                 train.py, metrics.py, predict.py, evaluate.py, agent.py
 │   └── validate/                     agent.py, engine.py, walkforward.py, stats.py, benchmarks.py,
 │                                     trials.py, gate.py, report.py, universe.py
 │
@@ -132,19 +136,20 @@ CORE MODULES CHECKLIST
 [✓] Phase 1 Modules (ported from v6.2, off by default):
     [✓] lib/kelly_sizing.sh (15,850 bytes)
     [✓] lib/mirofish_adapter.sh (8,675 bytes)
-[✓] Agent Layer (Phase 0-1, off by default; no tests/ or fixtures in the package):
+[✓] Agent Layer (Phase 0-2, off by default; no tests/ or fixtures in the package,
+    so `python -m agents ... --offline` (technical/validate/quant) needs the repo):
     [✓] lib/agent_adapter.sh (16,579 bytes)
-    [✓] requirements-agents.txt (1,295 bytes)
+    [✓] requirements-agents.txt (1,968 bytes; Phase 2 adds pyqlib, lightgbm, xgboost, mlflow, pyarrow)
     [✓] config.template.sh (19,411 bytes)
-    [✓] .gitignore (751 bytes)
-    [✓] agents/ (36 files, no __pycache__):
+    [✓] .gitignore (935 bytes)
+    [✓] agents/ (51 files, no __pycache__; Phase 2 adds agents/quant/ and agents/signals/quant.py):
         [✓] agents/__init__.py (406 bytes)
         [✓] agents/__main__.py (155 bytes)
         [✓] agents/cache.py (3,697 bytes)
-        [✓] agents/cli.py (6,379 bytes)
+        [✓] agents/cli.py (7,875 bytes)
         [✓] agents/config.py (6,634 bytes)
         [✓] agents/data/__init__.py (264 bytes)
-        [✓] agents/data/alpaca.py (12,638 bytes)
+        [✓] agents/data/alpaca.py (13,465 bytes)
         [✓] agents/data/bars.py (3,207 bytes)
         [✓] agents/data/yf_fallback.py (1,473 bytes)
         [✓] agents/envelope.py (4,543 bytes)
@@ -153,23 +158,38 @@ CORE MODULES CHECKLIST
         [✓] agents/llm/base.py (719 bytes)
         [✓] agents/llm/budget.py (3,051 bytes)
         [✓] agents/llm/providers.py (5,258 bytes)
+        [✓] agents/quant/__init__.py (894 bytes)
+        [✓] agents/quant/agent.py (10,604 bytes)
+        [✓] agents/quant/evaluate.py (22,886 bytes)
+        [✓] agents/quant/folds.py (4,745 bytes)
+        [✓] agents/quant/handler.py (4,122 bytes)
+        [✓] agents/quant/legacy_features.py (4,946 bytes)
+        [✓] agents/quant/metrics.py (6,716 bytes)
+        [✓] agents/quant/predict.py (10,267 bytes)
+        [✓] agents/quant/qlib_env.py (3,526 bytes)
+        [✓] agents/quant/raw.py (8,545 bytes)
+        [✓] agents/quant/store.py (6,760 bytes)
+        [✓] agents/quant/train.py (14,150 bytes)
+        [✓] agents/quant/universe.py (3,188 bytes)
+        [✓] agents/quant/universe.txt (2,113 bytes)
         [✓] agents/schemas/envelope.schema.json (3,033 bytes)
-        [✓] agents/schemas/gate.schema.json (5,425 bytes)
-        [✓] agents/signals/__init__.py (1,063 bytes)
-        [✓] agents/signals/base.py (3,257 bytes)
+        [✓] agents/schemas/gate.schema.json (6,063 bytes)
+        [✓] agents/signals/__init__.py (1,841 bytes)
+        [✓] agents/signals/base.py (3,826 bytes)
         [✓] agents/signals/mean_reversion.py (3,270 bytes)
+        [✓] agents/signals/quant.py (11,192 bytes)
         [✓] agents/signals/trend_follow.py (1,744 bytes)
         [✓] agents/signals/v2_confluence.py (5,839 bytes)
         [✓] agents/technical/__init__.py (446 bytes)
         [✓] agents/technical/agent.py (5,943 bytes)
-        [✓] agents/technical/bash_compat.py (48,284 bytes)
+        [✓] agents/technical/bash_compat.py (50,716 bytes)
         [✓] agents/technical/talib_features.py (6,164 bytes)
         [✓] agents/validate/__init__.py (568 bytes)
-        [✓] agents/validate/agent.py (22,241 bytes)
+        [✓] agents/validate/agent.py (31,801 bytes)
         [✓] agents/validate/benchmarks.py (2,718 bytes)
-        [✓] agents/validate/engine.py (11,217 bytes)
-        [✓] agents/validate/gate.py (6,986 bytes)
-        [✓] agents/validate/report.py (11,452 bytes)
+        [✓] agents/validate/engine.py (13,801 bytes)
+        [✓] agents/validate/gate.py (7,667 bytes)
+        [✓] agents/validate/report.py (12,145 bytes)
         [✓] agents/validate/stats.py (6,537 bytes)
         [✓] agents/validate/trials.py (2,860 bytes)
         [✓] agents/validate/universe.py (841 bytes)

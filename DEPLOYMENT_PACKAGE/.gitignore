@@ -61,3 +61,8 @@ config.live.sh
 .worktrees/
 # Agent layer venv (requirements-agents.txt, Python 3.12)
 .venv-agents/
+# Qlib/MLflow file store guard (the quant agent writes cache/agents/quant/mlruns)
+mlruns/
+
+# Local credentials: each user creates their own (cp config.template.sh config.sh)
+config.sh

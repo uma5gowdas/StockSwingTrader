@@ -2,8 +2,8 @@
 ## Code-Verified Reference for AI-Assisted Development
 
 **Version:** 6.3 (`VERSION="6.3"` in `StockSwingTrader_Agent.sh`; the separate `VERSION` file still says v6.2)  
-**Last Updated:** 2026-11-01 (agent layer Phase 0-1)  
-**Verified against:** commit `d626d6b` on `main` (agent layer Phase 0-1: `agents/` Python package, `lib/agent_adapter.sh`, Technical and Strategy Validation agents). The agent-layer parts ([Agent Layer](#agent-layer-phase-0-1), and the agent rows in [Current State](#current-state-at-a-glance), [Data Sources](#data-sources--synthetic-data), [Module Structure](#module-structure), [Setup & Configuration](#setup--configuration), [Testing](#testing), [Troubleshooting](#troubleshooting)) were checked at that commit. Step 1 sections were verified at `5a7abc0`; earlier sections at `532828e`.  
+**Last Updated:** 2026-11-01 (agent layer Phase 0-2: Quant Research Agent)  
+**Verified against:** commit `75ea040` on `main`, re-checked at `26c44ba` (config.sh untracked, docs/guides added) (agent layer Phase 0-2: `agents/` Python package incl. `agents/quant/` (Qlib) and `agents/signals/quant.py`, `lib/agent_adapter.sh`, Technical, Strategy Validation and Quant Research agents). The quant parts ([Quant Research Agent](#quant-research-agent-phase-2) and the quant rows elsewhere) were checked at `75ea040`; the other agent-layer parts ([Agent Layer](#agent-layer-phase-0-1), agent rows in [Current State](#current-state-at-a-glance), [Data Sources](#data-sources--synthetic-data), [Module Structure](#module-structure), [Setup & Configuration](#setup--configuration), [Testing](#testing), [Troubleshooting](#troubleshooting)) at `d626d6b` and re-checked where Phase 2 touched them. Step 1 sections were verified at `5a7abc0`; earlier sections at `532828e`.  
 **Purpose:** Accurate guide for future AI agents to understand, enhance, and maintain the codebase. Every command, function, path, port, weight and threshold below was checked against the code. Where the code does not do something, this guide says so.
 
 > Not financial advice. The ML model is trained on synthetic data (every prediction says `"model_training_data": "synthetic"`). Synthetic prices/features are used only on explicit opt-in (`SST_OFFLINE=1`, `SST_ALLOW_SYNTHETIC=1`, `--synthetic`) and are then marked `"data_source": "synthetic"`. Paper-trade only: the order safety checks of Step 1 reduce risk but are not a reason to trade real money; `config.sh` must stay on `paper-api.alpaca.markets`.
@@ -19,6 +19,7 @@
 5. [Enhancement Modules](#enhancement-modules)
 6. [Execution Safety (Step 1)](#execution-safety-step-1)
    - [Agent Layer (Phase 0-1)](#agent-layer-phase-0-1)
+   - [Quant Research Agent (Phase 2)](#quant-research-agent-phase-2)
 7. [Scoring Pipeline Integration](#scoring-pipeline-integration)
 8. [Main Agent Flags](#main-agent-flags)
 9. [Setup & Configuration](#setup--configuration)
@@ -52,7 +53,9 @@ Since live-safety Step 1 (`4c621fb`, `daf1bca`, `5a7abc0`) the CLI scores with `
 12. **bash MACD signal == MACD line.** `calc_macd` returns signal = macd and histogram 0, so the scan's MACD score is always 50. The Technical agent uses the standard TA-Lib signal line; parity tests pin the bash behaviour.
 13. **Regime ADX is an approximation.** `detect_market_regime` uses `min(100, |EMA20 − EMA50| × 10)`. The Technical agent computes a real ADX14 (`regime_adx`, same rules); the scan uses it only with `AGENTS_ENABLED=true AGENT_TECHNICAL_ENABLED=true` and an OK agent cache (see [Agent Layer](#agent-layer-phase-0-1)). Default: unchanged.
 
-**Agent layer (Phase 0-1, `0d945a6`..`d626d6b`).** A separate Python 3.12 package `agents/` (own venv `.venv-agents`) adds a Technical agent (TA-Lib features, real-ADX regime) and a Strategy Validation agent (vectorbt walk-forward, DSR, PBO, gates). The bash scan never runs Python; it reads the agents' cache through `lib/agent_adapter.sh`. Agents are off by default (`AGENTS_ENABLED=false`): v2 output is byte-identical to `970af57`; with `AGENTS_ENABLED=true` and all weights 0 only a `components.agents` shadow block is added. The real Phase 1 gate run (Alpaca SIP bars, 2016 → last session) is in `.agents/tasks/phase1-gate-report.md` (outside the repo); see [Agent Layer](#agent-layer-phase-0-1) for the result. Quant, Fundamental, Market and Portfolio agents are not implemented (`run` exits 1 `not_implemented`).
+**Agent layer (Phase 0-1, `0d945a6`..`d626d6b`).** A separate Python 3.12 package `agents/` (own venv `.venv-agents`) adds a Technical agent (TA-Lib features, real-ADX regime) and a Strategy Validation agent (vectorbt walk-forward, DSR, PBO, gates). The bash scan never runs Python; it reads the agents' cache through `lib/agent_adapter.sh`. Agents are off by default (`AGENTS_ENABLED=false`): v2 output is byte-identical to `970af57`; with `AGENTS_ENABLED=true` and all weights 0 only a `components.agents` shadow block is added. The real Phase 1 gate run (Alpaca SIP bars, 2016 → last session) is in `.agents/tasks/phase1-gate-report.md` (outside the repo); see [Agent Layer](#agent-layer-phase-0-1) for the result. Fundamental, Market and Portfolio agents are not implemented (`run` exits 1 `not_implemented`; `quant run` too, the quant agent uses its own commands).
+
+**Quant Research Agent (Phase 2, `afd07d5`..`75ea040`, `agents.__version__` 0.2.0).** `agents/quant/` trains Microsoft Qlib models (LightGBM on Alpha158 + the 14 legacy ML features; XGBoost baselines) on a fixed 153-stock universe of Alpaca SIP daily bars (2016 → last session), writes nightly rank envelopes `cache/agents/quant/<as_of>/<SYM>.json` and evaluates them (IC, three walk-forward gates, go/no-go). Real run 2026-11-01: **NO-GO**. LightGBM OOS Rank-IC 0.0087 (Newey-West t 1.95; needs ≥ 0.02 and ≥ 2); all three gates (`xgb_topk`, `quant_topk`, `quant_rank`) failed; `quant_topk` beat `xgb_topk` in 42.9 % of folds (needs 60 %). Consequence: `AGENT_QUANT_WEIGHT` stays 0 (default in `config.template.sh`), no weight is proposed, `lib/ml_predictor.sh` and `lib/models/` are unchanged. The bash scan is unchanged (it only reads the cache; the quant weight cannot apply until the `quant_rank` gate passes). Details: [Quant Research Agent (Phase 2)](#quant-research-agent-phase-2); full report `.agents/tasks/phase2-quant-report.md` / `.html` (outside the repo).
 
 ### Data Sources & Synthetic Data
 
@@ -80,6 +83,11 @@ Synthetic (generated) data never drives a prediction, score or backtest silently
 | Agent layer bars (`agents.data.load_bars`) | Alpaca `GET /v2/stocks/bars` (1Day, `adjustment=all`, feed `sip`, end clamped to now − 20 min; 403 → one retry with `iex`): `data_source` `alpaca:sip` / `alpaca:iex`. Rejected as stale when the newest bar is more than `AGENT_MAX_BAR_STALENESS_DAYS` (3) business days before the expected last session | `Unavailable(reason)`; agents write `available: false` envelopes; `validate gate` exits 2 `market_data_unavailable` and writes no gate | Offline (`SST_OFFLINE=1` / `--offline`): generated fixtures `tests/fixtures/agents/bars/` (AAA, BBB, CCC, SPY), `data_source: "fixture"`, `synthetic: true` + warning. yfinance only with `AGENT_DATA_FALLBACK=yfinance` (labeled `yfinance` + warning) |
 | Agent envelopes (`cache/agents/<agent>/<date>/<SYM>.json`) | `data_sources`, `synthetic: false` | `available: false`, score/direction/confidence null, reason | `synthetic: true` + `warning`; the adapter gives them weight 0 unless `SST_OFFLINE=1` |
 | Validation gates (`cache/agents/gates/<signal>.json`) | `data_sources` list (`alpaca:*`), `passed` per criteria | no gate written (exit 2) | `synthetic: true`, `passed: false`, reason `synthetic_data` (a synthetic gate can never pass; the adapter reads it as `SYNTHETIC`) |
+| Quant raw store (`cache/agents/quant/raw/<SYM>.csv` + `.meta.json`) | Alpaca bars with `vwap` (`include_vwap=True`), meta `data_source` `alpaca:sip` / `alpaca:iex`, `synthetic: false` | symbol listed in `unavailable` (e.g. `stale_data`); `quant ingest` exits 2 `market_data_unavailable` when no rank symbol has bars (store untouched) | Offline: fixtures QAA..QLL + SPY, meta `data_source: "fixture"`, `adjustment: "fixture"`, `synthetic: true` + warning |
+| Quant Qlib store (`cache/agents/quant/qlib_data/`, `store_meta.json`) | `data_sources` per symbol copied from the raw meta | `quant train` / `predict` exit 2 `store_unavailable` | `synthetic: true` in `store_meta.json`; train manifest `synthetic: true` + warning |
+| Quant OOS predictions (`cache/agents/quant/predictions/<arm>.parquet`) | from the real store (manifest `mode: "real"`) | `validate gate` with quant signals exits 2 `quant_predictions_unavailable` | manifest `mode: "offline"`, `synthetic: true` |
+| Quant envelopes (`cache/agents/quant/<as_of>/<SYM>.json`) | score = rank percentile, `data_sources` from the raw meta, `synthetic: false` | `available: false` with `not_in_quant_universe` / `no_features_at_as_of` / `stale_data` / `universe_too_small` | `synthetic: true` + warning (adapter weight 0 unless `SST_OFFLINE=1`) |
+| Quant gates (`cache/agents/gates/{xgb_topk,quant_topk,quant_rank}.json`) and eval report (`cache/agents/quant/eval/<run_id>/`) | `data_sources` `alpaca:*`, `synthetic: false` | exit 2 (`quant_store_unavailable` / `quant_predictions_unavailable`), no gate written | `synthetic: true`, `passed: false`, go = false (`real_data` criterion), HTML SYNTHETIC banner |
 
 Still not real data: the XGBoost model is trained on synthetic samples (`train_ml_model.py`). Fixed in Step 1: the OBV score in `score_stock` is no longer a constant 50; it is `score_obv_trend` over the last `OBV_LOOKBACK` (10) bars (all-up bars → 100, all-down → 0, flat → 50; fewer than N+1 points → 50 with `obv_available: false`). With no live quote, the Bollinger score uses the series' last close instead of price 0 (which always scored 100).
 
@@ -124,14 +132,18 @@ Still not real data: the XGBoost model is trained on synthetic samples (`train_m
     │ frontend :5173 (Vite)    │            │ Backtest JSON/HTML │
     └──────────────────────────┘            └────────────────────┘
 
-    Agent layer (Phase 0-1, run by hand / nightly; the scan never runs Python):
+    Agent layer (Phase 0-2, run by hand / nightly; the scan never runs Python):
     ┌──────────────────────────────┐  writes   ┌───────────────────────────┐
     │ python -m agents ...         │──────────▶│ cache/agents/             │
     │ (.venv-agents, Python 3.12)  │           │  technical/<date>/<SYM>   │
-    │  technical: TA-Lib, ADX14    │           │  gates/<signal>.json      │
-    │  validate: vectorbt WF gate  │           │  validate/ (reports, ...) │
-    │  data: Alpaca bars GET only  │           └─────────────┬─────────────┘
-    └──────────────────────────────┘                         │ reads (jq, no network)
+    │  technical: TA-Lib, ADX14    │           │  quant/<date>/<SYM>       │
+    │  validate: vectorbt WF gate  │           │  quant/{raw,qlib_data,    │
+    │  quant: Qlib + LightGBM /    │           │   models,predictions,     │
+    │    XGBoost, IC, gates        │           │   mlruns,eval}/           │
+    │  data: Alpaca bars GET only  │           │  gates/<signal>.json      │
+    └──────────────────────────────┘           │  validate/ (reports, ...) │
+                                               └─────────────┬─────────────┘
+                                                             │ reads (jq, no network)
                                                ┌─────────────▼─────────────┐
                                                │ lib/agent_adapter.sh      │
                                                │ → scoring.sh (weights 0)  │
@@ -182,9 +194,15 @@ StockSwingTrader_Agent.sh (Main Orchestrator)
     │   envelope.py + schemas/, cache.py, fixtures.py, llm/ (NoneProvider default, $0 budget)
     ├── data/  alpaca.py (GET-only bars client) ── bars.py (load_bars) ── yf_fallback.py (opt-in)
     ├── technical/  talib_features.py, agent.py, bash_compat.py (exact port of the bash v2 scan)
-    ├── signals/    v2_confluence (uses bash_compat), mean_reversion, trend_follow
-    └── validate/   engine.py (vectorbt), walkforward, stats, benchmarks, trials, gate, report,
-                    universe, agent.py (also imports lib/backtest_engine.py for legacy parity)
+    ├── signals/    v2_confluence (uses bash_compat), mean_reversion, trend_follow,
+    │               quant.py (xgb_topk, quant_topk, quant_rank; read quant/predictions)
+    ├── validate/   engine.py (vectorbt), walkforward, stats, benchmarks, trials, gate, report,
+    │               universe, agent.py (also imports lib/backtest_engine.py for legacy parity)
+    └── quant/      universe.py + universe.txt, raw.py (data/alpaca.py, include_vwap), store.py
+                    (Qlib bin writer), legacy_features.py (imports lib/ml_inference.py by path),
+                    qlib_env.py (init_qlib), handler.py, folds.py, train.py (qlib, lightgbm,
+                    xgboost, mlflow), metrics.py, predict.py, evaluate.py (validate.agent.run_gate),
+                    agent.py (CLI handlers)
 ```
 
 ---
@@ -197,13 +215,14 @@ StockSwingTrader_Agent.sh (Main Orchestrator)
 |--------|------|----------|------------------------------|
 | Main Agent | `StockSwingTrader_Agent.sh` | Bash | `main`, `usage`, `display_version`, `analyze_stock`, `fetch_stock_ohlcv`, `calculate_all_indicators`, `score_stock`, `generate_report`, `print_score_breakdown`, `init_ml_predictor`, `init_regime_adaptive`, `init_kalman_filter`, `init_dashboard`, `init_all_enhancements`, `load_broker_module`, `broker_connect`, `show_broker_account`, `show_broker_positions`, `validate_order_args`, `get_order_price`, `current_endpoint_mode` (sets `SST_ENDPOINT_MODE`; call without `$(...)`), `check_live_config_guard`, `order_prechecks`, `place_guarded_order`, `place_buy_order` / `place_sell_order` (thin wrappers), `startup_reconcile_warning`, `run_reconcile_command`, `apply_technical_agent_regime SYMBOL V2_INPUTS` (opt-in scan hook; echoes the input unchanged when disabled) |
 | Agent Adapter | `lib/agent_adapter.sh` | Bash | `agent_cache_dir`, `agent_cache_file AGENT SYMBOL [DATE]`, `agent_get AGENT SYMBOL` (`DISABLED`/`MISSING`/`INVALID`/`STALE`/`UNAVAILABLE`/`OK`), `agent_gate_get SIGNAL` (`MISSING`/`INVALID`/`SYNTHETIC`/`EXPIRED`/`FAILED`/`PASSED`), `agent_effective_weight AGENT`, `agent_max_total_weight`, `agent_components_json SYMBOL` (used by `calculate_confluence_score_v2`). jq only, no network, no Python |
-| Agents CLI | `agents/cli.py` (+ `__main__.py`) | Python 3.12 | `python -m agents <agent> <command>`; agents `market`, `fundamental`, `technical`, `quant`, `validate`, `portfolio`; commands `run`, `status`, `train`, `gate` (+ `validate parity`). Exit 0 ok, 1 error / `not_implemented`, 2 data unavailable. `HANDLERS` maps (agent, command) to a handler |
+| Agents CLI | `agents/cli.py` (+ `__main__.py`) | Python 3.12 | `python -m agents <agent> <command>`; agents `market`, `fundamental`, `technical`, `quant`, `validate`, `portfolio`; commands `run`, `status`, `train`, `gate` (+ `validate parity`, `quant ingest|train|predict|evaluate|status`; options `--refresh`, `--arms`). Exit 0 ok, 1 error / `not_implemented`, 2 data unavailable. `HANDLERS` maps (agent, command) to a handler (looked up before the `COMMANDS` check) |
 | Agents core | `agents/config.py`, `envelope.py`, `cache.py`, `fixtures.py`, `schemas/*.json` | Python | `load_config` (whitelisted keys, masked repr), `assert_paper`, `endpoint_mode`; `make_envelope`, `unavailable_envelope`, `validate_envelope`; `cache_root`, `cache_path`, `gate_path`, `atomic_write_json`, `write_envelope`; `load_fixture_bars` |
 | Agents data | `agents/data/{alpaca,bars,yf_fallback}.py` | Python | `AlpacaBarsClient.fetch` (GET only, host whitelist, paper asserted, pagination, 403 sip → iex, stale rejection, disk cache), `expected_last_session`, `load_bars(symbols, start, end, as_of)` → `BarsResult` / `Unavailable` |
 | Agents LLM | `agents/llm/{base,providers,budget}.py` | Python | `get_provider` (`LLM_PROVIDER` none (default) / fake / ollama / openai), `BudgetLedger` ($0 budget refuses paid calls before any HTTP request). Not used by any agent yet |
 | Technical Agent | `agents/technical/{talib_features,agent,bash_compat}.py` | Python | `compute_features`, `compute_series` (RSI, EMA, SMA, MACD, Bollinger, ATR (Wilder), ADX14/DI, Stochastic, Williams %R, OBV, Donchian, `trend_state`, `regime_adx`); `run`, `cli_run`, `cli_status`; `bash_compat.v2_from_bars` (exact port of the bash v2 scan, quirks included) |
-| Signals | `agents/signals/{base,mean_reversion,trend_follow,v2_confluence}.py` | Python | `get_signals()` → `v2_confluence`, `v2_confluence_adx`, `mr_only`, `tf_only` (`SignalSpec.grid()`, `build(df, params, symbol)`) |
-| Validation Agent | `agents/validate/{agent,engine,walkforward,stats,benchmarks,trials,gate,report,universe}.py` | Python | `run_gate`, `run_parity`, `status`; `gate_backtest`, `legacy_parity_backtest`; `calendar_folds`, `bar_folds`; `sharpe`, `max_drawdown`, `cagr`, `psr`, `dsr`, `pbo_cscv`; `spy_buy_hold`, `equal_weight_buy_hold`; `n_trials`; `evaluate_criteria`, `decide`, `write_gate`, `read_gates`; `render_html`, `write_report` |
+| Signals | `agents/signals/{base,mean_reversion,trend_follow,v2_confluence,quant}.py` | Python | `get_signals()` → `v2_confluence`, `v2_confluence_adx`, `mr_only`, `tf_only` (`SignalSpec.grid()`, `build(df, params, symbol)`); `get_signals(include_quant=True)` adds `xgb_topk`, `quant_topk`, `quant_rank` (`quant.py`: `predictions_file`, `load_ranks`, `percentiles`, `rebalance_dates`, `top_sets`, `topk_builder`, `compute_v2_core`, `v2_core`, `blend_recommendations`, `quant_rank_builder`) |
+| Validation Agent | `agents/validate/{agent,engine,walkforward,stats,benchmarks,trials,gate,report,universe}.py` | Python | `run_gate` (also `bars_res=`, `include_parity=`), `run_parity`, `status`, `order_signals`, `quant_inputs`, `quant_gate_inputs`, `needed_arms`, `default_quant_symbols`; `gate_backtest` (opt-in `sizing` = slots), `legacy_parity_backtest`; `calendar_folds`, `bar_folds`; `sharpe`, `max_drawdown`, `cagr`, `psr`, `dsr`, `pbo_cscv`; `spy_buy_hold`, `equal_weight_buy_hold`; `n_trials`; `thresholds`, `evaluate_criteria`, `decide`, `write_gate`, `read_gates`; `render_html`, `write_report` |
+| Quant Agent | `agents/quant/{universe,raw,store,legacy_features,qlib_env,handler,folds,train,metrics,predict,evaluate,agent}.py` + `universe.txt` | Python | `load_universe`, `rank_universe`, `benchmarks`, `all_symbols`; `ingest`, `load_raw`, `raw_status`, `read_meta`, `raw_dir`; `build_store`, `read_store_meta`, `store_dir`, `instrument_dirname`; `legacy_feature_frame`, `legacy_features_at`, `load_ml_inference`; `init_qlib`, `quiet`, `n_jobs`, `mlruns_dir`, `reset`; `make_handler`, `feature_count`; `Segment`, `yearly_folds`, `live_segment`, `bar_folds_offline`; `run_train`, `parse_arms`, `arm_params`, `read_latest`, `load_model`, `models_dir`, `predictions_dir`; `daily_ic`, `newey_west_t`, `naive_t`, `summarize_ic`, `per_year`, `topk_spread`, `quintile_spread`, `evaluate_arm`; `run_predict`, `rank_predictions`, `direction_for`, `gate_passed`, `ttl_hours`; `run_evaluate`, `go_decision`, `render_eval_html`, `write_eval_report`, `latest_evaluation`; `ingest_and_build`, `status`, `cli_ingest`, `cli_train`, `cli_predict`, `cli_evaluate`, `cli_status` |
 | Order Safety | `lib/order_safety.sh` | Bash | `sst_state_dir`, `kill_switch_file`, `kill_switch_active`, `kill_switch_engage`, `kill_switch_release`, `broker_endpoint_mode`, `endpoint_mode_label`, `config_file_is_tracked`, `order_ledger_file`, `order_ledger_append`, `order_ledger_update`, `order_ledger_entries`, `generate_client_order_id`, `order_lock_acquire`, `order_lock_release`, `check_order_qty_cap`, `daily_buy_notional_used`, `check_order_caps`, `daily_loss_limit_pct`, `check_daily_loss_halt`, `check_duplicate_order`, `reconcile_baseline_file`, `reconcile_compute`, `reconcile_with_broker`, `reconcile_accept`, `check_market_hours`, `check_pdt_warning`, `compute_limit_price`, `order_bracket_levels_from`, `order_bracket_levels`, `safety_status_report` |
 | Alerts | `lib/alerts.sh` | Bash | `send_alert LEVEL EVENT MESSAGE [DETAILS_JSON]` (always returns 0), `alert_log_file`, `alert_channels_summary` |
 | Indicators | `lib/indicators.sh` | Bash | `calc_rsi`, `calc_macd`, `calc_bollinger_bands`, `calc_atr`, `calc_obv`, `calc_stochastic`, `calc_williams_r`, `calc_sma`, `calc_ema` |
@@ -782,7 +801,7 @@ State: `$SST_STATE_DIR/positions_baseline.json` = `{taken_at, broker, positions:
 `broker_endpoint_mode` classifies the endpoint: `paper` (host `paper-api.alpaca.markets`, or an empty URL), `local` (127.0.0.1 / localhost / [::1]; `SST_LOOPBACK_IS_LIVE=1` is a test knob that makes it `live`), `live` (anything else; Robinhood is always `live`). The agent prints `Mode: PAPER|LOCAL STUB|LIVE (<broker>)` once.
 
 - LIVE without `--live` → refused before any broker contact.
-- LIVE while the active config file (`SST_CONFIG_FILE`, default `config.sh`) is tracked in git → refused (`config.sh is tracked in git and must stay on paper …`). Live keys go in an untracked file, e.g. `config.live.sh` (gitignored), selected with `SST_CONFIG_FILE=$PWD/config.live.sh … --live`.
+- LIVE while the active config file (`SST_CONFIG_FILE`, default `config.sh`) is tracked in git → refused (`config.sh is tracked in git and must stay on paper …`; since `26c44ba` `config.sh` itself is untracked, so this only fires for a tracked file). Live keys go in an untracked file, e.g. `config.live.sh` (gitignored), selected with `SST_CONFIG_FILE=$PWD/config.live.sh … --live`.
 - LIVE confirmation is the typed `SYMBOL QTY`.
 
 ### Alerts
@@ -822,7 +841,7 @@ cd StockSwingTrader-v6.3
 .venv-agents/bin/python -m agents status               # endpoint_mode PAPER, has_* booleans
 ```
 
-Pins (`requirements-agents.txt`, all resolved on Python 3.12.12 arm64): vectorbt 1.2.0, numba 0.68.1, llvmlite 0.50.0, pandas 3.1.0, numpy 2.5.4, scipy 1.16.3, TA-Lib 0.8.3 (wheel, no brew `ta-lib` needed), jsonschema 4.26.0, requests 2.34.2. Later-phase pins (openbb, pyqlib, lightgbm, PyPortfolioOpt) are commented out; `openbb-yfinance` is never installed; yfinance is not in the venv. The repo `requirements.txt` does not install on 3.12; never use it for the agents. Run `python -m agents` from the repo root (the package is not installed). The first `import vectorbt` compiles numba (~30-40 s).
+Pins (`requirements-agents.txt`, all resolved on Python 3.12.12 arm64): vectorbt 1.2.0, numba 0.68.1, llvmlite 0.50.0, pandas 3.1.0, numpy 2.5.4, scipy 1.16.3, TA-Lib 0.8.3 (wheel, no brew `ta-lib` needed), jsonschema 4.26.0, requests 2.34.2. Phase 2 adds pyqlib, lightgbm, xgboost, mlflow, pyarrow, joblib, python-dateutil (see [Quant Research Agent](#quant-research-agent-phase-2)); later-phase pins (openbb, PyPortfolioOpt) are commented out; `openbb-yfinance` is never installed; yfinance is not in the venv. The repo `requirements.txt` does not install on 3.12; never use it for the agents. Run `python -m agents` from the repo root (the package is not installed). The first `import vectorbt` compiles numba (~30-40 s).
 
 ### CLI
 
@@ -834,7 +853,7 @@ Pins (`requirements-agents.txt`, all resolved on Python 3.12.12 arm64): vectorbt
 | `python -m agents validate gate [--signals ...] [--symbols ...] [--benchmark SPY] [--start 2016-01-01] [--end DATE] [--offline] [--report-dir DIR]` | Walk-forward gate per signal: `cache/agents/gates/<signal>.json` + `report.html` / `report.json` | 0 (also when the gate fails), 2 data unavailable (nothing written), 1 bad args |
 | `python -m agents validate parity [--offline] [--symbols ...]` | vectorbt legacy mode vs `lib/backtest_engine.py` per symbol × {mean_reversion, trend_follow} | 0 match, 1 mismatch, 2 no data |
 | `python -m agents validate status` | Gate files: `signal_id`, `passed`, `synthetic`, `age_days`, `data_sources`, `run_id`, `reasons` | 0 |
-| `python -m agents quant\|fundamental\|market\|portfolio run` | Not implemented in Phase 0-1 | 1 `not_implemented` |
+| `python -m agents quant\|fundamental\|market\|portfolio run` | Not implemented (the quant agent has its own `ingest`/`train`/`predict`/`evaluate`/`status` commands, see [Quant Research Agent](#quant-research-agent-phase-2)) | 1 `not_implemented` |
 
 Config (`agents/config.py`): a bash subprocess sources `config.template.sh` then `${SST_CONFIG_FILE:-config.sh}` and returns only whitelisted names; non-empty file values win, the environment is the fallback. `assert_paper()` requires the `ALPACA_BASE_URL` host to be `paper-api.alpaca.markets` before any Alpaca client is built; the bars client only sends GET to `data.alpaca.markets` (loopback for tests). Nothing in `agents/` can place, cancel or modify an order or call Robinhood.
 
@@ -850,7 +869,11 @@ cache/agents/validate/signals/<signal>/        v2 signal cache, <SYM>_<sha256(ba
 cache/agents/validate/trials.jsonl             every evaluated config (DSR trial count)
 cache/agents/data/alpaca/                      bars disk cache
 cache/agents/llm/ledger.jsonl                  LLM budget ledger (unused while LLM_PROVIDER=none)
+cache/agents/validate/signals/v2_core/         quant_rank v2 core cache (conf, bull, bear per bar)
+cache/agents/quant/{raw,qlib_data,qlib_data.prev,models,predictions,mlruns,eval}/   quant agent (Phase 2)
 ```
+
+Quant envelopes use `ttl_hours` 84 (`QUANT_TTL_HOURS`) instead of 36.
 
 Envelope fields: `agent`, `symbol`, `as_of`, `generated_at` (second-precision `Z`), `ttl_hours` (36), `available`, `score` (0..100 or null), `direction`, `confidence`, `data_sources`, `synthetic`, `warning`, `reason`, `features`, `evidence`, `veto`, `llm`, `validation`. Rules: `available: false` → score/direction/confidence null, `data_sources: []`, non-empty `reason`; `synthetic: true` needs a `warning`.
 
@@ -860,7 +883,7 @@ Envelope fields: `agent`, `symbol`, `as_of`, `generated_at` (second-precision `Z
 
 - `AGENTS_ENABLED=false` (default): v2 JSON byte-identical to `970af57` (goldens in `tests/fixtures/agents/v2_golden/`, captured before any lib change; only `latency_ms`/timestamps differ).
 - `AGENTS_ENABLED=true`, all weights 0: same scores, recommendation and weights; a `components.agents` shadow block is added: `{applied_weight_percent, quant|fundamental|market: {score, status, weight_percent, applied, reason}}`. Reasons in order: `disabled` / `missing` / `invalid` / `stale` / `unavailable` → `synthetic` → `no_gate` → `gate_failed` / `gate_expired` / `gate_synthetic` → `shadow` (eligible, weight 0) → `applied`.
-- No quant/fundamental/market producer exists yet, so nothing can be applied in Phase 0-1.
+- Phase 2 adds the first producer (quant, `cache/agents/quant/<date>/`). Its gate `quant_rank` failed on real data, so the quant entry stays at most `gate_failed` and nothing can be applied; no fundamental/market producer exists yet.
 
 ### Technical Agent
 
@@ -889,7 +912,7 @@ Gate criteria (§5.6 defaults, env-overridable; non-numeric → default):
 | `max_drawdown_vs_spy` | OOS max DD ≤ 1.2 × SPY max DD | `GATE_MAX_DD_MULT` |
 | `min_oos_trades` | OOS trades ≥ 100 | `GATE_MIN_OOS_TRADES` |
 | `min_positive_folds` | share of folds with OOS return > 0 ≥ 0.60 | `GATE_MIN_POSITIVE_FOLDS` |
-| `baseline_improvement` | `not_applicable` for the 4 base signals (not counted) | — |
+| `baseline_improvement` | `not_applicable` for the 4 base signals (not counted); for a spec with a baseline (Phase 2: `quant_topk` → `xgb_topk`, `quant_rank` → `v2_confluence`) share of folds whose OOS return beats the baseline's ≥ 0.60 | `GATE_MIN_BASELINE_FOLDS` |
 
 `passed` = every applicable criterion passes AND the run is not synthetic AND every symbol and the benchmark have a real source (`alpaca:*` or `yfinance`). A failed gate is a valid result (exit 0, `reasons` lists each failure as `<criterion>: <value> <op> <threshold>`); missing data exits 2 and writes no gate. The gate run also runs the legacy parity on the same bars (`legacy_parity` in report.json). The HTML report is self-contained (no JS/CDN, inline SVG equity curves, HTML-escaped) and shows a SYNTHETIC banner on fixture runs.
 
@@ -910,7 +933,111 @@ The real-ADX regime did worse than the bash approximation on this run, so `AGENT
 
 ### LLM
 
-`LLM_PROVIDER=none` (default): no LLM is called. `fake` is for tests; `ollama` (`LLM_BASE_URL` default `http://127.0.0.1:11434`, `LLM_MODEL`) and `openai` (OpenAI-compatible, `LLM_API_KEY`) exist but no agent uses them in Phase 0-1. `BudgetLedger` authorises every call before any HTTP request; with `LLM_MONTHLY_BUDGET_USD` 0 (default) every cloud call is refused.
+`LLM_PROVIDER=none` (default): no LLM is called. `fake` is for tests; `ollama` (`LLM_BASE_URL` default `http://127.0.0.1:11434`, `LLM_MODEL`) and `openai` (OpenAI-compatible, `LLM_API_KEY`) exist but no agent uses them in Phase 0-1 or Phase 2. `BudgetLedger` authorises every call before any HTTP request; with `LLM_MONTHLY_BUDGET_USD` 0 (default) every cloud call is refused.
+
+---
+
+## Quant Research Agent (Phase 2)
+
+**Files:** `agents/quant/` (12 modules + `universe.txt`), `agents/signals/quant.py`, the Phase 2 block of `requirements-agents.txt`, quant additions in `agents/validate/` (slot sizing, baseline criterion, `bars_res`), `agents/technical/bash_compat.py` (`agent_blend`, `recommend`; parity unchanged), `agents/data/alpaca.py` (`include_vwap`). Commits `afd07d5`, `91835c3`, `7023129`, `09aec78`, `dbc0c90`, `e67d323`, `3edf3b6`, `7a42bb7`, `ea9b81a`, `75ea040`. No change to `config.template.sh`, `lib/scoring.sh`, `lib/agent_adapter.sh`, `lib/ml_predictor.sh`, `lib/models/` or any order/broker lib. FinRL is not used. No LLM, no paid service.
+
+### Setup
+
+Same venv as Phase 0-1 (`.venv-agents`, Python 3.12). Phase 2 pins (`requirements-agents.txt`): pyqlib 0.9.7, lightgbm 4.7.0, xgboost 3.4.1 (the version the legacy `lib/models/xgboost_predictor.pkl` was trained with), mlflow 3.17.2, pyarrow 25.0.1, joblib 1.6.0, python-dateutil 2.9.0.post0 (pyqlib needs < 3; pip downgraded 3.0.0; no Phase 0-1 pin changed). Installed with `pip install pyqlib==0.9.7 lightgbm==4.7.0 xgboost==3.4.1 -c <Phase 0-1 pins>`; `pip check` clean. pyqlib also pulls jupyter, cvxpy, gym, fire, loguru, redis, pymongo (not imported by our code). Venv size 1.2 GB. `import qlib` (+ lightgbm, xgboost, mlflow, pyarrow) takes ~12 s; `python -m agents status` and `quant status` import none of them.
+
+```bash
+.venv-agents/bin/pip install -r requirements-agents.txt && .venv-agents/bin/pip check
+```
+
+### Universe
+
+`agents/quant/universe.txt` (sections `# rank` and `# benchmark`, read by `load_universe`): 153 liquid US large caps (all GICS sectors, common stock, no dotted tickers, includes the 20 Phase 1 symbols) + benchmarks SPY, QQQ, IWM (ingested, never ranked). Pruned after the first real ingest: LIN (first SIP bar 2018-10-31), MMC (stale, last bar 2026-01-13), BK (stale, last bar 2026-05-20). **Survivorship bias:** a fixed list of today's large caps; delisted/acquired names are missing, which flatters every result. Offline: QAA..QLL + AAA, BBB, CCC (15 rank) and SPY from `tests/fixtures/agents/bars/` (generated random walks, synthetic).
+
+### Data: raw store and Qlib store
+
+`quant ingest` fetches daily bars through `AlpacaBarsClient` (paper asserted, GET only, host whitelist, `include_vwap=True`, batches of 25, 403 sip → iex) from `--start` (default 2016-01-01) to the expected last session, and writes `cache/agents/quant/raw/<SYM>.csv` (open, high, low, close, volume, vwap) + `<SYM>.meta.json` (`data_source`, `synthetic`, `adjustment`, `feed`, `start`, `end`, `rows`, `fetched_at`, ...). Full history per symbol (adjustment `all` re-bases on every dividend, so appending would mix bases). Resume: a symbol whose meta has the same start, end and adjustment (rows > 0) is skipped unless `--refresh`.
+
+Then `build_store` writes the Qlib bin store `cache/agents/quant/qlib_data/` (built in a temp dir, swapped in, old kept as `qlib_data.prev`): `calendars/day.txt`, `instruments/{all,sst_us}.txt` (`sst_us` = rank symbols), `features/<sym>/<field>.day.bin` (little-endian float32, first value = calendar start index) for open, high, low, close, volume, vwap, factor (1.0; prices already adjusted) and the 14 legacy ML features `sst_*` (computed with the functions of `lib/ml_inference.py`, imported by path; equal to `extract_features_from_data` on every prefix from bar 49), plus `store_meta.json` (`rank_symbols`, `benchmarks`, `spans`, `data_sources`, `bars_sha12`, `missing_sessions`, calendar range, `synthetic`).
+
+Real store (2026-11-01): 153 rank + 3 benchmark symbols, all `alpaca:sip`, `synthetic: false`, 2,723 sessions 2016-01-04 → 2026-10-30, every symbol complete (0 missing sessions), 424,788 bars. Disk: raw 23 MB, qlib_data 38 MB (+ prev 38 MB), models 9.2 MB, predictions 11 MB, mlruns 25 MB; `cache/agents/quant` 146 MB. First ingest 30 s (45 GETs), resume 10 s (0 GETs).
+
+### Model: handler, label, folds, arms
+
+- Handler (`make_handler`): `alpha158_sst14` = Qlib Alpha158 (158 features) + the 14 `$sst_*` fields = 172 features; `sst14` = the 14 legacy features only. Learn processors `DropnaLabel`, `CSZScoreNorm(label)`; no feature normalisation.
+- Label `LABEL0 = Ref($open, -6) / Ref($open, -1) - 1`: open t+1 → open t+6, the 5-day return tradable after a close-t decision.
+- Folds (`yearly_folds`): test year Y = 2018 … last (partial) year; expanding train from `calendar[60]`; valid = year Y-1; 7-session embargo before each segment boundary (`end + 7 < next start`). Live model (`live_segment`): valid = last 252 sessions, train before it minus the embargo. Offline: 2 bar folds of 126.
+- Arms (`train.ARMS`), no hyperparameter search (trial count 1):
+
+| Arm | Model | Features | Params | Role |
+|---|---|---|---|---|
+| `lgbm` | LightGBM | alpha158_sst14 (172) | Qlib Alpha158 benchmark: loss mse, lr 0.2, num_leaves 210, max_depth 8, colsample 0.8879, subsample 0.8789, lambda_l1 205.6999, lambda_l2 580.9768, early stopping 50, ≤ 1000 rounds, seed 42 | the quant model (predict default) |
+| `xgb14` | XGBoost | sst14 (14) | legacy: max_depth 6, eta 0.1, reg:squarederror, 100 rounds, seed 42 | baseline = today's ML path on real data |
+| `xgb_full` | XGBoost | alpha158_sst14 (172) | legacy params | IC diagnostic only |
+
+- CPU: `init_qlib` runs `qlib.init(provider_uri=store, region=REG_US, kernels=1, expression_cache=None, dataset_cache=None)` and sets `MLFLOW_ALLOW_FILE_STORE=true`, `MLFLOW_DISABLE_AGENT_HINT=1`, `MLFLOW_DISABLE_TELEMETRY=true`, `DO_NOT_TRACK=true` before importing qlib (MLflow 3.17 otherwise sends usage telemetry). `QUANT_N_JOBS` (default 4) = LightGBM `num_threads` / XGBoost `nthread`. Start long real runs with `nice -n 10`. `QUANT_TEST_FAST=1` (tests) caps rounds at 20.
+- Artefacts: `cache/agents/quant/models/<train_run_id>/<arm>/{fold_<Y>,live}/model.pkl`, `models/<train_run_id>/train_manifest.json`, `models/latest.json` (pointer), `predictions/<arm>.parquet` (datetime, instrument, score, label (raw open-to-open), fold); Qlib recorder (MLflow file store) `cache/agents/quant/mlruns`, experiment `sst_quant`, one recorder per arm × fold (`<arm>_<fold>`, `<arm>_live`). `.gitignore` also ignores `mlruns/`.
+
+Real training run `20261101T192518Z-1003ab`: 2 min 8 s wall (handler build 20.5 s / 7.4 s; lgbm 42.5 s, xgb14 10.3 s, xgb_full 37.7 s), 9 yearly folds 2018..2026 + live per arm, 339,660 OOS prediction rows per arm (2018-01-02 → 2026-10-30), fold train sizes 28,305 → 336,141 rows, live train 367,812. LightGBM early-stops at 1-13 trees per fold (live 2) with these fixed params; reported as-is.
+
+### Predict and envelopes
+
+`quant predict` (real mode) first refreshes the raw + Qlib store (resume: current symbols are not refetched), loads the live model of `--arms` (default `lgbm`) from `models/latest.json`, builds the handler over the last 130 sessions ending at the feature date (last store session ≤ `--as-of`; default = expected last session, offline = store end) and ranks the rank universe:
+
+- `score` = percentile `100 × (rank_asc − 1) / (n − 1)`, 1 decimal (100 = best; ties by symbol order); `direction` bullish ≥ 80, bearish ≤ 20, else neutral; `confidence` = |pct − 50| / 50.
+- `features`: `prediction`, `rank` (1 = best), `universe_size`, `percentile`, `arm`, `model_id`, `model_train_end`, `model_age_days`, `label`, `feature_set`, `feature_date`. `data_sources` from the raw meta. `validation` = `{gate_id: "quant_rank", passed}` from the gate file. `ttl_hours` 84 (`QUANT_TTL_HOURS`: a Friday prediction is still fresh on Monday or after a holiday). Model older than 400 days → warning.
+- Unavailable: `not_in_quant_universe` (requested symbols outside the rank list, incl. SPY), `no_features_at_as_of`, `stale_data` (store end before the staleness cutoff), `universe_too_small`.
+
+Real run (as of 2026-10-30): 153 envelopes in `cache/agents/quant/2026-10-30/`, 60 s; `agent_get quant AAPL` → OK, score 37.5 (rank 96/153). Nightly (after the close, on weekdays):
+
+```bash
+# crontab -e   (22:30 local time, Mon-Fri; quant predict refreshes the data itself)
+30 22 * * 1-5 cd /path/to/StockSwingTrader-v6.3 && nice -n 10 .venv-agents/bin/python -m agents quant predict >> logs/quant_predict.log 2>&1
+```
+
+### Evaluate, gates and the go rule
+
+`quant evaluate` computes per arm on the pooled OOS predictions (`metrics.evaluate_arm`): daily IC and Rank-IC (Spearman, ≥ 5 names), mean, std, ICIR, naive t, **Newey-West t (lag 4)**, non-overlapping (every 5th day) t, per-year table, top-k (5/10/20) excess over the universe mean (per 5 days, annualised × 252/5, NW t), Q5 − Q1 spread. Then two gate runs through `validate.agent.run_gate` (walk-forward 2 y / 6 m / 6 m from 2018-01-01, 14 folds, same criteria as Phase 1):
+
+| Gate | Signal | Universe | Grid | Baseline |
+|---|---|---|---|---|
+| `xgb_topk` | every 5 sessions hold the k best `xgb14` names, slot sizing (k slots of cash/k) | rank universe | k {5,10,20} × risk grid = 27 | — |
+| `quant_topk` | same with `lgbm` | rank universe | 27 | `xgb_topk` |
+| `quant_rank` | bash v2 replay with the quant percentile blended like an applied agent (`core × (1 − 0.15) + q × 0.15` before rounding; agents cast no votes; no quant → plain v2) | 20 Phase 1 symbols | risk grid = 9 | `v2_confluence` (in memory, no gate file) |
+
+Go (all required): lgbm Rank-IC mean ≥ 0.02 AND NW t ≥ 2; `quant_rank` gate passed; `quant_topk` beats `xgb_topk` in ≥ 60 % of folds; real data. Go only *proposes* `AGENT_QUANT_WEIGHT=0.15` in the report; the config default stays 0 either way. Report: `cache/agents/quant/eval/<run_id>/quant_report.{json,html}` (copied to `--report-dir`); HTML sections run, data, training, ic, spreads, gates, baselines, go, decision, caveats (+ proposal on go, SYNTHETIC banner offline).
+
+**Phase 2 real result** (eval `20261101T194304Z-cda1ae`, 12 min 20 s; full report `.agents/tasks/phase2-quant-report.md` / `.html`, outside the repo): **NO-GO.**
+
+| Arm | IC | Rank-IC | NW t (Rank-IC) | Non-overlap t | % days > 0 |
+|---|---|---|---|---|---|
+| `lgbm` | 0.0129 | 0.0087 | 1.95 | 1.29 | 51.6 % |
+| `xgb14` | 0.0107 | 0.0068 | 1.78 | 0.74 | 50.6 % |
+| `xgb_full` | 0.0200 | 0.0144 | 3.04 | 1.95 | 54.3 % |
+
+| Gate | OOS Sharpe (SPY 0.77) | CAGR | Max DD (SPY 33.8 %) | Trades | Positive folds | DSR | PBO | Failed criteria |
+|---|---|---|---|---|---|---|---|---|
+| `xgb_topk` | 0.53 | 9.7 % | 34.8 % | 2128 | 64.3 % | 0.834 | 0.391 | `vs_spy_sharpe`, `min_dsr`, `max_pbo` |
+| `quant_topk` | 0.58 | 11.1 % | 41.7 % | 1769 | 78.6 % | 0.828 | 0.422 | `vs_spy_sharpe`, `min_dsr`, `max_pbo`, `max_drawdown_vs_spy`, `baseline_improvement` (42.9 %) |
+| `quant_rank` | 0.64 | 4.0 % | 13.2 % | 931 | 78.6 % | 0.879 | 0.348 | `vs_spy_sharpe` (0.6418 < 0.6718), `min_dsr`, `max_pbo` (baseline 64.3 %: pass) |
+
+lgbm top-5 excess 0.28 % per 5 days (NW t 3.35); Q5 − Q1 0.09 % (t 1.60). Every go criterion except `real_data` failed. Consequence: `AGENT_QUANT_WEIGHT` stays 0, `agent_gate_get quant_rank` → `FAILED`, the quant component in v2 can at most be a `components.agents` shadow entry (`gate_failed`). Phase 1 gate files were not changed. Observation (not acted on): `xgb_full` had the strongest IC; any retune must be a new pre-registered run with its trials counted in the DSR.
+
+### Scoring wiring
+
+Nothing new in bash: `agent_components_json` already reads `cache/agents/quant/<date>/<SYM>.json` `.score` with gate `quant_rank` and weight `AGENT_QUANT_WEIGHT` (see [Scoring wiring](#scoring-wiring-zero-weight-identity)). The quant cache subdirectories (`raw/`, `qlib_data/`, ...) are ignored by the adapter (it only globs `YYYY-MM-DD` dirs). `tests/test_agents_quant_blend.sh` proves the Python `quant_rank` replay equals `calculate_confluence_score_v2` with an applied quant agent (whole JSON), and the pipeline suite proves the 13 v2 goldens stay identical with `AGENTS_ENABLED=true AGENT_QUANT_WEIGHT=0`.
+
+### CLI
+
+| Command | Effect | Exit |
+|---|---|---|
+| `quant ingest [--symbols ...] [--start] [--end] [--refresh] [--offline]` | raw store + Qlib store (with `--symbols`: rank = given non-benchmarks) | 0; 2 `market_data_unavailable` (store untouched) |
+| `quant train [--arms lgbm,xgb14,xgb_full] [--offline]` | yearly folds + live model per arm, OOS predictions, manifest | 0; 2 `store_unavailable`; 1 `invalid_arms` |
+| `quant predict [--as-of] [--symbols] [--arms lgbm] [--offline]` | envelopes `cache/agents/quant/<as_of>/` | 0; 2 `predictions_unavailable` / `store_unavailable` / none available |
+| `quant evaluate [--offline] [--report-dir DIR] [--start]` | IC, three gates, go/no-go report | 0 (also on no-go); 2 data/predictions missing |
+| `quant status` | raw, store, models, predictions, envelopes, evaluation, quant gates (null when absent) | 0 |
+| `validate gate --signals quant_topk,...` | quant gates directly (bars from the quant raw store) | 2 `quant_predictions_unavailable` / `quant_store_unavailable`; 1 `mixed_universes` |
+
+`train`, `predict` and `evaluate` send Qlib/LightGBM chatter to stderr so stdout stays one JSON document. Real pipeline on this Mac (10 cores, load ~8, `QUANT_N_JOBS=4`, nice 10): ingest 30 s, train ~2 min, predict 60 s, evaluate ~12 min.
 
 ---
 
@@ -1016,7 +1143,7 @@ pip install xgboost pandas numpy scikit-learn scipy joblib filterpy requests
 
 Configuration:
 - `config.template.sh` is tracked and has no secrets. The agent sources it, then `config.sh` (or `SST_CONFIG_FILE`) if present, whose values win. Its placeholder `API_KEY_ALPHA_VANTAGE`/`API_KEY_FINNHUB`/`API_KEY_NEWSAPI` values override anything exported earlier; Alpaca keys are read from the environment when `config.sh` does not set them.
-- `config.sh` is **tracked** in this private repository (since `52516c3`) and comes with the clone. It holds the Alpaca **paper** keys, `ALPACA_BASE_URL="https://paper-api.alpaca.markets"`, the Finnhub and NewsAPI keys, and (since `b083c76`) `FRED_API_KEY` and `SEC_USER_AGENT` (read by the agent layer only as `has_*` booleans until the Phase 3 clients exist). To change a key: edit `config.sh`, run `./StockSwingTrader_Agent.sh --check-account`, commit it to the private repo. Never put live keys or a live URL in it: the agent refuses LIVE broker commands while the active config file is tracked. Regenerate any key that was exposed outside the private repo.
+- `config.sh` is **untracked** again since `a64f234` / `26c44ba` (2026-11-01: listed in `.gitignore`, removed from the index; it was tracked from `52516c3` to `26c44ba`, so older commits still contain it). Each user creates their own (`cp config.template.sh config.sh`) with the Alpaca **paper** keys, `ALPACA_BASE_URL="https://paper-api.alpaca.markets"`, the Finnhub and NewsAPI keys, `FRED_API_KEY` and `SEC_USER_AGENT` (read by the agent layer only as `has_*` booleans until the Phase 3 clients exist). To change a key: edit `config.sh` and run `./StockSwingTrader_Agent.sh --check-account`. Keep it on paper: the tracked-config live guard (`config_file_is_tracked`) no longer fires for an untracked `config.sh`, so a live URL there is stopped only by `--live` + the typed confirmation. Regenerate any key that was exposed outside the private repo.
 - `config.robinhood.sh` and `config.live.sh` are untracked (`.gitignore`, together with `.state/`). Live keys go in `config.live.sh`, selected with `SST_CONFIG_FILE=$PWD/config.live.sh` and used only with `--live`.
 - The backend Settings API and the helper scripts (`RUN_TRADING.sh`, `CHECK_ACCOUNT.sh`, `CHECK_ORDERS.sh`) read `config.sh`.
 - To edit `RISK_PER_TRADE`, `MIN_CONFLUENCE_SCORE` and `TRADING_ENABLED` from the dashboard, add `export` lines for them to `config.sh` first.
@@ -1072,7 +1199,11 @@ Agent layer config variables (`config.template.sh` "Agent layer" block, all `${V
 | `AGENT_MAX_BAR_STALENESS_DAYS` | `3` | Business days the newest bar may lag the expected last session |
 | `AGENT_GATE_SLIPPAGE`, `AGENT_GATE_FEES` | `0.001`, `0` | Gate engine costs per side (environment only) |
 | `GATE_MIN_OOS_SHARPE` … `GATE_MIN_POSITIVE_FOLDS` | see [gate criteria](#strategy-validation-agent-and-gate) | Gate thresholds (environment only) |
-| `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`, `LLM_MONTHLY_BUDGET_USD`, `LLM_MAX_CALLS_PER_RUN` | `none`, …, `0` | LLM abstraction (unused in Phase 0-1; environment only) |
+| `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`, `LLM_MONTHLY_BUDGET_USD`, `LLM_MAX_CALLS_PER_RUN` | `none`, …, `0` | LLM abstraction (unused in Phase 0-2; environment only) |
+| `GATE_MIN_BASELINE_FOLDS` | `0.60` | `baseline_improvement` threshold (environment only, Phase 2) |
+| `QUANT_N_JOBS` | `4` | LightGBM `num_threads` / XGBoost `nthread` (environment only) |
+| `QUANT_TTL_HOURS` | `84` | `ttl_hours` of quant envelopes (environment only) |
+| `QUANT_TEST_FAST` | unset | `1` caps boosting rounds at 20 (tests only) |
 | `SST_AGENTS_VENV` | `<project>/.venv-agents` | Venv the test runner uses for agent suites (`/nonexistent` simulates no venv) |
 
 Environment variables used by the code: `LOG_FILE`, `DEBUG_MODE`, `BROKER_CHOICE`, `ML_TIMEOUT_SECONDS`, `SST_OFFLINE`, `SST_ALLOW_SYNTHETIC`, `REGIME_CACHE_DIR`, `BACKTEST_OUTPUT_DIR`, `DEBUG_BACKTEST`, `SST_CONFIG_FILE`, `ALPACA_API_KEY`, `ALPACA_SECRET_KEY`, `ALPACA_BASE_URL`, `ALPACA_DATA_URL`, `ALPACA_DATA_FEED`, `ALPACA_TIMEOUT_SECONDS`, `ALPACA_LOOKUP_ATTEMPTS`, `SCORING_MODE`, `SST_STATE_DIR`, `KILL_SWITCH_FILE`, `ALERT_LOG_FILE`, `SST_LOOPBACK_IS_LIVE` (tests only: treat 127.0.0.1 as live), `STUB_SLOW_SECONDS` (stub only), every variable in the table above, `PORT`, `SST_BASE_PATH`, `SST_LOG_FILE`, `VITE_API_BASE_URL`.
@@ -1103,7 +1234,7 @@ These are targets, not verified benchmarks: under 5 s per symbol for the full pi
 
 ## Testing
 
-`bash tests/test_runner.sh` runs 26 suites offline (`SST_OFFLINE=1`) and writes `.agents/tasks/test-report.md`. Last verified result (agent layer Phase 0-1): **26 suites, 1582/1582 passing** with the venv (exit 0, 1443 s; the 18 pre-existing suites 961 tests, the 8 agent suites 621) and **26 suites (20 passed, 6 skipped), 1134/1134** with `SST_AGENTS_VENV=/nonexistent` (exit 0, 1244 s), on `main` after the Phase 0-1 integration fix (config.sh agent settings reach `python -m agents`). The two MiroFish timing assertions (20 lookups < 1000 ms) are pre-existing and can fail when the Mac is under heavy load; a rerun passes. Six suites need the agent venv (`add_test NAME FILE venv`): when `${SST_AGENTS_VENV:-.venv-agents}/bin/python` is missing they print `[SKIP]` with the setup command and do not count as failures; `SST_AGENTS_VENV=/nonexistent bash tests/test_runner.sh` simulates that without deleting the venv. The runner unsets `AGENTS_ENABLED`, `AGENT_CACHE_DIR`, `AGENT_TECHNICAL_ENABLED` and the `AGENT_*_WEIGHT` variables at start. Before the agent layer: **18 suites, 960/960 passing** at `5a7abc0` (live-safety Step 1, about 13.5 min; run with no `SST_CONFIG_FILE` exported and `HOME` set to the real home; Broker Commands is now 137 because it checks the new `lib/agent_adapter.sh` too). Earlier: 15 suites, 598/598 after the broker/path fix; 14 suites, 468/468 before it (also on a fresh clone that trained its own model with `python3 lib/train_ml_model.py`, xgboost 3.4.1 / numpy 2.5.4). The ML Scoring Integration suite does not depend on what the trained model predicts: it checks the predictor's contract (schema, confidence range, determinism) and runs the STRONG_BUY/STRONG_SELL threshold tests with a stub predictor.
+`bash tests/test_runner.sh` runs 29 suites offline (`SST_OFFLINE=1`) and writes `.agents/tasks/test-report.md`. Last verified result (agent layer Phase 2, `75ea040`): **29 suites, 1878/1879** with the venv (28 suites passed; exit 1 only because of the pre-existing timing assertion `MiroFish step for 5 symbols takes < 1000 ms` in Phase 1 Integration (CLI), 1115 ms; 2559 s; the 18 pre-existing suites 961 tests with 960 passing, the 11 agent suites 918: Contract 26, Data Clients 20, Adapter 83, Scoring + Agents 90, Technical 21, Parity 322, Validation 40, CLI 23, Quant 46, Quant pipeline 89, Quant blend 158) and **29 suites (20 passed, 9 skipped), 1134/1134** with `SST_AGENTS_VENV=/nonexistent` (exit 0, 1784 s), on `main` at `75ea040` plus the Phase 2 docs (the runs overlapped the docs/config commits `fee5d80`..`26c44ba`, which change no code). The same assertion failed in both with-venv runs, in the first without-venv run and in a separate rerun of that suite (1115-1406 ms); the second without-venv run passed it. No other test failed in any run. Phase 0-1: 26 suites, 1582/1582 with the venv (1443 s) and 1134/1134 without (1244 s). Timing assertions are pre-existing and can fail when the Mac is under heavy load (endpoint-security scanning of every process spawn pushed the load to 12-21 on 10 cores during the Phase 2 runs): `MiroFish step for 5 symbols takes < 1000 ms` in Phase 1 Integration (CLI) measured 1115-1406 ms there (no lib or agent code changed since `ee15c75`, where it passed); they are not weakened. Nine suites need the agent venv (`add_test NAME FILE venv`): when `${SST_AGENTS_VENV:-.venv-agents}/bin/python` is missing they print `[SKIP]` with the setup command and do not count as failures; `SST_AGENTS_VENV=/nonexistent bash tests/test_runner.sh` simulates that without deleting the venv. The runner unsets `AGENTS_ENABLED`, `AGENT_CACHE_DIR`, `AGENT_TECHNICAL_ENABLED` and the `AGENT_*_WEIGHT` variables at start. Before the agent layer: **18 suites, 960/960 passing** at `5a7abc0` (live-safety Step 1, about 13.5 min; run with no `SST_CONFIG_FILE` exported and `HOME` set to the real home; Broker Commands is now 137 because it checks the new `lib/agent_adapter.sh` too). Earlier: 15 suites, 598/598 after the broker/path fix; 14 suites, 468/468 before it (also on a fresh clone that trained its own model with `python3 lib/train_ml_model.py`, xgboost 3.4.1 / numpy 2.5.4). The ML Scoring Integration suite does not depend on what the trained model predicts: it checks the predictor's contract (schema, confidence range, determinism) and runs the STRONG_BUY/STRONG_SELL threshold tests with a stub predictor.
 
 | Suite | File | Runner |
 |---|---|---|
@@ -1133,8 +1264,11 @@ These are targets, not verified benchmarks: under 5 s per symbol for the full pi
 | Agents: Parity vs bash | `tests/test_agents_parity.sh` | bash + `.venv-agents` (SKIP without venv) |
 | Agents: Validation | `tests/test_agents_validate.py` | `.venv-agents` python (SKIP without venv) |
 | Agents: CLI (offline) | `tests/test_agents_cli.sh` | bash + `.venv-agents` (SKIP without venv) |
+| Agents: Quant | `tests/test_agents_quant.py` | `.venv-agents` python (SKIP without venv) |
+| Agents: Quant pipeline (offline) | `tests/test_agents_quant_pipeline.sh` | bash + `.venv-agents` (SKIP without venv) |
+| Agents: Quant blend parity (bash) | `tests/test_agents_quant_blend.sh` | bash + `.venv-agents` (SKIP without venv) |
 
-Agent suites (all offline: fixtures in `tests/fixtures/agents/`, `SST_OFFLINE=1`, 127.0.0.1 stubs, no network): `test_agents_contract.py` (26) envelope schema + rules, atomic cache writes, path guards, config masking, config.sh agent settings reaching the CLI, `assert_paper`, LLM providers + $0 budget, CLI exit codes; `test_agents_data.py` (20) the Alpaca bars client against a 127.0.0.1 stub (pagination, GET only, host whitelist, sip → iex, retry, stale, timeout, cache), fixtures, yfinance fallback off; `test_agent_adapter.sh` (83) every `agent_get` / `agent_gate_get` status, weights, clamps and caps, no network; `test_scoring_agents.sh` (90) v2 goldens byte-identical with agents off, shadow block with weights 0, weight math, the scan hook; `test_agents_technical.py` (21) features, envelopes, CLI; `test_agents_parity.sh` (322, ~105 s) TA-Lib vs bash tolerances, `bash_compat` vs bash exact, v2 port vs 65 bash goldens, 3 live bash recomputes; `test_agents_validate.py` (36) signals, engine, walk-forward, stats, gates, report; `test_agents_cli.sh` (23) `validate gate|parity|status --offline`, the bash `agent_gate_get` contract on the gates written, a socket guard that refuses every connect, no key value in stdout. Python agent suites use `tests/agents_unittest.py`, which prints `Tests Passed:` / `Tests Failed:` for the runner. Fixture generators: `tests/fixtures/agents/make_fixtures.py` (bars, byte-identical on re-run), `v2_golden/generate_goldens.sh` (captured at `970af57`), `parity/gen_bash_v2_goldens.sh` (~9 min).
+Agent suites (all offline: fixtures in `tests/fixtures/agents/`, `SST_OFFLINE=1`, 127.0.0.1 stubs, no network): `test_agents_contract.py` (26) envelope schema + rules, atomic cache writes, path guards, config masking, config.sh agent settings reaching the CLI, `assert_paper`, LLM providers + $0 budget, CLI exit codes; `test_agents_data.py` (20) the Alpaca bars client against a 127.0.0.1 stub (pagination, GET only, host whitelist, sip → iex, retry, stale, timeout, cache), fixtures, yfinance fallback off; `test_agent_adapter.sh` (83) every `agent_get` / `agent_gate_get` status, weights, clamps and caps, no network; `test_scoring_agents.sh` (90) v2 goldens byte-identical with agents off, shadow block with weights 0, weight math, the scan hook; `test_agents_technical.py` (21) features, envelopes, CLI; `test_agents_parity.sh` (322, ~105 s) TA-Lib vs bash tolerances, `bash_compat` vs bash exact, v2 port vs 65 bash goldens, 3 live bash recomputes; `test_agents_validate.py` (40) signals, engine, walk-forward, stats, gates, report, slot sizing; `test_agents_cli.sh` (23) `validate gate|parity|status --offline`, the bash `agent_gate_get` contract on the gates written, a socket guard that refuses every connect, no key value in stdout; `test_agents_quant.py` (46, ~2 min) universe, raw ingest against a 127.0.0.1 stub, Qlib bin store round trip, legacy features vs `lib/ml_inference.py`, folds/embargo, training on fixtures (planted-signal IC), metrics, predict envelopes, quant signals, go rule, `quant_rank` at weight 0; `test_agents_quant_pipeline.sh` (89, ~2.5 min) offline `quant ingest → train → predict → evaluate → status` with a socket guard, exit codes, envelopes read by `agent_get`, the 13 v2 goldens identical with `AGENTS_ENABLED=true AGENT_QUANT_WEIGHT=0`, a synthetic evaluate gate read as `SYNTHETIC`; `test_agents_quant_blend.sh` (158, ~2 min) the Python `quant_rank` blend (`bash_compat` with `agent_blend`) equals bash `calculate_confluence_score_v2` with an applied quant agent (whole JSON). Python agent suites use `tests/agents_unittest.py`, which prints `Tests Passed:` / `Tests Failed:` for the runner. Fixture generators: `tests/fixtures/agents/make_fixtures.py` (bars, byte-identical on re-run), `v2_golden/generate_goldens.sh` (captured at `970af57`), `parity/gen_bash_v2_goldens.sh` (~9 min).
 
 `tests/test_v2_cli_scoring.sh` (81 tests) covers the OBV trend score (all up 100, all down 0, flat 50, deterministic), MR/TF/Kalman helpers, the 10th sentiment arg, `analyze_stock` in v2 and legacy mode, MiroFish applied once in v2, the JSON + HTML score breakdown and `--help`. `tests/test_order_execution.sh` (81) covers payload shapes (market/day, limit, bracket gtc, rounding, client order id), bracket orders, duplicate client order id → 422, timeout → lookup with exactly one POST, clock/calendar/open orders, account id masking and that the wrappers no longer shadow broker functions. `tests/test_live_safety.sh` (188, ~2.5 min, one stub per scenario) covers the default limit+bracket buy, every cap, no short selling, kill switch / `--halt` / `--resume`, duplicates, reconciliation (`--reconcile` exit 3, `--reconcile-accept`, fills, unknown open orders, `--allow-mismatch`), market closed / holiday / `queue`, PDT, the live guard (no `--live`, wrong confirmation, typed confirmation, tracked config), that the real `config.sh` points at paper (value check only), Robinhood without `--live`, alerts (log, Slack to the stub `/hooks/slack`, email via a stub sendmail) and `--safety-status`.
 
@@ -1147,8 +1281,10 @@ The stub (`alpaca_stub_server.py PORT_FILE REQ_LOG ORDER_LOG [STATE_FILE]`, `Thr
 Other test scripts not in the runner: `tests/test_alpaca_broker.sh`, `tests/test_robinhood_broker.sh`, `tests/test_regime_simple.sh`.
 
 ```bash
-bash tests/test_runner.sh               # all 26 suites (~22 min with the venv)
-SST_AGENTS_VENV=/nonexistent bash tests/test_runner.sh   # 6 agent suites SKIP
+bash tests/test_runner.sh               # all 29 suites (~40 min with the venv on a loaded Mac)
+SST_AGENTS_VENV=/nonexistent bash tests/test_runner.sh   # 9 agent suites SKIP
+.venv-agents/bin/python tests/test_agents_quant.py       # quant unit tests (~2 min)
+bash tests/test_agents_quant_pipeline.sh                 # offline quant CLI pipeline
 .venv-agents/bin/python tests/test_agents_validate.py    # one python agent suite
 bash tests/test_agents_parity.sh        # TA-Lib / bash_compat / v2 port vs bash (~105 s)
 bash tests/test_live_safety.sh          # order safety against local stubs (~2.5 min)
@@ -1211,6 +1347,12 @@ There is no `tests/test_indicators.sh`, `tests/validate_config.sh`, `DEPLOYMENT_
 | `SafetyError` / `endpoint_mode` LIVE in `agents status` | `ALPACA_BASE_URL` host is not `paper-api.alpaca.markets` | Restore the paper URL; the agent layer refuses to build an Alpaca client otherwise |
 | Gate `passed: false`, reason `synthetic_data` | Run on fixtures (`--offline`) | Expected; only real-data runs can pass |
 | Agent weight stays 0 although `AGENT_*_WEIGHT` > 0 | Envelope not OK/fresh, synthetic, or gate not `PASSED` (≤ 45 days) | Read `components.agents.<agent>.reason` in the v2 JSON |
+| Qlib hangs or spawns many processes | Qlib code run outside `if __name__ == "__main__"` or with `kernels` > 1 (joblib/multiprocessing on macOS) | Use `python -m agents quant ...` (guarded, `init_qlib` sets kernels=1); in your own scripts call `agents.quant.qlib_env.init_qlib()` under a `__main__` guard |
+| MLflow error about the file store / telemetry requests | MLflow 3.17 refuses the file store without `MLFLOW_ALLOW_FILE_STORE=true` and sends telemetry by default | `init_qlib` sets `MLFLOW_ALLOW_FILE_STORE`, `MLFLOW_DISABLE_TELEMETRY`, `DO_NOT_TRACK` before importing qlib; do not `import qlib` before it |
+| `quant train` / `predict` exit 2 `store_unavailable` | No Qlib store (`cache/agents/quant/qlib_data/` missing) | `python -m agents quant ingest` first |
+| `quant predict` exit 2 `predictions_unavailable`; `validate gate` exit 2 `quant_predictions_unavailable` | No trained model / OOS predictions for the arm (`models/latest.json`, `predictions/<arm>.parquet`) | `python -m agents quant train` (quant_topk needs `xgb14` too) |
+| Quant envelopes `stale_data` | Store end before the staleness cutoff (ingest not run, or Alpaca returned old bars) | `quant ingest` (or let `quant predict` refresh); check `quant status` |
+| A universe symbol missing / `unavailable` in ingest | Late listing, delisting or stale SIP bars | Remove it from `agents/quant/universe.txt` (header documents the pruning rule) and re-ingest; `validate gate` exits 2 `quant_store_unavailable` when a gate symbol is missing |
 
 ### Debug Mode
 
@@ -1233,7 +1375,9 @@ None of these exist in the code yet.
 
 **Deferred from live-safety Step 1:** feed the ML predictor the CLI's own bars (it still fetches via yfinance); the SMA200 term (needs > 200 bars); writing `logs/trades.json` from the CLI; cancel/replace of bracket legs before a sell (only warned); Robinhood brackets, clock and reconciliation; auto-execution; `--watchlist` on bash 3.2.
 
-**Deferred from the agent layer Phase 0-1:** Finnhub / SEC / FRED clients and the Market + Fundamental agents (Phase 3; keys are only plumbed through as `has_*`); vetoes and overlays (Phase 3); Quant agent with Qlib (Phase 2; quant replacing ML); Portfolio agent with PyPortfolioOpt (Phase 4); backend `/api/agents` routes; running the Technical agent inside the scan as a batch; supertrend; ML on real data; the scan stochastic/Williams closes-only quirk (issue 11); Robinhood stays untouched by the agents.
+**Deferred from the agent layer Phase 0-1:** Finnhub / SEC / FRED clients and the Market + Fundamental agents (Phase 3; keys are only plumbed through as `has_*`); vetoes and overlays (Phase 3); Portfolio agent with PyPortfolioOpt (Phase 4); backend `/api/agents` routes; running the Technical agent inside the scan as a batch; supertrend; ML on real data; the scan stochastic/Williams closes-only quirk (issue 11); Robinhood stays untouched by the agents.
+
+**Deferred from Phase 2 (quant):** a survivorship-free universe (point-in-time index membership incl. delisted names); a pre-registered hyperparameter search (LightGBM early-stops at 1-13 trees with the fixed Qlib params) with every trial counted in the DSR; XGBoost/feature ablations (`xgb_full` had the best IC); Qlib's own backtest / portfolio strategy; intraday data; running `quant predict` from the bash scan (today: a cron line); replacing `lib/ml_predictor.sh` (only on a go); FinRL (skipped: no reinforcement learning at $0 / CPU budget).
 
 **Short-term:** real market data for the agent and regime detector; training on real data with a CLI; grid search and stops in the backtester; WebSocket updates instead of polling (`ws` is already a backend dependency but unused).
 
@@ -1245,7 +1389,7 @@ None of these exist in the code yet.
 
 ## Deployment & Versioning
 
-**v6.3 adds:** ML predictor, regime detection and weighting, React dashboard + Express backend, backtesting module, Kalman filter. **Live-safety Step 1** (`4c621fb`, `daf1bca`, `5a7abc0`; `VERSION` unchanged): v2 scoring in the CLI with a real OBV score and score breakdown in reports; Alpaca limit/bracket orders with client order ids; order safety (caps, kill switch, loss halt, duplicate guard, reconciliation, market hours, PDT warning, live guard, alerts). **Agent layer Phase 0-1** (`0d945a6` … `d626d6b`; `VERSION` unchanged, `agents.__version__` 0.1.0): `agents/` package, `lib/agent_adapter.sh` (weights 0), Technical agent, Strategy Validation agent with gates.
+**v6.3 adds:** ML predictor, regime detection and weighting, React dashboard + Express backend, backtesting module, Kalman filter. **Live-safety Step 1** (`4c621fb`, `daf1bca`, `5a7abc0`; `VERSION` unchanged): v2 scoring in the CLI with a real OBV score and score breakdown in reports; Alpaca limit/bracket orders with client order ids; order safety (caps, kill switch, loss halt, duplicate guard, reconciliation, market hours, PDT warning, live guard, alerts). **Agent layer Phase 0-1** (`0d945a6` … `d626d6b`; `VERSION` unchanged, `agents.__version__` 0.1.0): `agents/` package, `lib/agent_adapter.sh` (weights 0), Technical agent, Strategy Validation agent with gates. **Agent layer Phase 2** (`afd07d5` … `75ea040`; `VERSION` unchanged, `agents.__version__` 0.2.0): Quant Research Agent (`agents/quant/`, Qlib + LightGBM + XGBoost baseline), quant gate signals, baseline criterion; real result NO-GO, `AGENT_QUANT_WEIGHT` stays 0.
 
 **Earlier versions (from project docs, not re-verified):** v6.2 Robinhood integration; v6.1 backend API; v6.0 Alpaca broker support.
 
@@ -1268,9 +1412,11 @@ DEPLOYMENT_PACKAGE/
 ├── README.md, INSTALLATION.md, ARCHITECTURE.md, FEATURES.md,
 │   SETUP_WIZARDS.md, VERSION_HISTORY.md, PACKAGE_MANIFEST.txt, STEERING_GUIDE.md
 ├── .kiro/steering/stockswingtrader-v6.3.md   (this guide)
-├── .gitignore                       byte-identical to the repo (.state/, config.live.sh, .venv-agents/)
-├── requirements-agents.txt          agent layer venv pins (Python 3.12)
-├── agents/                          agent layer package (no __pycache__), byte-identical to the repo
+├── .gitignore                       byte-identical to the repo (.state/, config.live.sh, .venv-agents/, mlruns/)
+├── requirements-agents.txt          agent layer venv pins (Python 3.12; Phase 2 block: pyqlib, lightgbm,
+│                                    xgboost, mlflow, pyarrow, joblib, python-dateutil)
+├── agents/                          agent layer package (no __pycache__), byte-identical to the repo,
+│                                    incl. agents/quant/ (+ universe.txt) and agents/signals/quant.py
 ├── lib/                             26 modules + models/: Step 1 synced the agent, config.template.sh,
 │                                    scoring.sh, html_report.sh, alpaca_broker.sh, alpaca_wrappers.sh,
 │                                    order_safety.sh, alerts.sh, risk_management.sh, trade_journal.sh,
@@ -1285,7 +1431,7 @@ DEPLOYMENT_PACKAGE/
                                      STEERING_DEPLOYMENT_SUMMARY.txt
 ```
 
-There is no `tests/` directory (so no fixtures: `python -m agents ... --offline` needs the repo) and no `config.sh` in the package (create one from `config.template.sh`; keep it on paper). `trading_thresholds.sh` is now included, so the regime and strategy modules get their threshold constants. `--broker robinhood` fails to load in the package because `robinhood_oauth.sh` is missing.
+There is no `tests/` directory (so no fixtures: `python -m agents ... --offline`, including `quant ... --offline`, needs the repo) and no `config.sh` in the package (create one from `config.template.sh`; keep it on paper). `trading_thresholds.sh` is now included, so the regime and strategy modules get their threshold constants. `--broker robinhood` fails to load in the package because `robinhood_oauth.sh` is missing.
 
 ---
 
@@ -1295,16 +1441,18 @@ There is no `tests/` directory (so no fixtures: `python -m agents ... --offline`
 StockSwingTrader-v6.3/
 ├── StockSwingTrader_Agent.sh         Main agent
 ├── config.template.sh                Configuration template (tracked)
-├── config.sh                         Private config, TRACKED (private repo): Alpaca paper, Finnhub, NewsAPI, FRED keys, SEC user agent
+├── config.sh                         Local per-user config, gitignored (untracked since 26c44ba): Alpaca paper, Finnhub, NewsAPI, FRED keys, SEC user agent
 ├── config.robinhood.sh, config.live.sh   Untracked (gitignored); live keys only in config.live.sh
 ├── .state/                           Gitignored: orders.jsonl, positions_baseline.json, KILL_SWITCH, order.lock
 ├── requirements.txt                  Python dependencies (legacy lib/*.py, Python ≤ 3.11 pins)
 ├── requirements-agents.txt           Agent layer pins (Python 3.12, .venv-agents)
 ├── .venv-agents/                     Gitignored agent venv
 ├── agents/                           Agent layer package: cli, config, envelope, cache, fixtures, schemas/,
-│                                     llm/, data/, technical/, signals/, validate/
+│                                     llm/, data/, technical/, signals/ (incl. quant.py), validate/,
+│                                     quant/ (Qlib quant agent + universe.txt)
 ├── cache/agents/                     Gitignored: envelopes, gates/, validate/ (reports, signals, trials.jsonl),
-│                                     data/alpaca/, llm/
+│                                     data/alpaca/, llm/, quant/ (raw, qlib_data, models, predictions,
+│                                     mlruns, eval, <date>/ envelopes)
 ├── VERSION                           Says v6.2 (stale)
 ├── lib/
 │   ├── indicators.sh, indicators_new.sh
@@ -1323,12 +1471,15 @@ StockSwingTrader-v6.3/
 ├── backend/      server.js, start.sh, package.json
 ├── frontend/     src/{App.tsx,pages,hooks,utils,components}, vite.config.ts, package.json
 ├── docs/         STEERING_GUIDE.md (this file), KALMAN_FILTER_GUIDE.md, ROBINHOOD_SETUP.md,
-│                 ALPACA_SETUP_GUIDE.html, STEERING_DEPLOYMENT_SUMMARY.txt
+│                 ALPACA_SETUP_GUIDE.html, STEERING_DEPLOYMENT_SUMMARY.txt,
+│                 guides/ (LOCAL_SETUP_GUIDE.html = copy of the Desktop local setup guide,
+│                 PLATFORM_INTEGRATIONS_GUIDE.html, README.md; added in fee5d80)
 ├── examples/     ml_scoring_integration_example.sh
-├── tests/        test_runner.sh + 26 registered suites (see Testing), broker tests, mock_data.json,
+├── tests/        test_runner.sh + 29 registered suites (see Testing), broker tests, mock_data.json,
 │                 agents_unittest.py, stubs/yfinance_{empty,error,fixture}/ (offline yfinance stand-ins),
 │                 stubs/alpaca_stub_server.py (local Alpaca API stand-in, 127.0.0.1),
-│                 fixtures/agents/ (bars/, alpaca/, v2_golden/, parity/; generated, synthetic)
+│                 fixtures/agents/ (bars/ incl. quant panel QAA..QLL, alpaca/, v2_golden/, parity/;
+│                 generated, synthetic)
 ├── logs/         agent.log, alerts.log, trades.json and broker logs (git-ignored)
 └── .agents/tasks/test-report.md      Written by tests/test_runner.sh
 ```
@@ -1337,5 +1488,5 @@ Copies of this guide that must stay identical: `docs/STEERING_GUIDE.md` (canonic
 
 ---
 
-**Document Last Updated:** 2026-11-01 (agent layer Phase 0-1)  
-**For:** StockSwingTrader v6.3 (commit `d626d6b`)
+**Document Last Updated:** 2026-11-01 (agent layer Phase 0-2: Quant Research Agent)  
+**For:** StockSwingTrader v6.3 (commit `75ea040`)

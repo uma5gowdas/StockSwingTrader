@@ -1,0 +1,184 @@
+# StockSwingTrader quant agent universe (agents/quant/universe.txt), Phase 2.
+#
+# Purpose: the cross-section the Qlib quant agent ingests, trains on and ranks
+# (agents/quant/universe.py load_universe()). One symbol per line; '#' starts
+# a comment; sections `# rank` (ranked stocks) and `# benchmark` (ETFs that
+# are ingested for benchmarks/market context but never ranked).
+#
+# SURVIVORSHIP BIAS: this is a fixed list of today's liquid US large caps.
+# Names that were delisted, acquired or fell out of the index since 2016 are
+# missing, which flatters every result (backtest, IC, gate) computed on it.
+#
+# Selection rules (plan Q2): liquid US large caps across all GICS sectors,
+# common stock only (no ETFs in the rank section), no dotted tickers (e.g. no
+# BRK.B), must contain the 20 Phase 1 validation symbols. After the first real
+# ingest, symbols whose first SIP bar is after 2016-01-08 or that miss more
+# than 5 sessions of the calendar are removed (listed in the Phase 2 report).
+#
+# Created 2026-11-01 (156 rank symbols + 3 benchmarks).
+#
+# Pruned 2026-11-01 after the first real ingest (Alpaca SIP, adjustment=all,
+# 2016-01-01 -> 2026-10-30): 153 rank symbols + 3 benchmarks remain.
+#   LIN  first SIP bar 2018-10-31 (after 2016-01-08; 2010 rows of 2723)
+#   MMC  unavailable: stale_data, last bar 2026-01-13
+#   BK   unavailable: stale_data, last bar 2026-05-20
+# No remaining symbol misses a session of the calendar (missing_sessions 0).
+#
+# rank
+AAPL
+MSFT
+NVDA
+AMZN
+GOOGL
+META
+AVGO
+ORCL
+CSCO
+ADBE
+CRM
+INTC
+AMD
+QCOM
+TXN
+IBM
+INTU
+AMAT
+MU
+ADI
+LRCX
+KLAC
+NOW
+ADP
+ACN
+SNPS
+CDNS
+NFLX
+PYPL
+JPM
+BAC
+WFC
+C
+GS
+MS
+BLK
+SCHW
+AXP
+USB
+PNC
+TFC
+COF
+MET
+AIG
+PRU
+CB
+SPGI
+ICE
+CME
+V
+MA
+TRV
+ALL
+UNH
+JNJ
+LLY
+PFE
+MRK
+ABBV
+TMO
+ABT
+DHR
+BMY
+AMGN
+GILD
+CVS
+MDT
+ISRG
+SYK
+CI
+ELV
+ZTS
+VRTX
+REGN
+BSX
+BDX
+HUM
+BIIB
+MCK
+WMT
+COST
+HD
+LOW
+MCD
+SBUX
+NKE
+TGT
+PG
+KO
+PEP
+PM
+MO
+MDLZ
+CL
+KMB
+GIS
+TJX
+BKNG
+DIS
+CMCSA
+CHTR
+ORLY
+AZO
+ROST
+HON
+UNP
+UPS
+CAT
+DE
+LMT
+RTX
+BA
+GE
+MMM
+GD
+NOC
+EMR
+ITW
+CSX
+NSC
+FDX
+WM
+ETN
+PH
+XOM
+CVX
+COP
+SLB
+EOG
+PSX
+MPC
+VLO
+OXY
+KMI
+NEE
+DUK
+SO
+D
+AEP
+EXC
+AMT
+PLD
+CCI
+SPG
+O
+APD
+SHW
+ECL
+NEM
+FCX
+T
+VZ
+TMUS
+# benchmark
+SPY
+QQQ
+IWM

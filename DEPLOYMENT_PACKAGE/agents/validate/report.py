@@ -179,6 +179,17 @@ def render_html(meta: Dict[str, Any], gates: List[Dict[str, Any]], curves: Dict[
         out.append("</table>")
         out.append(svg_chart((curves or {}).get(sid) or {}))
 
+    if meta.get("baselines"):
+        out.append("<h2>Baselines (evaluated in memory on the same folds, no gate file)</h2>")
+        out.append("<table><tr><th>baseline</th><th>for</th><th>would pass</th><th>OOS Sharpe</th>"
+                   "<th>fold OOS returns</th></tr>")
+        for b in meta["baselines"]:
+            out.append("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
+                esc(b.get("signal_id")), esc(b.get("for")), esc(_fmt(b.get("would_pass"))),
+                esc(_fmt((b.get("metrics") or {}).get("oos_sharpe"))),
+                esc(", ".join(_fmt(f.get("oos_return")) for f in b.get("folds") or []))))
+        out.append("</table>")
+
     if parity:
         out.append("<h2>Legacy parity (lib/backtest_engine.py vs vectorbt)</h2>")
         out.append("<p>%s</p>" % esc("ok" if parity.get("ok") else "MISMATCH"))

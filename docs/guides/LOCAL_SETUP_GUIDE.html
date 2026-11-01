@@ -134,7 +134,7 @@
         <div class="stat-box"><div class="number">Python 3.13</div><div class="label">venv, unpinned deps</div></div>
         <div class="stat-box"><div class="number">Node 25</div><div class="label">npm 11</div></div>
         <div class="stat-box"><div class="number">:3000 / :5173</div><div class="label">backend / dashboard</div></div>
-        <div class="stat-box"><div class="number">1580 / 1580</div><div class="label">tests passed (26 suites, with agent venv)</div></div>
+        <div class="stat-box"><div class="number">1878 / 1879</div><div class="label">tests passed (29 suites, with agent venv; 1 timing flake)</div></div>
     </div>
 
     <nav class="toc" aria-labelledby="toc-heading">
@@ -751,30 +751,34 @@ QUANT_N_JOBS=2 nice -n 10 .venv-agents/bin/python -m agents quant train  # fewer
             <p><span class="badge badge-danger">result</span> The real run on 2026-11-01 was <strong>NO-GO</strong>. lgbm Rank-IC 0.0087 (t 1.95), xgb14 0.0068, xgb_full 0.0144. All three gates failed: <code>quant_rank</code> Sharpe 0.64 vs SPY 0.77 (needs 0.67), <code>quant_topk</code> 0.58, <code>xgb_topk</code> 0.53; deflated Sharpe 0.83-0.88 (needs 0.95), overfitting probability 0.35-0.42 (needs 0.30 or less). <code>quant_topk</code> beat <code>xgb_topk</code> in only 43% of windows. So <code>AGENT_QUANT_WEIGHT</code> stays 0 and <strong>no live money</strong>. Full report: <code>/Users/P3291917/Builds/6/.agents/tasks/phase2-quant-report.html</code> and <code>.md</code>.</p>
 
             <h3 id="agents-tests">Tests with and without the agent venv</h3>
-            <p>The runner has 26 suites; 6 of them need <code>.venv-agents</code>. Without the venv they print <code>[SKIP]</code> with the setup command and do not count as failures. All agent tests are offline (generated fixtures, local stubs on 127.0.0.1). <span class="badge badge-success">verified</span></p>
+            <p>The runner has 29 suites; 9 of them need <code>.venv-agents</code> (the 3 new quant suites included). Without the venv they print <code>[SKIP]</code> with the setup command and do not count as failures. All agent tests are offline (generated fixtures, local stubs on 127.0.0.1). The full run takes about 30 minutes without and 40 minutes with the venv on a busy Mac. <span class="badge badge-success">verified</span></p>
 <pre class="code-block"><code>bash tests/test_runner.sh                               # with the venv
 SST_AGENTS_VENV=/nonexistent bash tests/test_runner.sh  # simulates a Mac without the venv</code></pre>
-<pre class="code-block output"><code>With the venv (2026-11-01, after d626d6b; the 18 older suites as in Step 8, then):
-[PASS] Agents: Contract (3617ms) - 24 passed, 0 failed
-[PASS] Agents: Data Clients (9129ms) - 20 passed, 0 failed
-[PASS] Agent Adapter (bash) (10941ms) - 83 passed, 0 failed
-[PASS] Scoring + Agents (zero-weight identity) (207098ms) - 90 passed, 0 failed
-[PASS] Agents: Technical (6684ms) - 21 passed, 0 failed
-[PASS] Agents: Parity vs bash (144334ms) - 322 passed, 0 failed
-[PASS] Agents: Validation (30737ms) - 36 passed, 0 failed
-[PASS] Agents: CLI (offline) (59744ms) - 23 passed, 0 failed
-Suites:              26 (26 passed, 0 failed, 0 skipped)
-Total Tests Run:     1580
-Tests Passed:        1580
-Tests Failed:        0
+<pre class="code-block output"><code>With the venv (2026-11-01, Phase 2 at 75ea040; the 18 older suites as in Step 8, then):
+[PASS] Agents: Contract (18715ms) - 26 passed, 0 failed
+[PASS] Agents: Data Clients (11461ms) - 20 passed, 0 failed
+[PASS] Agent Adapter (bash) (23118ms) - 83 passed, 0 failed
+[PASS] Scoring + Agents (zero-weight identity) (363574ms) - 90 passed, 0 failed
+[PASS] Agents: Technical (16236ms) - 21 passed, 0 failed
+[PASS] Agents: Parity vs bash (212688ms) - 322 passed, 0 failed
+[PASS] Agents: Validation (34843ms) - 40 passed, 0 failed
+[PASS] Agents: CLI (offline) (78982ms) - 23 passed, 0 failed
+[PASS] Agents: Quant (123042ms) - 46 passed, 0 failed
+[PASS] Agents: Quant pipeline (offline) (149279ms) - 89 passed, 0 failed
+[PASS] Agents: Quant blend parity (bash) (113525ms) - 158 passed, 0 failed
+Suites:              29 (28 passed, 1 failed, 0 skipped)
+Total Tests Run:     1879
+Tests Passed:        1878
+Tests Failed:        1
 
 Without the venv (SST_AGENTS_VENV=/nonexistent):
 [SKIP] Agents: Contract: agent venv not found (/nonexistent); create it: /opt/homebrew/bin/python3.12 -m venv .venv-agents &amp;&amp; .venv-agents/bin/pip install -r requirements-agents.txt
 ...
-Suites:              26 (20 passed, 0 failed, 6 skipped)
+Suites:              29 (20 passed, 0 failed, 9 skipped)
 Total Tests Run:     1134
 Tests Passed:        1134
 Tests Failed:        0</code></pre>
+            <p><span class="badge badge-warning">known flake</span> The one failure with the venv is an old timing check in Phase 1 Integration (CLI): <code>MiroFish step for 5 symbols takes &lt; 1000 ms</code> measured 1115-1406 ms while the Mac was busy (security software scanning every process start; load 12-21 on 10 cores). It is not related to the agents (no bash code changed) and the check was not loosened. It passed in the second run without the venv and in every Phase 0-1 run; rerun that suite with <code>bash tests/test_phase1_integration.sh</code>.</p>
         </section>
 
         <!-- ================= STEP 8 ================= -->

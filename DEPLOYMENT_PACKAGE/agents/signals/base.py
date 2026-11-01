@@ -45,6 +45,15 @@ class SignalSpec:
     param_grid: List[Dict[str, Any]]
     build: Callable[..., SignalFrame]
     description: str = ""
+    # Phase 2 (quant) options; the defaults keep the Phase 1 specs unchanged.
+    # sizing(cfg) -> gate_backtest sizing dict (None: equal cash per symbol)
+    sizing: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None
+    # signal whose OOS fold returns the baseline_improvement criterion uses
+    baseline_id: Optional[str] = None
+    # quant arm whose predictions the signal needs (bars from the quant raw store)
+    quant_arm: Optional[str] = None
+    # 'quant' (quant rank universe) | 'phase1' (validate universe) | None
+    universe: Optional[str] = None
 
     def grid(self) -> List[Dict[str, Any]]:
         return full_grid(self)

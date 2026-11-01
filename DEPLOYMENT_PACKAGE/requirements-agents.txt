@@ -1,5 +1,5 @@
 # ============================================================================
-# StockSwingTrader agent layer (agents/), Phase 0-1 only. Exact pins.
+# StockSwingTrader agent layer (agents/), Phase 0-2. Exact pins.
 # ============================================================================
 # Separate venv, Python 3.12 (the repo requirements.txt pins numpy 1.24.3 /
 # pandas 2.0.3, which do not build on 3.12; never use it for the agents):
@@ -21,12 +21,26 @@ jsonschema==4.26.0
 requests==2.34.2
 
 # ----------------------------------------------------------------------------
-# Later phases (NOT installed in Phase 0-1; uncomment when the phase starts).
+# Phase 2 (quant): Qlib + LightGBM + XGBoost. pyqlib pulls mlflow, pyarrow,
+# jupyter, cvxpy, gym, ...: the venv grows to ~1.2-1.9 GB and `import qlib`
+# takes ~13 s. pyqlib needs python-dateutil < 3 (pip downgraded 3.0.0 to
+# 2.9.0.post0; no Phase 0-1 pin changed). Installed with
+#   pip install pyqlib==0.9.7 lightgbm==4.7.0 xgboost==3.4.1 -c <pins above>
+# ----------------------------------------------------------------------------
+pyqlib==0.9.7
+lightgbm==4.7.0
+# same xgboost version the legacy lib/models/xgboost_predictor.pkl was trained with
+xgboost==3.4.1
+mlflow==3.17.2
+pyarrow==25.0.1
+joblib==1.6.0
+python-dateutil==2.9.0.post0
+
+# ----------------------------------------------------------------------------
+# Later phases (NOT installed yet; uncomment when the phase starts).
 # NEVER install openbb-yfinance (pulls yfinance into OpenBB; not needed).
 # ----------------------------------------------------------------------------
 # openbb==5.0.0
 # openbb-equity==2.0.0
 # openbb-economy==2.0.0
-# pyqlib==0.9.7
-# lightgbm==4.7.0
 # PyPortfolioOpt==1.6.0

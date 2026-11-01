@@ -20,6 +20,17 @@ parity [--offline] [--symbols ...]
        exit 2 without data.
 status Gate files with passed / status / age_days / data_sources.
 
+Phase 2 quant signals (xgb_topk, quant_topk, quant_rank; need `quant
+train` predictions): `gate --signals quant_topk ...` takes its bars from the
+quant raw store (agents.quant.raw.load_raw: exit 2 quant_store_unavailable
+when a symbol is missing; exit 2 quant_predictions_unavailable without the
+predictions parquet). Default universe: the quant rank universe (top-k
+signals) or the Phase 1 universe (quant_rank); default --start = the first
+OOS prediction date. A signal with a baseline (quant_topk -> xgb_topk,
+quant_rank -> v2_confluence) gets the baseline_improvement criterion; a
+baseline that was not requested is evaluated in memory on the same folds,
+listed in the report meta as `baselines` and never written as a gate file.
+
 Read-only: market-data GETs through agents.data only (paper asserted by the
 Alpaca client); nothing here can place, cancel or modify orders.
 """
@@ -149,14 +160,26 @@ class _SignalRun:
         self.n_evaluations += 1
         if len(idx) < 2:
             return {"sharpe": 0.0, "returns": pd.Series(0.0, index=idx), "trades": 0}
-        res = gate_backtest(self.bars, self.frames(cfg), cfg, self.costs, index=idx)
+        sizing = self.spec.sizing(cfg) if getattr(self.spec, "sizing", None) else None
+        if sizing is None:
+            res = gate_backtest(self.bars, self.frames(cfg), cfg, self.costs, index=idx)
+        else:
+            res = gate_backtest(self.bars, self.frames(cfg), cfg, self.costs, index=idx, sizing=sizing)
         r = res["returns"].fillna(0.0)
         return {"sharpe": sharpe(r), "returns": r, "trades": res["trades"], "per_symbol": res["per_symbol"]}
 
 
 def run_signal(spec, bars_res: Dict[str, Any], symbols: List[str], benchmark: str, offline: bool,
-               start: Optional[str], run_id: str, costs: Dict[str, Any]) -> Dict[str, Any]:
-    """Gate dict + curves for one signal (does not write files)."""
+               start: Optional[str], run_id: str, costs: Dict[str, Any],
+               baseline_folds: Optional[List[Optional[float]]] = None,
+               inputs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Gate dict + curves for one signal (does not write files).
+
+    BASELINE_FOLDS: the baseline signal's per-fold OOS returns on the same
+    folds (spec.baseline_id); then metrics.baseline_signal_id and
+    metrics.pct_folds_beating_baseline (share of folds whose OOS return is
+    above the baseline's) are set and baseline_improvement is applicable.
+    INPUTS: optional gate `inputs` (quant arm, predictions file, ...)."""
     from agents.validate import benchmarks as bm
     from agents.validate import stats as st
     from agents.validate import trials as tr
@@ -258,6 +281,18 @@ def run_signal(spec, bars_res: Dict[str, Any], symbols: List[str], benchmark: st
         "sr0_per_period": sr0, "n_trials": int(n_trials), "grid_size": len(configs),
         "n_evaluations": int(runner.n_evaluations), "full_sample_default_sharpe": default_sr,
     }
+    if baseline_folds is not None and getattr(spec, "baseline_id", None):
+        metrics["baseline_signal_id"] = spec.baseline_id
+        if len(baseline_folds) == len(fold_out) and fold_out:
+            beats = sum(1 for f, b in zip(fold_out, baseline_folds)
+                        if f["oos_return"] is not None and b is not None and f["oos_return"] > b)
+            metrics["pct_folds_beating_baseline"] = beats / len(fold_out)
+        else:
+            metrics["pct_folds_beating_baseline"] = None
+        metrics["baseline_folds"] = len(baseline_folds)
+        for f, b in zip(fold_out, baseline_folds):
+            f_b = _clean(b)
+            f["baseline_return"] = f_b
     metrics = _clean(metrics)
     th = thresholds()
     criteria = evaluate_criteria(metrics, th)
@@ -277,6 +312,8 @@ def run_signal(spec, bars_res: Dict[str, Any], symbols: List[str], benchmark: st
                                       costs, universe, data_range),
         "reasons": reasons, "warning": warning,
     }
+    if inputs is not None:
+        gate["inputs"] = _clean(inputs)
     curves = {
         "strategy": _downsample(list(st.equity_from_returns(oos))),
         "spy": _downsample(list(st.equity_from_returns(spy))),
@@ -313,15 +350,50 @@ def parity_results(bars: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
             "sizing": "from_signals size_type=amount with legacy-replayed integer share counts"}
 
 
+def quant_inputs(spec, symbols: List[str]) -> Optional[Dict[str, Any]]:
+    """Gate `inputs` for a quant signal: arm, predictions file, train_run_id
+    (models/latest.json) and the number of symbols with predictions."""
+    arm = getattr(spec, "quant_arm", None)
+    if not arm:
+        return None
+    from agents.signals.quant import load_ranks, predictions_file
+    from agents.quant.train import read_latest
+
+    latest = read_latest() or {}
+    try:
+        n = int(load_ranks(arm).shape[1])
+    except FileNotFoundError:
+        n = None
+    return {"arm": arm, "predictions_file": str(predictions_file(arm)),
+            "train_run_id": latest.get("train_run_id"), "rank_universe_size": n}
+
+
+def order_signals(signal_ids: List[str], specs: Dict[str, Any]) -> List[str]:
+    """SIGNAL_IDS with every requested baseline moved before its dependent."""
+    order: List[str] = []
+    for sid in signal_ids:
+        b = getattr(specs[sid], "baseline_id", None)
+        if b and b in signal_ids and b not in order:
+            order.append(b)
+        if sid not in order:
+            order.append(sid)
+    return order
+
+
 def run_gate(signal_ids: List[str], symbols: List[str], benchmark: str, start: Optional[str],
-             end: Optional[str], offline: bool, report_dir: Optional[str] = None, client=None) -> Dict[str, Any]:
-    """Whole gate run. Returns {exit, summary} (summary printed by the CLI)."""
+             end: Optional[str], offline: bool, report_dir: Optional[str] = None, client=None,
+             bars_res: Optional[Dict[str, Any]] = None, include_parity: bool = True) -> Dict[str, Any]:
+    """Whole gate run. Returns {exit, summary} (summary printed by the CLI).
+
+    BARS_RES: {SYM: BarsResult} incl. the benchmark supplied by the caller
+    (quant raw store); then load_universe is skipped. INCLUDE_PARITY=False
+    skips the legacy parity section (large quant universes)."""
     from agents.signals import get_signals
     from agents.validate.engine import gate_costs
     from agents.validate.gate import write_gate
     from agents.validate.report import report_dir as _report_dir, write_report
 
-    specs = get_signals()
+    specs = get_signals(include_quant=True)
     unknown = [s for s in signal_ids if s not in specs]
     if unknown:
         return {"exit": 1, "summary": {"error": "unknown_signal", "signals": unknown, "known": list(specs)}}
@@ -329,23 +401,58 @@ def run_gate(signal_ids: List[str], symbols: List[str], benchmark: str, start: O
         from agents.validate.universe import REAL_START
 
         start = REAL_START
+    explicit_end = end
     if not end:
         end = _default_end(offline)
-    data = load_universe(symbols, benchmark, start, end, offline, client=client)
-    if data["unavailable"]:
-        return {"exit": 2, "summary": {"error": "market_data_unavailable", "agent": AGENT,
-                                       "unavailable": data["unavailable"],
-                                       "detail": "no gate files written"}}
-    bars_res = data["bars"]  # incl. WARMUP_DAYS before START; folds start at START
+    if bars_res is not None and explicit_end:
+        from agents.data.bars import BarsResult
+
+        cut = pd.Timestamp(explicit_end)
+        bars_res = {s: BarsResult(r.df[r.df.index <= cut], r.data_source, r.synthetic, r.warning)
+                    for s, r in bars_res.items()}
+    if bars_res is None:
+        data = load_universe(symbols, benchmark, start, end, offline, client=client)
+        if data["unavailable"]:
+            return {"exit": 2, "summary": {"error": "market_data_unavailable", "agent": AGENT,
+                                           "unavailable": data["unavailable"],
+                                           "detail": "no gate files written"}}
+        bars_res = data["bars"]  # incl. WARMUP_DAYS before START; folds start at START
+    else:
+        missing = [s for s in list(symbols) + [benchmark] if s not in bars_res]
+        short = {s: "insufficient bars: %d" % len(bars_res[s].df) for s in list(symbols) + [benchmark]
+                 if s in bars_res and len(bars_res[s].df) < 60}
+        if missing or short:
+            unav = dict({s: "not_provided" for s in missing}, **short)
+            return {"exit": 2, "summary": {"error": "market_data_unavailable", "agent": AGENT,
+                                           "unavailable": unav, "detail": "no gate files written"}}
     run_id = new_run_id()
     costs = gate_costs()
     gates, curves, files = [], {}, []
-    for sid in signal_ids:
-        out = run_signal(specs[sid], bars_res, list(symbols), benchmark, offline, start, run_id, costs)
+    results: Dict[str, Dict[str, Any]] = {}
+    baselines: List[Dict[str, Any]] = []
+    for sid in order_signals(list(signal_ids), specs):
+        spec = specs[sid]
+        bfolds = None
+        if getattr(spec, "baseline_id", None):
+            bid = spec.baseline_id
+            if bid not in results:
+                bout = run_signal(specs[bid], bars_res, list(symbols), benchmark, offline, start, run_id, costs,
+                                  inputs=quant_inputs(specs[bid], list(symbols)))
+                results[bid] = bout
+                bg = bout["gate"]
+                baselines.append({"signal_id": bid, "for": sid, "would_pass": bg["passed"],
+                                  "metrics": bg["metrics"], "folds": bg["folds"], "reasons": bg["reasons"],
+                                  "note": "evaluated in memory on the same folds; no gate file written"})
+            bfolds = [f.get("oos_return") for f in results[bid]["gate"]["folds"]]
+        out = run_signal(spec, bars_res, list(symbols), benchmark, offline, start, run_id, costs,
+                         baseline_folds=bfolds, inputs=quant_inputs(spec, list(symbols)))
+        results[sid] = out
+        if sid not in signal_ids:
+            continue
         files.append(str(write_gate(out["gate"])))
         gates.append(out["gate"])
         curves[sid] = out["curves"]
-    parity = parity_results({s: bars_res[s].df for s in symbols})
+    parity = parity_results({s: bars_res[s].df for s in symbols}) if include_parity else None
     synthetic = any(g["synthetic"] for g in gates)
     meta = {
         "run_id": run_id, "generated_at": utc_now_iso(), "mode": "offline" if offline else "real",
@@ -357,8 +464,10 @@ def run_gate(signal_ids: List[str], symbols: List[str], benchmark: str, start: O
         "notes": (["Offline mode: bar folds 252/126 x 2 and PBO with S=%d (short series)." % PBO_S_OFFLINE]
                   if offline else []),
     }
+    if baselines:
+        meta["baselines"] = baselines
     out_dir = _report_dir(run_id, report_dir)
-    paths = write_report(out_dir, _clean(meta), gates, curves, _clean(parity))
+    paths = write_report(out_dir, _clean(meta), gates, curves, _clean(parity) if parity is not None else None)
     summary = {
         "run_id": run_id, "report_html": paths["report_html"], "report_json": paths["report_json"],
         "synthetic": synthetic,
@@ -366,9 +475,11 @@ def run_gate(signal_ids: List[str], symbols: List[str], benchmark: str, start: O
                                    "failed_criteria": [k for k, c in g["criteria"].items()
                                                        if c.get("applicable") and not c.get("passed")],
                                    "reasons": g["reasons"]} for g in gates},
-        "legacy_parity_ok": parity["ok"],
+        "legacy_parity_ok": parity["ok"] if parity is not None else None,
     }
-    return {"exit": 0, "summary": summary}
+    if baselines:
+        summary["baselines"] = {b["signal_id"]: {"would_pass": b["would_pass"], "for": b["for"]} for b in baselines}
+    return {"exit": 0, "summary": summary, "gates": gates, "meta": meta}
 
 
 def run_parity(symbols: List[str], start: Optional[str], end: Optional[str], offline: bool,
@@ -448,9 +559,86 @@ def cli_gate(args: argparse.Namespace) -> int:
             emit({"error": "invalid_date", "detail": "use YYYY-MM-DD", "value": d})
             return EXIT_ERROR
     sigs = [s.strip() for s in (args.signals or ",".join(SIGNAL_IDS)).split(",") if s.strip()]
-    res = run_gate(sigs, syms, bench, args.start, args.end, offline, args.report_dir)
+    from agents.signals import get_signals
+
+    specs = get_signals(include_quant=True)
+    quant = [s for s in sigs if s in specs and getattr(specs[s], "quant_arm", None)]
+    if quant:
+        prep = quant_gate_inputs([specs[s] for s in sigs if s in specs], args, offline, bench)
+        if "error" in prep:
+            emit(prep["error"])
+            return int(prep["exit"])
+        res = run_gate(sigs, prep["symbols"], bench, prep["start"], args.end, offline, args.report_dir,
+                       bars_res=prep["bars"])
+    else:
+        res = run_gate(sigs, syms, bench, args.start, args.end, offline, args.report_dir)
     emit(res["summary"])
     return int(res["exit"])
+
+
+def needed_arms(specs_list) -> List[str]:
+    """Quant arms the specs (and their baselines) need."""
+    from agents.signals import get_signals
+
+    all_specs = get_signals(include_quant=True)
+    arms: List[str] = []
+    for sp in specs_list:
+        for s in (sp, all_specs.get(getattr(sp, "baseline_id", None) or "")):
+            arm = getattr(s, "quant_arm", None) if s is not None else None
+            if arm and arm not in arms:
+                arms.append(arm)
+    return arms
+
+
+def quant_gate_inputs(specs_list, args, offline: bool, bench: str) -> Dict[str, Any]:
+    """Symbols, start and quant raw-store bars for a gate with quant signals:
+    {symbols, start, bars} or {error: <json>, exit: 1|2}."""
+    from agents.cli import EXIT_ERROR, EXIT_UNAVAILABLE, parse_symbols
+    from agents.quant import raw
+    from agents.signals.quant import load_ranks
+
+    arms = needed_arms(specs_list)
+    first_dates = []
+    for arm in arms:
+        try:
+            first_dates.append(load_ranks(arm).index.min())
+        except FileNotFoundError as exc:
+            return {"exit": EXIT_UNAVAILABLE,
+                    "error": {"error": "quant_predictions_unavailable", "agent": AGENT, "arm": arm,
+                              "detail": str(exc) + "; run `python -m agents quant train` first"}}
+    syms = parse_symbols(args.symbols)
+    if not syms:
+        kinds = {getattr(s, "universe", None) for s in specs_list if getattr(s, "quant_arm", None)}
+        if len(kinds) != 1:
+            return {"exit": EXIT_ERROR, "error": {"error": "mixed_universes", "agent": AGENT,
+                                                  "detail": "quant_rank and the top-k signals use different "
+                                                            "universes; pass --symbols or run them separately"}}
+        syms = default_quant_symbols(kinds.pop(), offline)
+    loaded = raw.load_raw(list(dict.fromkeys(list(syms) + [bench])))
+    missing = {s: getattr(r, "reason", "unavailable") for s, r in loaded.items() if not getattr(r, "available", False)}
+    if missing:
+        return {"exit": EXIT_UNAVAILABLE,
+                "error": {"error": "quant_store_unavailable", "agent": AGENT, "unavailable": missing,
+                          "detail": "run `python -m agents quant ingest` first; no gate files written"}}
+    start = args.start
+    if not start and not offline and first_dates:
+        start = str(min(first_dates).date())
+    return {"symbols": list(syms), "start": start, "bars": loaded}
+
+
+def default_quant_symbols(kind: Optional[str], offline: bool) -> List[str]:
+    """'quant' -> the rank universe present in the raw store (all of it when
+    nothing is ingested yet); 'phase1' -> the validate default universe."""
+    from agents.validate.universe import default_universe
+
+    if kind == "phase1":
+        return default_universe(offline)
+    from agents.quant import raw
+    from agents.quant.universe import rank_universe
+
+    rank = rank_universe(offline)
+    present = [s for s in rank if raw.read_meta(s)]
+    return present or rank
 
 
 def cli_parity(args: argparse.Namespace) -> int:
