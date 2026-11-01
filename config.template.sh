@@ -127,6 +127,35 @@ export MIROFISH_WEIGHT="${MIROFISH_WEIGHT:-0.10}"              # 0..0.5
 export MIROFISH_CACHE_DIR="${MIROFISH_CACHE_DIR:-cache/mirofish}"
 export MIROFISH_MAX_AGE_HOURS="${MIROFISH_MAX_AGE_HOURS:-36}"  # Older cache = STALE (ignored)
 export MIROFISH_MIN_CONFIDENCE="${MIROFISH_MIN_CONFIDENCE:-0.4}"  # Lower = LOW_CONFIDENCE (ignored)
+# ============================================================================
+# Agent layer (Phase 0-1, optional, default OFF)
+# ============================================================================
+# Python agents (agents/, venv .venv-agents, `python -m agents ...`) write
+# JSON envelopes to AGENT_CACHE_DIR/<agent>/<YYYY-MM-DD>/<SYMBOL>.json and
+# validation gates to AGENT_CACHE_DIR/gates/<signal>.json. The scan only
+# reads them (lib/agent_adapter.sh, no network). A weight applies only for a
+# fresh, non-synthetic, OK cache with a PASSED gate (<= AGENT_GATE_MAX_AGE_DAYS
+# old); then the core weights scale by (1 - sum of agent weights). All
+# weights default 0 (shadow): AGENTS_ENABLED=true then only adds a
+# components.agents block, the score is unchanged. The agent layer is
+# read-only and paper-only (it asserts ALPACA_BASE_URL is paper and only
+# GETs market-data bars); LLM use is off with a $0 budget.
+export AGENTS_ENABLED="${AGENTS_ENABLED:-false}"
+export AGENT_CACHE_DIR="${AGENT_CACHE_DIR:-cache/agents}"          # Relative = project root
+export AGENT_MAX_AGE_HOURS="${AGENT_MAX_AGE_HOURS:-36}"            # Used when a file has no ttl_hours
+export AGENT_GATE_MAX_AGE_DAYS="${AGENT_GATE_MAX_AGE_DAYS:-45}"    # Older gate = EXPIRED (weight 0)
+export AGENT_MAX_TOTAL_WEIGHT="${AGENT_MAX_TOTAL_WEIGHT:-0.30}"    # Cap on the sum (0..0.5)
+export AGENT_QUANT_WEIGHT="${AGENT_QUANT_WEIGHT:-0}"               # 0..0.30, gate quant_rank
+export AGENT_FUNDAMENTAL_WEIGHT="${AGENT_FUNDAMENTAL_WEIGHT:-0}"   # 0..0.30, gate fundamental_quality
+export AGENT_MARKET_WEIGHT="${AGENT_MARKET_WEIGHT:-0}"             # 0..0.30, gate market_news_score
+export AGENT_TECHNICAL_ENABLED="${AGENT_TECHNICAL_ENABLED:-false}" # Technical agent cache feeds the scan
+export AGENT_BARS_FEED="${AGENT_BARS_FEED:-sip}"                   # sip (403 -> iex retry) | iex
+export AGENT_BARS_ADJUSTMENT="${AGENT_BARS_ADJUSTMENT:-all}"       # raw | split | dividend | all
+export AGENT_DATA_FALLBACK="${AGENT_DATA_FALLBACK:-none}"          # none | yfinance (labeled fallback)
+export AGENT_MAX_BAR_STALENESS_DAYS="${AGENT_MAX_BAR_STALENESS_DAYS:-3}"  # Business days
+export LLM_PROVIDER="${LLM_PROVIDER:-none}"                        # none | ollama | openai
+export LLM_MONTHLY_BUDGET_USD="${LLM_MONTHLY_BUDGET_USD:-0}"       # 0 = no cloud calls
+export LLM_MAX_CALLS_PER_RUN="${LLM_MAX_CALLS_PER_RUN:-0}"         # 0 = no calls at all
 
 # ============================================================================
 # Data Fetch Preferences

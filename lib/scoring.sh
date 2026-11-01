@@ -21,6 +21,8 @@ source "${SCORING_LIB_DIR}/regime_weighting.sh" 2>/dev/null || true
 source "${SCORING_LIB_DIR}/kalman_filter.sh" 2>/dev/null || true
 # Optional MiroFish cache adapter (Phase 1 port)
 source "${SCORING_LIB_DIR}/mirofish_adapter.sh" 2>/dev/null || true
+# Optional agent layer cache adapter (agents/; default off, weights 0)
+source "${SCORING_LIB_DIR}/agent_adapter.sh" 2>/dev/null || true
 
 # ============================================================================
 # Score Individual Technical Indicators
@@ -310,6 +312,12 @@ apply_mirofish_to_confluence() {
 #     final = core*(1-ws) + sentiment*ws (core = unrounded score incl.
 #     MiroFish) and every other weight_percent scales by (1-ws). Sentiment
 #     casts no vote. With <= 9 args the output is unchanged.
+#   Agent layer (lib/agent_adapter.sh, AGENTS_ENABLED=true only): gated
+#     quant/fundamental/market cache scores with AGENT_<X>_WEIGHT > 0 give
+#     core*(1-sum w) + sum(score*w) before sentiment, and components.agents
+#     is added (a shadow block when every weight is 0; score and weights are
+#     then unchanged). Agents cast no vote. AGENTS_ENABLED unset/false: the
+#     output is identical to the pre-agent code.
 #
 # Returns: JSON with {
 #   "confluence_score": 0-100,
@@ -497,6 +505,26 @@ calculate_confluence_score_v2() {
             ($technical_score * 0.30) + \
             ($volume_trend_score * 0.20)" | bc)
     fi
+    # Optional agent layer (lib/agent_adapter.sh; cache read only, no
+    # network). Only when AGENTS_ENABLED=true; a weight applies only for an
+    # OK, gated agent with weight > 0. Then core (MiroFish included) scales by
+    # (1 - sum w) and sum(score * w) is added, before sentiment. With every
+    # weight 0 the score and weights are unchanged (components.agents only).
+    local ag_json="" ag_w=0 ag_sum=0 ag_applied=false
+    if [[ "${AGENTS_ENABLED:-false}" == "true" ]] && declare -f agent_components_json >/dev/null; then
+        ag_json=$(agent_components_json "$symbol" 2>/dev/null)
+        if [[ -n "$ag_json" ]] && echo "$ag_json" | jq -e 'type == "object"' >/dev/null 2>&1; then
+            ag_w=$(echo "$ag_json" | jq -r '.applied_weight // 0')
+            ag_sum=$(echo "$ag_json" | jq -r '.weighted_sum // 0')
+            if awk -v w="$ag_w" 'BEGIN { exit !(w > 0) }'; then
+                ag_applied=true
+                confluence_score=$(awk -v c="$confluence_score" -v w="$ag_w" -v s="$ag_sum" \
+                    'BEGIN { printf "%.4f", c * (1 - w) + s }')
+            fi
+        else
+            ag_json=""
+        fi
+    fi
     if [[ "$sent_applied" == "true" ]]; then
         # Blend sentiment on the unrounded core score (MiroFish included)
         confluence_score=$(awk -v c="$confluence_score" -v s="$sent_score" -v w="$sent_w" \
@@ -533,6 +561,25 @@ calculate_confluence_score_v2() {
             wp_vt=$(awk -v s="$base_scale" -v w="$sent_w" 'BEGIN { printf "%.1f", 20 * s * (1 - w) }')
         fi
     fi
+    # Applied agents take sum w: every core weight scales by (1 - sum w) on
+    # top of MiroFish and sentiment, recomputed from the unrounded base weights
+    local ag_sent_scale=1
+    [[ "$sent_applied" == "true" ]] && ag_sent_scale=$(awk -v w="$sent_w" 'BEGIN { print 1 - w }')
+    if [[ "$ag_applied" == "true" ]]; then
+        local ag_scale
+        ag_scale=$(awk -v a="$ag_w" -v s="$ag_sent_scale" -v m="$mf_w" -v mf="$mf_applied" \
+            'BEGIN { k = (1 - a) * s; if (mf == "true") k = k * (1 - m); print k }')
+        if [[ "$ml_available" != "true" ]]; then
+            wp_regime=$(awk -v k="$ag_scale" 'BEGIN { printf "%.1f", 3500 / 85 * k }')
+            wp_tech=$(awk -v k="$ag_scale" 'BEGIN { printf "%.1f", 3000 / 85 * k }')
+            wp_vt=$(awk -v k="$ag_scale" 'BEGIN { printf "%.1f", 2000 / 85 * k }')
+        else
+            wp_ml=$(awk -v k="$ag_scale" 'BEGIN { printf "%.1f", 15 * k }')
+            wp_regime=$(awk -v k="$ag_scale" 'BEGIN { printf "%.1f", 35 * k }')
+            wp_tech=$(awk -v k="$ag_scale" 'BEGIN { printf "%.1f", 30 * k }')
+            wp_vt=$(awk -v k="$ag_scale" 'BEGIN { printf "%.1f", 20 * k }')
+        fi
+    fi
     # JSON fragments for the ML component's availability / data source
     local ml_score_json="$ml_confidence" ml_extra="" data_warning=""
     if [[ "$ml_available" != "true" ]]; then
@@ -555,6 +602,9 @@ calculate_confluence_score_v2() {
         if [[ "$mf_applied" == "true" && "$sent_applied" == "true" ]]; then
             mf_wp=$(awk -v w="$mf_w" -v ws="$sent_w" 'BEGIN { printf "%.1f", 100 * w * (1 - ws) }')
         fi
+        if [[ "$mf_applied" == "true" && "$ag_applied" == "true" ]]; then
+            mf_wp=$(awk -v w="$mf_w" -v a="$ag_w" -v s="$ag_sent_scale" 'BEGIN { printf "%.1f", 100 * w * (1 - a) * s }')
+        fi
         mirofish_component=",
     \"mirofish\": {
       \"score\": ${mf_score},
@@ -573,6 +623,19 @@ calculate_confluence_score_v2() {
       \"available\": ${sent_available},
       \"weight_percent\": ${sent_wp}
     }"
+    fi
+    # components.agents: only when AGENTS_ENABLED=true (shadow block when every
+    # weight is 0). weight_percent = 100 * w * (1 - sentiment weight).
+    local agents_component=""
+    if [[ -n "$ag_json" ]]; then
+        local ag_block
+        ag_block=$(echo "$ag_json" | jq -c --argjson s "$ag_sent_scale" '
+            def r1: (. * 10 | round) / 10;
+            {applied_weight_percent: (100 * .applied_weight * $s | r1)}
+            + (.agents | with_entries(.value |= {score, status,
+                weight_percent: (100 * .weight * $s | r1), applied, reason}))' 2>/dev/null)
+        [[ -n "$ag_block" ]] && agents_component=",
+    \"agents\": ${ag_block}"
     fi
     
     # ========================================================================
@@ -683,7 +746,7 @@ calculate_confluence_score_v2() {
     "volume_trend_score": {
       "score": ${volume_trend_score},
       "weight_percent": ${wp_vt}
-    }${mirofish_component}${sentiment_component}
+    }${mirofish_component}${sentiment_component}${agents_component}
   },
   "breakdown": {
     "symbol": "${symbol}",
