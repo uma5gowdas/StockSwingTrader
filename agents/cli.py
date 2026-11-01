@@ -2,7 +2,7 @@
 
 Agents:   market | fundamental | technical | quant | validate | portfolio
 Commands: run | status | train | gate   (validate adds its own, e.g. parity;
-          quant adds ingest, predict; `quant run` is not implemented)
+          quant adds ingest, predict, evaluate; `quant run` is not implemented)
   quant ingest [--symbols ...] [--start] [--end] [--refresh] [--offline]
                raw Alpaca bars (+ vwap) -> cache/agents/quant/raw, then the
                Qlib bin store cache/agents/quant/qlib_data
@@ -11,7 +11,11 @@ Commands: run | status | train | gate   (validate adds its own, e.g. parity;
                XGBoost); OOS predictions cache/agents/quant/predictions
   quant predict [--as-of] [--symbols] [--arms lgbm] [--offline]
                live model -> envelopes cache/agents/quant/<as_of>/<SYM>.json
-  quant status raw store / Qlib store / models / predictions summary
+  quant evaluate [--offline] [--report-dir DIR] [--start]
+               IC metrics, gates xgb_topk / quant_topk / quant_rank and the
+               go / no-go report cache/agents/quant/eval/<run_id>/
+  quant status raw store / Qlib store / models / predictions / evaluation /
+               quant gates summary
 Exit codes: 0 ok, 1 error (incl. not_implemented), 2 data unavailable.
 
 `python -m agents status` (top level or any agent) prints the agent version,
@@ -56,6 +60,7 @@ HANDLERS[("quant", "ingest")] = _lazy("agents.quant.agent", "cli_ingest")
 HANDLERS[("quant", "status")] = _lazy("agents.quant.agent", "cli_status")
 HANDLERS[("quant", "train")] = _lazy("agents.quant.agent", "cli_train")
 HANDLERS[("quant", "predict")] = _lazy("agents.quant.agent", "cli_predict")
+HANDLERS[("quant", "evaluate")] = _lazy("agents.quant.agent", "cli_evaluate")
 
 
 def emit(obj) -> None:

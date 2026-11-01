@@ -8,8 +8,12 @@
   predict  live model -> one envelope per rank symbol in
            cache/agents/quant/<as_of>/<SYM>.json (agents/quant/predict.py);
            --as-of, --symbols, --offline, --arms (first item)
-  status   agent status, raw store, Qlib store, models, predictions and the
-           latest envelopes (no network, no qlib import)
+  evaluate IC metrics per arm, gates xgb_topk / quant_topk (rank universe)
+           and quant_rank (Phase 1 universe), go / no-go and a JSON + HTML
+           report (agents/quant/evaluate.py); --offline, --report-dir, --start
+  status   agent status, raw store, Qlib store, models, predictions, the
+           latest envelopes, the latest evaluation and the quant gates (no
+           network, no qlib import)
 Exit codes: 0 ok, 1 error, 2 data / store / model unavailable. Never prints a
 key value. Qlib, LightGBM and xgboost write progress to stdout; train and
 predict send it to stderr so stdout stays one JSON document.
@@ -212,9 +216,58 @@ def status() -> Dict[str, Any]:
         "models": _models_summary(),
         "predictions": _predictions_summary(),
         "envelopes": _envelopes_summary(),
-        # filled in by a later Phase 2 step (evaluate)
-        "evaluation": None,
+        "evaluation": _evaluation_summary(),
+        "gates": _gates_summary(),
     }
+
+
+def _evaluation_summary() -> Any:
+    from agents.quant.evaluate import latest_evaluation
+
+    return latest_evaluation()
+
+
+QUANT_GATES = ("quant_topk", "xgb_topk", "quant_rank")
+
+
+def _gates_summary() -> Dict[str, Any]:
+    from datetime import datetime, timezone
+
+    from agents.cache import gate_path, read_json
+
+    out: Dict[str, Any] = {}
+    now = datetime.now(timezone.utc)
+    for sid in QUANT_GATES:
+        g = read_json(gate_path(sid))
+        if not isinstance(g, dict):
+            out[sid] = None
+            continue
+        age = None
+        try:
+            t = datetime.strptime(g.get("generated_at", ""), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            age = round((now - t).total_seconds() / 86400.0, 2)
+        except (TypeError, ValueError):
+            pass
+        out[sid] = {"passed": g.get("passed"), "synthetic": g.get("synthetic"), "age_days": age,
+                    "run_id": g.get("run_id")}
+    return out
+
+
+def cli_evaluate(args: argparse.Namespace) -> int:
+    from agents.cli import EXIT_ERROR, emit
+    from agents.fixtures import is_offline
+    from agents.quant.evaluate import run_evaluate
+    from agents.validate.agent import _is_date
+
+    offline = bool(getattr(args, "offline", False)) or is_offline()
+    start = getattr(args, "start", None)
+    if start and not _is_date(start):
+        emit({"error": "invalid_date", "detail": "use YYYY-MM-DD", "value": start})
+        return EXIT_ERROR
+    with _quiet_stdout():
+        res = run_evaluate(offline=offline, report_dir=getattr(args, "report_dir", None), start=start)
+    emit(res["summary"])
+    return int(res["exit"])
 
 
 def cli_status(args: argparse.Namespace) -> int:

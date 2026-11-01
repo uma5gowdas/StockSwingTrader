@@ -7,6 +7,10 @@ Qlib bin store (round trip through qlib.data.D.features) and the CLI.
 Quant model (FEAT-002): folds + embargo, metrics (IC, Newey-West t, top-k),
 handlers (label, feature count, no look-ahead), tiny training on a planted
 signal (QUANT_TEST_FAST=1), predictions -> envelopes, train/predict CLI.
+Quant validation (FEAT-003): top-k / quant_rank signal builders on hand-made
+predictions, quant_rank at w 0 == v2_confluence on every fixture bar, the
+baseline_improvement criterion, the go / no-go rule, the evaluate report and
+the gate / evaluate CLI exit codes.
 Every test runs with a temp AGENT_CACHE_DIR; socket connects to anything but
 loopback raise.
 """
@@ -810,6 +814,223 @@ class QuantTrainCliTests(TempCacheMixin, unittest.TestCase):
         p = self.run_cli("quant", "predict", "--offline")
         self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
         self.assertEqual(json.loads(p.stdout)["error"], "predictions_unavailable")
+
+
+# ---------------------------------------------------------------------------
+# FEAT-003: quant gate signals, baseline criterion, evaluate
+# ---------------------------------------------------------------------------
+
+def write_predictions(root, arm, symbols, dates, seed=5):
+    """Hand-made OOS predictions parquet for ARM under ROOT (no qlib)."""
+    rng = np.random.default_rng(seed)
+    rows = [{"datetime": d, "instrument": s, "score": float(rng.normal()), "label": 0.0, "fold": "bar1"}
+            for d in dates for s in symbols]
+    path = Path(root) / "quant" / "predictions" / ("%s.parquet" % arm)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(rows).to_parquet(path, index=False)
+    return path
+
+
+class QuantSignalTests(TempCacheMixin, unittest.TestCase):
+    SYMS = ("AAA", "BBB", "CCC") + QUANT_FIXTURES
+
+    def setUp(self):
+        super().setUp()
+        self.dates = load_fixture_bars("AAA").index[700:]
+        write_predictions(self.tmp, "lgbm", self.SYMS, self.dates)
+
+    def test_rebalance_spacing_and_topk(self):
+        from agents.signals.quant import REBALANCE_EVERY, load_ranks, rebalance_dates, top_sets, topk_builder
+
+        wide = load_ranks("lgbm")
+        self.assertEqual(list(wide.columns), sorted(self.SYMS))
+        rb = rebalance_dates(wide.index)
+        self.assertEqual(rb[0], self.dates[0])
+        pos = [list(wide.index).index(d) for d in rb]
+        self.assertTrue(all(b - a == REBALANCE_EVERY for a, b in zip(pos, pos[1:])))
+        for k in (5, 10):
+            sets = top_sets("lgbm", k)
+            frames = {s: topk_builder("lgbm")(load_fixture_bars(s), {"k": k}, s) for s in self.SYMS}
+            ent = pd.DataFrame({s: f.entries for s, f in frames.items()})
+            ext = pd.DataFrame({s: f.exits for s, f in frames.items()})
+            before = ent.index < self.dates[0]
+            self.assertFalse(ent[before].any().any(), "no entry before the first prediction")
+            self.assertFalse(ext[before].any().any(), "no exit before the first prediction")
+            off = ~ent.index.isin(rb)
+            self.assertFalse(ent[off].any().any() or ext[off].any().any(), "signals only on rebalance days")
+            self.assertTrue((ent.loc[rb].sum(axis=1) == k).all(), "exactly k entries per rebalance")
+            self.assertTrue((ent.loc[rb] | ext.loc[rb]).all().all(), "entry or exit for every name on a rebalance")
+            self.assertFalse((ent & ext).any().any())
+            d = rb[3]
+            row = wide.loc[d].sort_values(ascending=False)
+            self.assertEqual(set(row.index[:k]), set(sets[d]))
+            self.assertEqual(set(ent.columns[ent.loc[d].to_numpy()]), set(sets[d]))
+            for s in sets[rb[2]] - sets[d]:
+                self.assertTrue(ext.loc[d, s], "%s left the top %d -> exit" % (s, k))
+
+    def test_percentiles_match_live_ranking(self):
+        from agents.quant.predict import rank_predictions
+        from agents.signals.quant import load_ranks, percentiles
+
+        pct, wide = percentiles("lgbm"), load_ranks("lgbm")
+        d = self.dates[10]
+        want = rank_predictions(wide.loc[d].dropna()).set_index("instrument")["percentile"]
+        for s in self.SYMS:
+            self.assertEqual(pct.loc[d, s], want[s], s)
+        self.assertEqual((pct.loc[d].min(), pct.loc[d].max()), (0.0, 100.0))
+
+    def test_missing_predictions(self):
+        from agents.signals.quant import PredictionsMissing, load_ranks
+
+        with self.assertRaises(PredictionsMissing):
+            load_ranks("xgb14")
+
+    def test_quant_rank_w0_equals_v2_confluence(self):
+        from agents.signals import v2_confluence as v2mod
+        from agents.signals.quant import blend_recommendations, percentiles, v2_core
+
+        pct = percentiles("lgbm")
+        for s in ("AAA", "BBB", "CCC"):
+            df = load_fixture_bars(s)
+            core = v2_core(df, s)
+            fr = blend_recommendations(core, pct[s], 0.0)
+            v2 = v2mod.v2_series("v2_confluence", df, s)
+            self.assertEqual(list(fr["recommendation"]), list(v2["recommendation"]), s)
+            a, b = fr["confluence_score"].to_numpy(dtype=float), v2["confluence_score"].to_numpy(dtype=float)
+            self.assertTrue(np.array_equal(np.isnan(a), np.isnan(b)), s)
+            self.assertTrue(np.array_equal(a[~np.isnan(a)], b[~np.isnan(b)]), s)
+            # w 0.15 changes the score only where a percentile exists
+            fr15 = blend_recommendations(core, pct[s], 0.15)
+            have_q = fr15["quant_percentile"].notna().to_numpy()
+            self.assertTrue(have_q.sum() == len(self.dates))
+            self.assertTrue(np.array_equal(np.nan_to_num(fr15["confluence_score"].to_numpy()[~have_q], nan=-1),
+                                           np.nan_to_num(a[~have_q], nan=-1)), s)
+            # the core cache is reused (same bars hash)
+            self.assertTrue(v2_core(df, s).equals(core))
+
+
+class BaselineCriterionTests(unittest.TestCase):
+    GOOD = {"oos_sharpe": 1.0, "spy_sharpe": 0.8, "dsr": 0.97, "pbo": 0.1, "oos_max_dd": 0.1,
+            "spy_max_dd": 0.2, "oos_trades": 500, "pct_positive_folds": 0.8}
+    REAL = {"AAA": "alpaca:sip", "SPY": "alpaca:sip"}
+
+    def test_applicability(self):
+        from agents.validate.gate import decide, evaluate_criteria, thresholds
+
+        c = evaluate_criteria(self.GOOD, thresholds({}))
+        self.assertFalse(c["baseline_improvement"]["applicable"])
+        self.assertEqual(c["baseline_improvement"]["op"], "n/a")
+        m = dict(self.GOOD, baseline_signal_id="xgb_topk", pct_folds_beating_baseline=0.7)
+        b = evaluate_criteria(m, thresholds({}))["baseline_improvement"]
+        self.assertEqual((b["applicable"], b["passed"], b["op"], b["threshold"], b["value"]),
+                         (True, True, ">=", 0.6, 0.7))
+        self.assertTrue(decide(evaluate_criteria(m, thresholds({})), False, self.REAL)[0])
+        ok, reasons = decide(evaluate_criteria(dict(m, pct_folds_beating_baseline=0.5), thresholds({})),
+                             False, self.REAL)
+        self.assertFalse(ok)
+        self.assertEqual([r for r in reasons if r.startswith("baseline_improvement")],
+                         ["baseline_improvement: 0.5 >= 0.6"])
+        self.assertFalse(evaluate_criteria(dict(m, pct_folds_beating_baseline=None),
+                                           thresholds({}))["baseline_improvement"]["passed"])
+        self.assertEqual(thresholds({"GATE_MIN_BASELINE_FOLDS": "0.7"})["GATE_MIN_BASELINE_FOLDS"], 0.7)
+
+
+class EvaluateGoTests(unittest.TestCase):
+    IC = {"rank_ic_mean": 0.03, "rank_ic_t_nw": 2.5}
+    GATES = {"quant_rank": {"passed": True, "metrics": {}},
+             "quant_topk": {"passed": False, "metrics": {"pct_folds_beating_baseline": 0.7}}}
+
+    def test_all_pass_is_go(self):
+        from agents.quant.evaluate import go_decision
+
+        d = go_decision(self.IC, self.GATES, False)
+        self.assertTrue(d["go"], d)
+        self.assertFalse(d["quant_topk_passed"])  # reported, not part of go
+
+    def test_each_criterion_alone_fails(self):
+        from agents.quant.evaluate import go_decision
+
+        cases = {
+            "lgbm_rank_ic_mean": (dict(self.IC, rank_ic_mean=0.019), self.GATES),
+            "lgbm_rank_ic_t_nw": (dict(self.IC, rank_ic_t_nw=1.99), self.GATES),
+            "quant_rank_gate_passed": (self.IC, dict(self.GATES, quant_rank={"passed": False})),
+            "quant_topk_beats_xgb_topk_folds": (self.IC, dict(self.GATES, quant_topk={
+                "passed": True, "metrics": {"pct_folds_beating_baseline": 0.59}})),
+        }
+        for name, (ic, gates) in cases.items():
+            d = go_decision(ic, gates, False)
+            self.assertFalse(d["go"], name)
+            self.assertEqual([k for k, c in d["criteria"].items() if not c["passed"]], [name], name)
+        self.assertFalse(go_decision(dict(self.IC, rank_ic_mean=None), self.GATES, False)["go"])
+        self.assertFalse(go_decision(self.IC, {}, False)["go"])
+
+    def test_synthetic_is_no_go(self):
+        from agents.quant.evaluate import go_decision
+
+        d = go_decision(self.IC, self.GATES, True)
+        self.assertFalse(d["go"])
+        self.assertEqual([k for k, c in d["criteria"].items() if not c["passed"]], ["real_data"])
+
+    def test_gate_start(self):
+        from agents.quant.evaluate import _gate_start
+
+        self.assertEqual(_gate_start(None, pd.Timestamp("2018-01-02")), "2018-01-01")
+        self.assertEqual(_gate_start(None, pd.Timestamp("2021-11-15")), "2021-11-15")
+        self.assertEqual(_gate_start("2019-06-03", pd.Timestamp("2018-01-02")), "2019-06-03")
+
+    def test_html_escapes_banner_and_proposal(self):
+        from agents.quant.evaluate import go_decision, render_eval_html
+
+        rep = {"run_id": "<r>", "synthetic": True, "decision": go_decision(self.IC, self.GATES, True),
+               "gates": {"quant_rank": {"description": "<script>x</script>", "criteria": {}, "folds": []}},
+               "caveats": ["a & b"]}
+        h = render_eval_html(rep)
+        self.assertIn('id="synthetic-banner"', h)
+        self.assertNotIn("<script>", h)
+        self.assertIn("&lt;script&gt;", h)
+        self.assertNotIn("propose AGENT_QUANT_WEIGHT", h)
+        rep2 = dict(rep, synthetic=False, decision=go_decision(self.IC, self.GATES, False),
+                    proposal="propose AGENT_QUANT_WEIGHT=0.15 (config default stays 0; user decides)")
+        h2 = render_eval_html(rep2)
+        self.assertIn("propose AGENT_QUANT_WEIGHT=0.15", h2)
+        self.assertNotIn('id="synthetic-banner"', h2)
+        self.assertIn(">GO<", h2)
+
+
+class EvaluateCliTests(TempCacheMixin, unittest.TestCase):
+    def run_cli(self, *args):
+        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": self.tmp, "AGENT_CACHE_DIR": self.tmp,
+               "SST_OFFLINE": "1", "SST_CONFIG_FILE": os.path.join(self.tmp, "none.sh")}
+        return subprocess.run([sys.executable, "-m", "agents", *args], cwd=PROJECT_DIR, env=env,
+                              stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=600)
+
+    def test_evaluate_without_predictions_exit_2(self):
+        p = self.run_cli("quant", "evaluate", "--offline")
+        self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
+        self.assertEqual(json.loads(p.stdout)["error"], "quant_predictions_unavailable")
+
+    def test_gate_quant_signal_errors(self):
+        dates = load_fixture_bars("AAA").index[700:]
+        write_predictions(self.tmp, "lgbm", ("AAA", "BBB", "CCC"), dates)
+        write_predictions(self.tmp, "xgb14", ("AAA", "BBB", "CCC"), dates)
+        p = self.run_cli("validate", "gate", "--offline", "--signals", "quant_topk")
+        self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
+        self.assertEqual(json.loads(p.stdout)["error"], "quant_store_unavailable")
+        p = self.run_cli("validate", "gate", "--offline", "--signals", "quant_topk,quant_rank")
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertEqual(json.loads(p.stdout)["error"], "mixed_universes")
+        os.unlink(Path(self.tmp) / "quant" / "predictions" / "xgb14.parquet")
+        p = self.run_cli("validate", "gate", "--offline", "--signals", "quant_topk")
+        self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
+        self.assertEqual(json.loads(p.stdout)["error"], "quant_predictions_unavailable")
+        self.assertFalse((Path(self.tmp) / "gates").exists(), "no gate file written")
+
+    def test_status_has_evaluation_and_gates(self):
+        p = self.run_cli("quant", "status")
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        out = json.loads(p.stdout)
+        self.assertIsNone(out["evaluation"])
+        self.assertEqual(out["gates"], {"quant_topk": None, "xgb_topk": None, "quant_rank": None})
 
 
 if __name__ == "__main__":
