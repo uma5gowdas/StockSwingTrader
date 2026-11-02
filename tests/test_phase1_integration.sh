@@ -193,7 +193,10 @@ mf_ms=$(bash -c '
     t1=$(perl -MTime::HiRes=time -e "printf \"%d\", time*1000")
     echo $((t1 - t0))
 ' _ "$AGENT")
-assert_true "MiroFish step for 5 symbols takes < 1000 ms (${mf_ms} ms)" test "${mf_ms:-99999}" -lt 1000
+# Wall-clock bound against an unreachable MIROFISH_API_URL: catches a per-symbol
+# network wait (>= 2 s each, >= 10 s for 5). ~0.5-1 s is normal; 1.1-1.9 s was
+# measured on a loaded Mac (security daemons scanning process spawns), so 5000 ms.
+assert_true "MiroFish step for 5 symbols takes < 5000 ms (${mf_ms} ms)" test "${mf_ms:-99999}" -lt 5000
 
 # ============================================================================
 # Summary
