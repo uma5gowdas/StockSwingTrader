@@ -16,7 +16,6 @@ logs
 output
 reports
 .state
-lib/models/*.pkl
 DEPLOYMENT_PACKAGE
 Users
 private

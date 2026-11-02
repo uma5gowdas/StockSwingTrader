@@ -40,7 +40,8 @@ WORKDIR /app
 COPY --chown=sst:sst . .
 
 # .venv (core requirements), npm ci for backend/frontend, config.sh from the
-# template, ML model training; .venv-agents only with WITH_AGENTS=1.
+# template (the ML model is tracked in lib/models/); .venv-agents only with
+# WITH_AGENTS=1.
 RUN ./setup.sh --non-interactive --skip-smoke $( [ "$WITH_AGENTS" = 1 ] && echo --with-agents )
 
 ENV SST_OFFLINE=1

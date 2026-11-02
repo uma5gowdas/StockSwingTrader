@@ -16,6 +16,10 @@ yarn-error.log
 
 # ML Models
 *.pkl
+# The ML model is tracked: the v2 goldens (tests/fixtures/agents/v2_golden) were
+# captured with it, and lib/train_ml_model.py seeds with hash(symbol), which
+# changes per Python process, so a retrained model gives different ML scores.
+!lib/models/xgboost_predictor.pkl
 *.onnx
 *.h5
 *.joblib
