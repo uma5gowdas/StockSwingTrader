@@ -1,6 +1,6 @@
 # StockSwingTrader v6.3 - Test Report
 
-**Generated:** 2026-11-01 15:25:12  
+**Generated:** 2026-11-01 17:02:37  
 **Command:** `bash tests/test_runner.sh`  
 **Result:** ❌ 1 suite(s) failed
 
@@ -9,8 +9,8 @@
 | Metric | Value |
 |--------|-------|
 | Suites | 29 (28 passed, 1 failed, 0 skipped) |
-| Total Tests | 1879 |
-| Tests Passed | **1878** |
+| Total Tests | 1880 |
+| Tests Passed | **1879** |
 | Tests Failed | **1** |
 | Success Rate | 99% |
 
@@ -18,35 +18,35 @@
 
 | Suite | Status | Time | Details |
 |-------|--------|------|---------|
-| ML Predictor | ✅ PASS | 23552ms | 29 passed, 0 failed |
-| Regime Weighting | ✅ PASS | 69666ms | 30 passed, 0 failed |
-| Kalman Filter | ✅ PASS | 6274ms | 18 passed, 0 failed |
-| Backtest | ✅ PASS | 6938ms | 34 passed, 0 failed |
-| ML Scoring Integration | ✅ PASS | 32393ms | 29 passed, 0 failed |
-| Regime Detector | ✅ PASS | 71872ms | 20 passed, 0 failed |
-| Scoring Integration (Python) | ✅ PASS | 131ms | 32 passed, 0 failed |
-| Dashboard Components | ✅ PASS | 1894ms | 27 passed, 0 failed |
-| Backend API | ✅ PASS | 559ms | 17 passed, 0 failed |
-| Kelly Sizing & Risk Budget | ✅ PASS | 10098ms | 51 passed, 0 failed |
-| Sentiment (deterministic) | ✅ PASS | 6114ms | 36 passed, 0 failed |
-| MiroFish Cache Adapter | ✅ PASS | 13961ms | 42 passed, 0 failed |
-| Phase 1 Integration (CLI) | ❌ FAIL | 327032ms | 37 passed, 1 failed (exit code 1) |
-| No Silent Fake Data | ✅ PASS | 137505ms | 71 passed, 0 failed |
-| Broker Commands (stubbed) | ✅ PASS | 128986ms | 137 passed, 0 failed |
-| V2 CLI Scoring | ✅ PASS | 245325ms | 81 passed, 0 failed |
-| Order Execution (stubbed) | ✅ PASS | 62505ms | 81 passed, 0 failed |
-| Live Safety (stubbed) | ✅ PASS | 265965ms | 188 passed, 0 failed |
-| Agents: Contract | ✅ PASS | 18715ms | 26 passed, 0 failed |
-| Agents: Data Clients | ✅ PASS | 11461ms | 20 passed, 0 failed |
-| Agent Adapter (bash) | ✅ PASS | 23118ms | 83 passed, 0 failed |
-| Scoring + Agents (zero-weight identity) | ✅ PASS | 363574ms | 90 passed, 0 failed |
-| Agents: Technical | ✅ PASS | 16236ms | 21 passed, 0 failed |
-| Agents: Parity vs bash | ✅ PASS | 212688ms | 322 passed, 0 failed |
-| Agents: Validation | ✅ PASS | 34843ms | 40 passed, 0 failed |
-| Agents: CLI (offline) | ✅ PASS | 78982ms | 23 passed, 0 failed |
-| Agents: Quant | ✅ PASS | 123042ms | 46 passed, 0 failed |
-| Agents: Quant pipeline (offline) | ✅ PASS | 149279ms | 89 passed, 0 failed |
-| Agents: Quant blend parity (bash) | ✅ PASS | 113525ms | 158 passed, 0 failed |
+| ML Predictor | ✅ PASS | 28156ms | 29 passed, 0 failed |
+| Regime Weighting | ✅ PASS | 71863ms | 30 passed, 0 failed |
+| Kalman Filter | ✅ PASS | 7740ms | 18 passed, 0 failed |
+| Backtest | ✅ PASS | 8576ms | 34 passed, 0 failed |
+| ML Scoring Integration | ✅ PASS | 39637ms | 29 passed, 0 failed |
+| Regime Detector | ✅ PASS | 83275ms | 20 passed, 0 failed |
+| Scoring Integration (Python) | ✅ PASS | 146ms | 32 passed, 0 failed |
+| Dashboard Components | ✅ PASS | 2405ms | 27 passed, 0 failed |
+| Backend API | ✅ PASS | 896ms | 17 passed, 0 failed |
+| Kelly Sizing & Risk Budget | ✅ PASS | 14664ms | 51 passed, 0 failed |
+| Sentiment (deterministic) | ✅ PASS | 7593ms | 36 passed, 0 failed |
+| MiroFish Cache Adapter | ✅ PASS | 25735ms | 42 passed, 0 failed |
+| Phase 1 Integration (CLI) | ❌ FAIL | 404964ms | 37 passed, 1 failed (exit code 1) |
+| No Silent Fake Data | ✅ PASS | 180684ms | 71 passed, 0 failed |
+| Broker Commands (stubbed) | ✅ PASS | 142367ms | 137 passed, 0 failed |
+| V2 CLI Scoring | ✅ PASS | 321944ms | 81 passed, 0 failed |
+| Order Execution (stubbed) | ✅ PASS | 85881ms | 81 passed, 0 failed |
+| Live Safety (stubbed) | ✅ PASS | 310016ms | 188 passed, 0 failed |
+| Agents: Contract | ✅ PASS | 12417ms | 26 passed, 0 failed |
+| Agents: Data Clients | ✅ PASS | 9292ms | 20 passed, 0 failed |
+| Agent Adapter (bash) | ✅ PASS | 18838ms | 83 passed, 0 failed |
+| Scoring + Agents (zero-weight identity) | ✅ PASS | 392633ms | 90 passed, 0 failed |
+| Agents: Technical | ✅ PASS | 18244ms | 21 passed, 0 failed |
+| Agents: Parity vs bash | ✅ PASS | 224146ms | 322 passed, 0 failed |
+| Agents: Validation | ✅ PASS | 30665ms | 40 passed, 0 failed |
+| Agents: CLI (offline) | ✅ PASS | 65409ms | 23 passed, 0 failed |
+| Agents: Quant | ✅ PASS | 110021ms | 47 passed, 0 failed |
+| Agents: Quant pipeline (offline) | ✅ PASS | 159431ms | 89 passed, 0 failed |
+| Agents: Quant blend parity (bash) | ✅ PASS | 128116ms | 158 passed, 0 failed |
 
 Counts are taken from each suite's own summary output. A suite passes only
 when it exits 0 with at least one passed test and zero failures.
