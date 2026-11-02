@@ -4,6 +4,8 @@
 # ============================================================================
 # Generates professional HTML reports with technical analysis, signals, charts
 # ============================================================================
+HTML_REPORT_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${HTML_REPORT_LIB_DIR}/portable.sh"
 
 # ============================================================================
 # Generate HTML Report
@@ -452,47 +454,48 @@ EOF
     elif echo "$stock_data" | grep -Eq '"data_source": *"unknown"'; then
         banner='<div class="data-warning" role="alert">Unknown data source: the analysis does not record where its prices came from.</div>'
     fi
-    sed -i '' "s|DATA_SOURCE_BANNER|${banner}|g" "$output_file"
-
-    sed -i '' "s/SYMBOL/${symbol:-N\/A}/g" "$output_file"
-    sed -i '' "s/\$PRICE/\$${price:-0.00}/g" "$output_file"
-    sed -i '' "s/REPORT_TIMESTAMP/${timestamp}/g" "$output_file"
-    sed -i '' "s/RSI_VALUE/--/g" "$output_file"
-    sed -i '' "s/MACD_VALUE/--/g" "$output_file"
-    sed -i '' "s/BB_POSITION%/--/g" "$output_file"
-    sed -i '' "s/STOCH_VALUE/--/g" "$output_file"
-    sed -i '' "s/WILLIAMS_VALUE/--/g" "$output_file"
-    sed -i '' "s/OBV_TREND/--/g" "$output_file"
-    sed -i '' "s/SENTIMENT_SUMMARY/Aggregated from multiple sources/g" "$output_file"
-    sed -i '' "s/SIGNAL/ANALYZE/g" "$output_file"
-    sed -i '' "s/CONFIDENCE_PCT/0/g" "$output_file"
-    sed -i '' "s/CONFIDENCE%/--/g" "$output_file"
-    sed -i '' "s/REASONING/Analysis data loaded successfully/g" "$output_file"
-    sed -i '' "s/CHANGE_CLASS/neutral/g" "$output_file"
-    sed -i '' "s/CHANGE %/0.00%/g" "$output_file"
-    sed -i '' "s/SIGNAL_CLASS/signal-hold/g" "$output_file"
-    sed -i '' "s/TWITTER_SCORE/--/g" "$output_file"
-    sed -i '' "s/REDDIT_SCORE/--/g" "$output_file"
-    sed -i '' "s/STOCKTWITS_SCORE/--/g" "$output_file"
-    sed -i '' "s/NEWS_SCORE/--/g" "$output_file"
-    sed -i '' "s/\$ENTRY_PRICE/\$${price:-0.00}/g" "$output_file"
-    sed -i '' "s/\$STOP_LOSS/\$--/g" "$output_file"
-    sed -i '' "s/\$TAKE_PROFIT/\$--/g" "$output_file"
-    sed -i '' "s/RISK_REWARD_RATIO/--/g" "$output_file"
-    sed -i '' "s/ATR_VALUE/--/g" "$output_file"
-    sed -i '' "s/VOLATILITY%/--/g" "$output_file"
-    sed -i '' "s/MARKET_CAP/--/g" "$output_file"
-    sed -i '' "s/VOLUME/--/g" "$output_file"
-    sed -i '' "s/52W_RANGE/--/g" "$output_file"
-    sed -i '' "s/TRADE_SUMMARY/Ready for analysis. Configure API keys for live data./g" "$output_file"
-    sed -i '' "s/RESISTANCE_SUPPORT_LEVELS/N\/A - Configure API keys for live data/g" "$output_file"
-    sed -i '' "s/RSI_STATUS/--/g" "$output_file"
-    sed -i '' "s/MACD_STATUS/--/g" "$output_file"
-    sed -i '' "s/BB_STATUS/--/g" "$output_file"
-    sed -i '' "s/STOCH_STATUS/--/g" "$output_file"
-    sed -i '' "s/WILLIAMS_STATUS/--/g" "$output_file"
-    sed -i '' "s/OBV_STATUS/--/g" "$output_file"
-
+    # One sed pass over the file, expressions in this order (portable: no
+    # BSD/GNU -i difference); same result as one sed -i per expression.
+    sst_sed_inplace "$output_file" \
+        -e "s|DATA_SOURCE_BANNER|${banner}|g" \
+        -e "s/SYMBOL/${symbol:-N\/A}/g" \
+        -e "s/\$PRICE/\$${price:-0.00}/g" \
+        -e "s/REPORT_TIMESTAMP/${timestamp}/g" \
+        -e "s/RSI_VALUE/--/g" \
+        -e "s/MACD_VALUE/--/g" \
+        -e "s/BB_POSITION%/--/g" \
+        -e "s/STOCH_VALUE/--/g" \
+        -e "s/WILLIAMS_VALUE/--/g" \
+        -e "s/OBV_TREND/--/g" \
+        -e "s/SENTIMENT_SUMMARY/Aggregated from multiple sources/g" \
+        -e "s/SIGNAL/ANALYZE/g" \
+        -e "s/CONFIDENCE_PCT/0/g" \
+        -e "s/CONFIDENCE%/--/g" \
+        -e "s/REASONING/Analysis data loaded successfully/g" \
+        -e "s/CHANGE_CLASS/neutral/g" \
+        -e "s/CHANGE %/0.00%/g" \
+        -e "s/SIGNAL_CLASS/signal-hold/g" \
+        -e "s/TWITTER_SCORE/--/g" \
+        -e "s/REDDIT_SCORE/--/g" \
+        -e "s/STOCKTWITS_SCORE/--/g" \
+        -e "s/NEWS_SCORE/--/g" \
+        -e "s/\$ENTRY_PRICE/\$${price:-0.00}/g" \
+        -e "s/\$STOP_LOSS/\$--/g" \
+        -e "s/\$TAKE_PROFIT/\$--/g" \
+        -e "s/RISK_REWARD_RATIO/--/g" \
+        -e "s/ATR_VALUE/--/g" \
+        -e "s/VOLATILITY%/--/g" \
+        -e "s/MARKET_CAP/--/g" \
+        -e "s/VOLUME/--/g" \
+        -e "s/52W_RANGE/--/g" \
+        -e "s/TRADE_SUMMARY/Ready for analysis. Configure API keys for live data./g" \
+        -e "s/RESISTANCE_SUPPORT_LEVELS/N\/A - Configure API keys for live data/g" \
+        -e "s/RSI_STATUS/--/g" \
+        -e "s/MACD_STATUS/--/g" \
+        -e "s/BB_STATUS/--/g" \
+        -e "s/STOCH_STATUS/--/g" \
+        -e "s/WILLIAMS_STATUS/--/g" \
+        -e "s/OBV_STATUS/--/g"
     # Score breakdown: filled LAST, after every sed above (they rewrite words
     # such as SIGNAL/SYMBOL/VOLUME globally), by splicing a temp file in awk
     _html_fill_score_breakdown "$stock_data" "$output_file"

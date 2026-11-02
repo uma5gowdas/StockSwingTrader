@@ -15,6 +15,9 @@
 ML_PREDICTOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODELS_DIR="${ML_PREDICTOR_DIR}/models"
 PYTHON_SCRIPT="${ML_PREDICTOR_DIR}/ml_inference.py"
+source "${ML_PREDICTOR_DIR}/portable.sh"
+# Use <repo>/.venv when it exists (PATH only; SST_NO_REPO_VENV=1 disables)
+sst_use_repo_venv
 
 ##############################################################################
 # Function: ml_predict_direction
@@ -99,10 +102,10 @@ ml_predict_direction() {
 ml_get_model_status() {
     if [[ -f "${MODELS_DIR}/xgboost_predictor.pkl" ]]; then
         local file_size
-        file_size=$(stat -f%z "${MODELS_DIR}/xgboost_predictor.pkl" 2>/dev/null || stat -c%s "${MODELS_DIR}/xgboost_predictor.pkl" 2>/dev/null)
+        file_size=$(sst_file_size "${MODELS_DIR}/xgboost_predictor.pkl")
         
         local mod_time
-        mod_time=$(stat -f%Sm -t "%Y-%m-%d %H:%M:%S" "${MODELS_DIR}/xgboost_predictor.pkl" 2>/dev/null || stat -c%y "${MODELS_DIR}/xgboost_predictor.pkl" 2>/dev/null | cut -d' ' -f1-2)
+        mod_time=$(sst_file_mtime_fmt "${MODELS_DIR}/xgboost_predictor.pkl" "%Y-%m-%d %H:%M:%S")
         
         echo "{\"status\": \"ready\", \"model_file\": \"${MODELS_DIR}/xgboost_predictor.pkl\", \"size_bytes\": ${file_size}, \"modified\": \"${mod_time}\"}"
     else

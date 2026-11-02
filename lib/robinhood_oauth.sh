@@ -8,6 +8,8 @@
 # ============================================================================
 
 set -o pipefail
+ROBINHOOD_OAUTH_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${ROBINHOOD_OAUTH_LIB_DIR}/portable.sh"
 
 # ============================================================================
 # Module Configuration & Globals
@@ -70,7 +72,7 @@ robinhood_log() {
 # Returns: 64-character hex string (256-bit key)
 robinhood_oauth_derive_key() {
     local key_material="${USER}@$(hostname)"
-    echo -n "$key_material" | sha256sum | cut -d' ' -f1
+    printf '%s' "$key_material" | sst_sha256
 }
 
 # Generate random IV for encryption
@@ -145,7 +147,7 @@ robinhood_oauth_load_tokens() {
     fi
     
     # Check file permissions
-    local file_perms=$(stat -f '%A' "$ROBINHOOD_TOKENS_FILE" 2>/dev/null || stat -c '%a' "$ROBINHOOD_TOKENS_FILE" 2>/dev/null)
+    local file_perms=$(sst_file_mode "$ROBINHOOD_TOKENS_FILE")
     if [[ "$file_perms" != "600" ]]; then
         robinhood_log "WARN" "Token file permissions are $file_perms, should be 600. Fixing..."
         chmod 0600 "$ROBINHOOD_TOKENS_FILE"

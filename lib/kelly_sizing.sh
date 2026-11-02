@@ -24,6 +24,8 @@
 # This file does not source trading_thresholds.sh: every input has a
 # ${VAR:-default} fallback so it also works from DEPLOYMENT_PACKAGE/.
 # ============================================================================
+KELLY_SIZING_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${KELLY_SIZING_LIB_DIR}/portable.sh"
 
 # ----------------------------------------------------------------------------
 # Internal helpers
@@ -173,7 +175,7 @@ risk_budget_allocate() {
     while ! mkdir "$lock" 2>/dev/null; do
         if [[ $stale_checked -eq 0 && -d "$lock" ]]; then
             local mtime age
-            mtime=$(stat -f%m "$lock" 2>/dev/null || stat -c%Y "$lock" 2>/dev/null || echo 0)
+            mtime=$(sst_file_mtime "$lock")
             age=$(( $(date +%s) - mtime ))
             if (( age > 30 )); then
                 stale_checked=1

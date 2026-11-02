@@ -217,7 +217,7 @@ assert_equals "rc=0 /usr/bin:/bin" "$out" "no .venv: PATH unchanged, returns 0"
 echo "=== bash 3.2 / no python ==="
 out=$(/bin/bash -n "$PROJECT_DIR/lib/portable.sh" 2>&1)
 assert_equals "" "$out" "/bin/bash -n lib/portable.sh"
-assert_equals "0" "$(grep -v '^[[:space:]]*#' "$PROJECT_DIR/lib/portable.sh" | grep -cE 'mapfile|declare -A|local -n|\$\{[a-zA-Z_]+,,\}')" "no bash-4-only constructs"
+assert_equals "0" "$(grep -v '^[[:space:]]*#' "$PROJECT_DIR/lib/portable.sh" | grep -cE 'ma[p]file|declare -[A]|local -n|\$\{[a-zA-Z_]+,,\}')" "no bash-4-only constructs"
 assert_equals "0" "$(wc -l < "$NET_LOG" | tr -d ' ')" "no python call during the suite"
 
 echo ""

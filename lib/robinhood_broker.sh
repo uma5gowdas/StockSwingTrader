@@ -23,6 +23,7 @@ if [[ ! -f "$ROBINHOOD_LIB_DIR/robinhood_oauth.sh" ]]; then
     echo "ERROR: robinhood_oauth.sh not found" >&2
     return 1
 fi
+source "$ROBINHOOD_LIB_DIR/portable.sh"
 source "$ROBINHOOD_LIB_DIR/robinhood_oauth.sh"
 
 # API Configuration
@@ -291,7 +292,7 @@ robinhood_oauth_wait_for_callback() {
     while [[ $elapsed -lt $timeout ]]; do
         # Try to connect and see if user sent callback
         local callback_response
-        callback_response=$(timeout 2 bash -c "exec 3<>/dev/tcp/127.0.0.1/$port; echo 'GET /callback?code=test HTTP/1.0\r\n\r\n' >&3; cat <&3" 2>/dev/null || echo "")
+        callback_response=$(sst_timeout 2 bash -c "exec 3<>/dev/tcp/127.0.0.1/$port; echo 'GET /callback?code=test HTTP/1.0\r\n\r\n' >&3; cat <&3" 2>/dev/null || echo "")
         
         if [[ -n "$callback_response" ]]; then
             # Extract code from query string

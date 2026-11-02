@@ -68,7 +68,10 @@ if [[ -f "$SST_CONFIG_FILE" ]]; then
     source "$SST_CONFIG_FILE"
 fi
 
-# Load libraries
+# Load libraries. portable.sh first: the other libs use its helpers.
+source "$AGENT_DIR/lib/portable.sh" 2>/dev/null || echo "WARNING: portable.sh not found"
+# Use <repo>/.venv when it exists (PATH only; SST_NO_REPO_VENV=1 disables)
+declare -F sst_use_repo_venv >/dev/null && sst_use_repo_venv
 source "$AGENT_DIR/lib/indicators.sh" 2>/dev/null || echo "WARNING: indicators.sh not found"
 source "$AGENT_DIR/lib/sentiment.sh" 2>/dev/null || echo "WARNING: sentiment.sh not found"
 source "$AGENT_DIR/lib/scoring.sh" 2>/dev/null || echo "WARNING: scoring.sh not found"
@@ -2024,7 +2027,16 @@ main() {
     if [[ -n "$symbols" ]]; then
         IFS=',' read -ra stocks_to_analyze <<< "$symbols"
     elif [[ -n "$watchlist_file" && -f "$watchlist_file" ]]; then
-        mapfile -t stocks_to_analyze < "$watchlist_file"
+        # One symbol per line; blank and # lines skipped, CR (CRLF files) and
+        # surrounding spaces trimmed. A read loop (works on bash 3.2).
+        local wl_line
+        while IFS= read -r wl_line || [[ -n "$wl_line" ]]; do
+            wl_line="${wl_line//$'\r'/}"
+            wl_line="${wl_line#"${wl_line%%[![:space:]]*}"}"
+            wl_line="${wl_line%"${wl_line##*[![:space:]]}"}"
+            [[ -z "$wl_line" || "$wl_line" == \#* ]] && continue
+            stocks_to_analyze+=("$wl_line")
+        done < "$watchlist_file"
     elif [[ "$use_top_10" == "true" ]]; then
         IFS=' ' read -ra stocks_to_analyze <<< "$(get_top_10_stocks)"
     else

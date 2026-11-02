@@ -37,6 +37,7 @@ python3() { echo "python3 $*" >> "$NET_LOG"; return 1; }
 export -f curl wget nc python python3
 
 source "$PROJECT_DIR/lib/agent_adapter.sh"
+source "$PROJECT_DIR/lib/portable.sh"
 
 # ============================================================================
 # Test Utilities
@@ -84,11 +85,7 @@ iso_hours_ahead() {
 }
 
 day_offset() {  # day_offset N -> America/New_York date N days from today
-    if [[ "$1" -ge 0 ]]; then
-        TZ=America/New_York date -v+"$1"d +%Y-%m-%d 2>/dev/null || TZ=America/New_York date -d "$1 days" +%Y-%m-%d
-    else
-        TZ=America/New_York date -v"$1"d +%Y-%m-%d 2>/dev/null || TZ=America/New_York date -d "$1 days" +%Y-%m-%d
-    fi
+    TZ=America/New_York sst_date_offset_days "$1" %Y-%m-%d
 }
 
 TODAY=$(day_offset 0)

@@ -16,6 +16,7 @@
 # so it uses its own dir variable and never touches the caller's SCRIPT_DIR.
 # calculate_confluence_score_v2 runs "$SCORING_LIB_DIR/ml_predictor.sh".
 SCORING_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCORING_LIB_DIR}/portable.sh"
 source "${SCORING_LIB_DIR}/ml_predictor.sh" 2>/dev/null || true
 source "${SCORING_LIB_DIR}/regime_weighting.sh" 2>/dev/null || true
 source "${SCORING_LIB_DIR}/kalman_filter.sh" 2>/dev/null || true
@@ -361,7 +362,7 @@ calculate_confluence_score_v2() {
         fi
     fi
     
-    local start_time=$(date +%s%N)
+    local start_time=$(sst_now_ms)
     
     # ========================================================================
     # Component 1: ML Predictor (15% weight) - 5 second timeout
@@ -717,8 +718,8 @@ calculate_confluence_score_v2() {
     # ========================================================================
     # Calculate latency
     # ========================================================================
-    local end_time=$(date +%s%N)
-    local latency_ms=$(( (end_time - start_time) / 1000000 ))
+    local end_time=$(sst_now_ms)
+    local latency_ms=$(( end_time - start_time ))
     
     # ========================================================================
     # Generate JSON Output

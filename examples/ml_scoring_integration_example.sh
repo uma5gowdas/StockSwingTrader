@@ -274,19 +274,22 @@ echo ""
 echo "Scenario: Score multiple symbols for portfolio management."
 echo ""
 
-declare -A portfolio=(
-    ["AAPL"]="65:60:70:55:sideways"
-    ["MSFT"]="72:75:68:70:trending_bull"
-    ["GOOGL"]="55:45:52:48:sideways"
-    ["TSLA"]="70:72:75:68:trending_bull"
-    ["AMZN"]="35:30:38:32:trending_bear"
+# Parallel indexed arrays (bash 3.2 has no associative arrays)
+portfolio_symbols=(AAPL MSFT GOOGL TSLA AMZN)
+portfolio_inputs=(
+    "65:60:70:55:sideways"
+    "72:75:68:70:trending_bull"
+    "55:45:52:48:sideways"
+    "70:72:75:68:trending_bull"
+    "35:30:38:32:trending_bear"
 )
 
 echo "Portfolio Analysis:"
 echo "────────────────────────────────────────────────────────────────"
 
-for symbol in "${!portfolio[@]}"; do
-    IFS=':' read -r rsi macd bb obv regime <<< "${portfolio[$symbol]}"
+for i in "${!portfolio_symbols[@]}"; do
+    symbol="${portfolio_symbols[$i]}"
+    IFS=':' read -r rsi macd bb obv regime <<< "${portfolio_inputs[$i]}"
     
     result=$(calculate_confluence_score_v2 "$symbol" \
         "$rsi" "$macd" "$bb" "$obv" "$regime")

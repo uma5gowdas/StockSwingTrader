@@ -19,6 +19,8 @@
 # There is no randomness in this file: earlier versions generated random
 # social scores, which made identical inputs produce different signals.
 # ============================================================================
+SENTIMENT_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SENTIMENT_LIB_DIR}/portable.sh"
 
 # ----------------------------------------------------------------------------
 # _sentiment_unavailable SYMBOL SOURCE REASON
@@ -197,7 +199,7 @@ news_sentiment() {
     local cache_dir="${SENTIMENT_CACHE_DIR:-cache/data}"
     local cache_file="${cache_dir}/${symbol}_news_sentiment.json"
     if [[ -f "$cache_file" ]]; then
-        local file_age=$(( $(date +%s) - $(stat -f%m "$cache_file" 2>/dev/null || stat -c%Y "$cache_file" 2>/dev/null || echo 0) ))
+        local file_age=$(( $(date +%s) - $(sst_file_mtime "$cache_file") ))
         if (( file_age < 30 * 60 )) && jq -e '.status == "ok"' "$cache_file" >/dev/null 2>&1; then
             cat "$cache_file"
             return 0

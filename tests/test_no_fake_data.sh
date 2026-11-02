@@ -11,7 +11,7 @@
 #   - regime detection / Kalman demo series / agent OHLCV report unavailable
 # Real-data paths are exercised offline with yfinance stubs on PYTHONPATH
 # (tests/stubs/yfinance_{empty,error,fixture}).
-# macOS bash 3.2 compatible (no `timeout`, no mapfile).
+# macOS bash 3.2 compatible (no `timeout`, no bash-4 builtins).
 # ============================================================================
 
 set -o pipefail

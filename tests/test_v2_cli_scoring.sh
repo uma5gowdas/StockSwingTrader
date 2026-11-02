@@ -295,6 +295,13 @@ assert_true "--legacy-score prints 'SCORE BREAKDOWN (legacy'" grep -q 'SCORE BRE
 assert_jq "$(cat "$WORK_DIR"/cli_legacy/swing_analysis_*.json 2>/dev/null)" '.[0].scoring_model == "legacy" and (.[0] | has("confluence_v2") | not) and (.[0].confluence | has("technical_avg"))' "--legacy-score: JSON analysis has the legacy shape"
 assert_true "--legacy-score HTML row says legacy" grep -q '<td>legacy</td>' "$(ls "$WORK_DIR"/cli_legacy/swing_analysis_*.html | head -1)"
 
+# --watchlist FILE under /bin/bash (3.2 on macOS): read loop, not a bash-4 builtin.
+# 2 symbols (one with a CRLF ending), a blank line and a comment line.
+printf '# my watchlist\nAAPL\r\n\n  MSFT  \n' > "$WORK_DIR/watchlist.txt"
+/bin/bash "$AGENT" --watchlist "$WORK_DIR/watchlist.txt" --output-dir "$WORK_DIR/cli_wl" > "$WORK_DIR/cli_wl.txt" 2>&1; rc=$?
+assert_equals "0" "$rc" "--watchlist FILE under /bin/bash exits 0"
+assert_true "--watchlist: no 'command not found'" bash -c '! grep -q "command not found" "$1"' _ "$WORK_DIR/cli_wl.txt"
+assert_jq "$(cat "$WORK_DIR"/cli_wl/swing_analysis_*.json 2>/dev/null)" 'type == "array" and length == 2 and ([.[].symbol] | sort) == ["AAPL", "MSFT"]' "--watchlist: 2 symbols analyzed (blank/comment skipped, CR and spaces trimmed)"
 help_out=$("$AGENT" --help 2>&1)
 assert_true "--help lists --legacy-score" grep -q -- '--legacy-score' <<< "$help_out"
 assert_true "--help says v2 scoring always runs the ML predictor" grep -q 'always runs the ML predictor' <<< "$help_out"

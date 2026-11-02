@@ -17,6 +17,8 @@
 # ============================================================================
 
 # Source dependencies
+REGIME_DETECTOR_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${REGIME_DETECTOR_LIB_DIR}/portable.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/indicators.sh" 2>/dev/null
 source "$(dirname "${BASH_SOURCE[0]}")/trading_thresholds.sh" 2>/dev/null
 source "$(dirname "${BASH_SOURCE[0]}")/kalman_filter.sh" 2>/dev/null
@@ -86,7 +88,7 @@ is_regime_cache_valid() {
         return 1
     fi
     
-    local file_age=$(($(date +%s) - $(stat -f%m "$cache_file" 2>/dev/null || stat -c%Y "$cache_file" 2>/dev/null || echo 0)))
+    local file_age=$(($(date +%s) - $(sst_file_mtime "$cache_file")))
     
     if [[ $file_age -lt $REGIME_CACHE_TTL ]]; then
         return 0
