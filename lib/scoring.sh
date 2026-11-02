@@ -386,7 +386,9 @@ calculate_confluence_score_v2() {
             my $t = shift;
             my $pid = fork() // exit 125;
             if ($pid == 0) { setpgrp(0, 0); exec @ARGV or exit 127; }
-            $SIG{ALRM} = sub { kill "TERM", -$pid; kill "TERM", $pid; exit 124; };
+            # Leader first, then the group: /bin/bash 3.2 sometimes survived a
+            # group TERM that reached its child first (see sst_timeout).
+            $SIG{ALRM} = sub { kill "TERM", $pid; kill "TERM", -$pid; exit 124; };
             alarm $t;
             waitpid($pid, 0);
             exit($? >> 8);' "${ML_TIMEOUT_SECONDS:-5}" \

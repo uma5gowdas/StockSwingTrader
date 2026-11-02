@@ -127,7 +127,10 @@ sst_timeout() {
         my $t = shift;
         my $pid = fork() // exit 125;
         if ($pid == 0) { setpgrp(0, 0); exec @ARGV or exit 127; }
-        $SIG{ALRM} = sub { kill "TERM", -$pid; kill "TERM", $pid; exit 124; };
+        # Leader first, then the group: when the group signal reached the
+        # child of a /bin/bash 3.2 leader first, bash 3.2 sometimes survived
+        # and ran its next command (about 1 in 5 on macOS).
+        $SIG{ALRM} = sub { kill "TERM", $pid; kill "TERM", -$pid; exit 124; };
         alarm $t;
         waitpid($pid, 0);
         exit($? >> 8);' -- "$@"
