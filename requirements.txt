@@ -1,35 +1,17 @@
-# Machine Learning
-xgboost==2.0.1
-pandas==2.0.3
-numpy==1.24.3
-scikit-learn==1.3.1
-scipy==1.11.2
-
-# Data & Utilities
-python-dateutil==2.8.2
-pytz==2023.3
-requests==2.31.0
-
-# ML Utilities
-joblib==1.3.2
-tqdm==4.66.1
-
-# Kalman Filter & Signal Processing
-filterpy==1.4.2
-
-# API & Trading
-alpaca-trade-api==3.0.0
-python-dotenv==1.0.0
-
-# Visualization
-matplotlib==3.7.2
-plotly==5.17.0
-
-# Testing
-pytest==7.4.2
-pytest-cov==4.1.0
-
-# Development
-black==23.9.1
-flake8==6.1.0
-pylint==3.0.0
+# ============================================================================
+# StockSwingTrader core Python dependencies (lib/*.py, the CLI and its tests).
+# Exact pins. Python >= 3.12 (3.12 and 3.13 tested; see below for 3.11).
+#   ./setup.sh                      (creates <repo>/.venv and installs this)
+#   or: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+# The agent layer (agents/) uses its own venv and requirements-agents.txt
+# (Python 3.12): ./setup.sh --with-agents
+# Only packages the core imports are listed: xgboost, pandas, numpy,
+# scikit-learn and joblib (ML model, lib/ml_inference.py, lib/train_ml_model.py)
+# and yfinance (market data for the CLI, ML inference and backtests).
+# ============================================================================
+xgboost==3.4.1
+pandas==3.1.0
+numpy==2.5.4
+scikit-learn==1.9.1
+joblib==1.6.0
+yfinance==1.7.0
