@@ -88,6 +88,7 @@ add_test "V2 CLI Scoring" "${SCRIPT_DIR}/test_v2_cli_scoring.sh"
 add_test "Order Execution (stubbed)" "${SCRIPT_DIR}/test_order_execution.sh"
 add_test "Live Safety (stubbed)" "${SCRIPT_DIR}/test_live_safety.sh"
 add_test "Portable helpers" "${SCRIPT_DIR}/test_portable.sh"
+add_test "Setup script" "${SCRIPT_DIR}/test_setup.sh"
 add_test "Agents: Contract" "${SCRIPT_DIR}/test_agents_contract.py" venv
 add_test "Agents: Data Clients" "${SCRIPT_DIR}/test_agents_data.py" venv
 add_test "Agent Adapter (bash)" "${SCRIPT_DIR}/test_agent_adapter.sh"
@@ -291,6 +292,7 @@ when it exits 0 with at least one passed test and zero failures.
 | No Silent Fake Data | tests/test_no_fake_data.sh | bash | data_source rules with yfinance stubs (no data, error, fixture) |
 | Broker Commands (stubbed) | tests/test_broker_commands.sh | bash | --check-account/--view-positions/--buy/--sell and deprecated aliases against a local Alpaca stub, Robinhood with stub functions, confirmation yes/no, invalid input, --ml/--kalman loading, libs keep SCRIPT_DIR |
 | Portable helpers | tests/test_portable.sh | bash | lib/portable.sh (perl stat/mtime/mode/size, sha256, one-pass in-place sed, process-group timeout, date offsets, epoch ms, repo .venv PATH, sst_os; bash 3.2, no python) |
+| Setup script | tests/test_setup.sh | bash | setup.sh in a temp skeleton: --help, unknown flag, --dry-run changes nothing, config.sh mode 600 + idempotent, existing config.sh untouched, --configure-keys without printing values, paper URL warning, --doctor (real repo exit 0, jq missing exit 1 + brew/apt hints); no network |
 | Agents: Contract | tests/test_agents_contract.py | .venv-agents python (SKIP without venv) | agents/ envelope schema + rules, atomic cache writes, path guards, config masking, config.sh agent settings reach the CLI, assert_paper, LLM providers + \$0 budget, CLI exit codes |
 | Agents: Data Clients | tests/test_agents_data.py | .venv-agents python (SKIP without venv) | agents/data Alpaca bars client against a 127.0.0.1 stub (pagination, GET only, host whitelist, sip->iex, retry, stale, timeout, cache), offline fixtures, yfinance fallback off |
 | Agent Adapter (bash) | tests/test_agent_adapter.sh | bash | lib/agent_adapter.sh statuses, gates, latest dir, ttl, weight clamp/cap, components reasons, no network |
