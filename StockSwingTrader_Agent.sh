@@ -248,9 +248,9 @@ show_broker_account() {
     if command -v jq &>/dev/null; then
         # Robinhood has no portfolio_value (uses equity) and Alpaca no
         # account_type (uses status). The account number is not printed.
-        echo "Portfolio Value: $(echo "$account_data" | jq -r '.portfolio_value // .equity // 0' | xargs printf '\$%.2f')"
-        echo "Cash Balance:    $(echo "$account_data" | jq -r '.cash // 0' | xargs printf '\$%.2f')"
-        echo "Buying Power:    $(echo "$account_data" | jq -r '.buying_power // 0' | xargs printf '\$%.2f')"
+        echo "Portfolio Value: $(echo "$account_data" | jq -r '.portfolio_value // .equity // 0' | xargs printf '$%.2f')"
+        echo "Cash Balance:    $(echo "$account_data" | jq -r '.cash // 0' | xargs printf '$%.2f')"
+        echo "Buying Power:    $(echo "$account_data" | jq -r '.buying_power // 0' | xargs printf '$%.2f')"
         echo "Account Type:    $(echo "$account_data" | jq -r '.account_type // .status // "n/a"')"
         echo "============================================"
     else
