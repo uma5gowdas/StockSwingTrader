@@ -74,7 +74,7 @@ summary() {
 }
 
 if [[ ! -x "$AGENTS_PY" ]]; then
-    fail "agent venv python at $AGENTS_PY" "create it: python3.12 -m venv .venv-agents && .venv-agents/bin/pip install -r requirements-agents.txt"
+    fail "agent venv python at $AGENTS_PY" "create it: ./setup.sh --with-agents (or python3.12 -m venv .venv-agents && .venv-agents/bin/pip install -r requirements-agents.txt)"
     summary
 fi
 

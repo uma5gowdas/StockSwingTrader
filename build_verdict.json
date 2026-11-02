@@ -42,7 +42,7 @@
       "description": "Twitter, Reddit, StockTwits, and news sentiment are simulated with realistic variance. Architecture supports real API integration; swap simulated functions with real API calls. Acceptable for learning phase."
     }
   ],
-  "reviewDoc": "/Users/P3291917/Builds/6/StockSwingTrader/BUILD_REVIEW.md",
+  "reviewDoc": "BUILD_REVIEW.md",
   "summary": {
     "completeness": "All 10 planned phases delivered. Core technical analysis (8 indicators, sentiment aggregation, confluence scoring) fully implemented and verified. Data fetchers and test suites partially complete but acceptable for demo.",
     "correctness": "Mathematical formulas verified: RSI, MACD, Bollinger Bands, ATR, Stochastic, Williams %R all correct. Tested with known inputs. HTML report structure valid and renders properly.",

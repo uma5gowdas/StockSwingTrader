@@ -123,8 +123,8 @@ TEST SUMMARY
 
 Pass Rate: 100% (65/65)
 
-Test Log: /Users/P3291917/Desktop/StockSwingTrader/logs/test_alpaca.log
-Alpaca Log: /Users/P3291917/Desktop/StockSwingTrader/logs/alpaca_test.log
+Test Log: <repo>/logs/test_alpaca.log
+Alpaca Log: <repo>/logs/alpaca_test.log
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 VERIFICATION CHECKS

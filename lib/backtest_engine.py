@@ -17,6 +17,7 @@ Requirements:
 import json
 import os
 import sys
+import tempfile
 import zlib
 import logging
 from pathlib import Path
@@ -376,7 +377,7 @@ class BacktestEngine:
         self.train_pct = config.get('train_pct', 80)
         self.slippage_pct = config.get('slippage_pct', 0.001)
         self.commission_pct = config.get('commission_pct', 0.0001)
-        self.output_file = config.get('output_file', f'/tmp/backtest_{self.symbol}.json')
+        self.output_file = config.get('output_file', os.path.join(tempfile.gettempdir(), f'backtest_{self.symbol}.json'))
     
     def run(self) -> Dict[str, Any]:
         """Execute backtest."""

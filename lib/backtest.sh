@@ -25,13 +25,17 @@ set -o pipefail
 # File-specific dir variable: this file is sourced, so it must not change the
 # caller's SCRIPT_DIR.
 BACKTEST_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${BACKTEST_LIB_DIR}/portable.sh"
+# Use <repo>/.venv when it exists (PATH only; SST_NO_REPO_VENV=1 disables)
+sst_use_repo_venv
 
 # ============================================================================
 # Configuration
 # ============================================================================
 
 # Default parameters
-BACKTEST_OUTPUT_DIR="${BACKTEST_OUTPUT_DIR:-/Users/P3291917/Builds/6/.agents/tasks/backtest_results}"
+# Results go to <repo>/output/backtests (git-ignored) unless BACKTEST_OUTPUT_DIR is set
+BACKTEST_OUTPUT_DIR="${BACKTEST_OUTPUT_DIR:-$(dirname "$BACKTEST_LIB_DIR")/output/backtests}"
 SLIPPAGE_PCT=0.001        # 0.1% slippage
 COMMISSION_PCT=0.0001     # 0.01% commission
 KELLY_DIVISOR=4           # Conservative Kelly: full / 4
@@ -226,7 +230,8 @@ backtest_strategy() {
     local results_file="$BACKTEST_OUTPUT_DIR/backtest_${symbol}_${timestamp}.json"
     
     # Create backtest configuration
-    local config_file="/tmp/backtest_${symbol}_${timestamp}.json"
+    local config_file
+    config_file=$(mktemp "${TMPDIR:-/tmp}/sst_backtest_cfg.XXXXXX") || return 1
     
     cat > "$config_file" << EOF
 {
@@ -358,7 +363,8 @@ generate_backtest_reports() {
     local csv_file="${results_file%.*}.csv"
     
     # Create Python script for report generation
-    local temp_script="/tmp/gen_backtest_reports_$$.py"
+    local temp_script
+    temp_script=$(mktemp "${TMPDIR:-/tmp}/sst_gen_backtest_reports.XXXXXX") || return 1
     
     cat > "$temp_script" << 'PYSCRIPT'
 #!/usr/bin/env python3
@@ -533,7 +539,8 @@ generate_portfolio_summary() {
     local summary_file="$BACKTEST_OUTPUT_DIR/portfolio_summary_${timestamp}.json"
     
     # Create Python script
-    local temp_script="/tmp/gen_portfolio_summary_$$.py"
+    local temp_script
+    temp_script=$(mktemp "${TMPDIR:-/tmp}/sst_gen_portfolio_summary.XXXXXX") || return 1
     
     cat > "$temp_script" << 'PYSCRIPT'
 #!/usr/bin/env python3

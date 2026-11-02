@@ -239,6 +239,39 @@ test('GET /api/backtest reports each result\'s data source and flags synthetic r
   assert.deepEqual(bySymbol.MSFT.data, { symbol: 'MSFT', total_pnl: 7, data_source: 'synthetic' });
 });
 
+test('default paths are repo-relative: <base>/logs/backend.log and <base>/output/backtests', () => {
+  // server.js reads its env at require time, so this case runs in a child node
+  // process with SST_LOG_FILE and BACKTEST_OUTPUT_DIR unset.
+  const { spawnSync } = require('node:child_process');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sst_backend_defaults.'));
+  try {
+    const btDir = path.join(root, 'output', 'backtests');
+    fs.mkdirSync(btDir, { recursive: true });
+    fs.writeFileSync(path.join(btDir, 'backtest_NVDA_9.json'), JSON.stringify({ symbol: 'NVDA', total_pnl: 1 }));
+    const env = { ...process.env, SST_BASE_PATH: root };
+    delete env.SST_LOG_FILE;
+    delete env.BACKTEST_OUTPUT_DIR;
+    const script = `
+      const app = require(${JSON.stringify(path.join(__dirname, '..', 'backend', 'server.js'))});
+      const s = app.listen(0, '127.0.0.1', async () => {
+        const res = await fetch('http://127.0.0.1:' + s.address().port + '/api/backtest');
+        const body = await res.json();
+        s.close();
+        process.stdout.write(JSON.stringify({ status: res.status, files: (body.results || []).map((r) => r.file) }));
+      });`;
+    const child = spawnSync(process.execPath, ['-e', script], { cwd: root, env, encoding: 'utf8', timeout: 30000 });
+    assert.equal(child.status, 0, child.stderr);
+    const out = JSON.parse(child.stdout.trim().split('\n').pop());
+    assert.equal(out.status, 200);
+    assert.deepEqual(out.files, ['backtest_NVDA_9.json']);
+    const logFile = path.join(root, 'logs', 'backend.log');
+    assert.ok(fs.existsSync(logFile), 'logs/backend.log written under SST_BASE_PATH');
+    assert.match(fs.readFileSync(logFile, 'utf8'), /Backtest results requested/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('unknown routes return 404', async () => {
   const res = await request('GET', '/api/nonexistent');
   assert.equal(res.status, 404);

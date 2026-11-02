@@ -14,6 +14,10 @@ set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+# Error-handler output goes to a private temp file (no fixed /tmp name)
+WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sst_broker_test.XXXXXX")"
+trap 'rm -rf "$WORK_DIR"' EXIT
+ERR_FILE="$WORK_DIR/err.txt"
 TEST_LOG_FILE="${PROJECT_ROOT}/logs/test_alpaca.log"
 TESTS_PASSED=0
 TESTS_FAILED=0
@@ -311,25 +315,25 @@ echo "────────────────────────�
 
 # Test 7.1: HTTP error codes
 run_test "Handle 401 Unauthorized" \
-    "alpaca_handle_error 401 '{\"message\":\"Invalid API key\"}' > /tmp/err.txt 2>&1 || true; grep -qi 'unauthorized\\|invalid' /tmp/err.txt"
+    "alpaca_handle_error 401 '{\"message\":\"Invalid API key\"}' > \"\$ERR_FILE\" 2>&1 || true; grep -qi 'unauthorized\\|invalid' \"\$ERR_FILE\""
 
 run_test "Handle 403 Forbidden" \
-    "alpaca_handle_error 403 '{\"message\":\"No permission\"}' > /tmp/err.txt 2>&1 || true; grep -qi 'forbidden' /tmp/err.txt"
+    "alpaca_handle_error 403 '{\"message\":\"No permission\"}' > \"\$ERR_FILE\" 2>&1 || true; grep -qi 'forbidden' \"\$ERR_FILE\""
 
 run_test "Handle 400 Bad Request" \
-    "alpaca_handle_error 400 '{\"message\":\"Invalid parameters\"}' > /tmp/err.txt 2>&1 || true; grep -qi 'bad request' /tmp/err.txt"
+    "alpaca_handle_error 400 '{\"message\":\"Invalid parameters\"}' > \"\$ERR_FILE\" 2>&1 || true; grep -qi 'bad request' \"\$ERR_FILE\""
 
 run_test "Handle 404 Not Found" \
-    "alpaca_handle_error 404 '{\"message\":\"Resource not found\"}' > /tmp/err.txt 2>&1 || true; grep -qi 'not found' /tmp/err.txt"
+    "alpaca_handle_error 404 '{\"message\":\"Resource not found\"}' > \"\$ERR_FILE\" 2>&1 || true; grep -qi 'not found' \"\$ERR_FILE\""
 
 run_test "Handle 422 Unprocessable Entity" \
-    "alpaca_handle_error 422 '{\"message\":\"Insufficient buying power\"}' > /tmp/err.txt 2>&1 || true; grep -qi 'unprocessable\\|insufficient' /tmp/err.txt"
+    "alpaca_handle_error 422 '{\"message\":\"Insufficient buying power\"}' > \"\$ERR_FILE\" 2>&1 || true; grep -qi 'unprocessable\\|insufficient' \"\$ERR_FILE\""
 
 run_test "Handle 429 Rate Limited" \
-    "alpaca_handle_error 429 '{\"message\":\"Too many requests\"}' > /tmp/err.txt 2>&1 || true; grep -qi 'rate' /tmp/err.txt"
+    "alpaca_handle_error 429 '{\"message\":\"Too many requests\"}' > \"\$ERR_FILE\" 2>&1 || true; grep -qi 'rate' \"\$ERR_FILE\""
 
 run_test "Handle 500 Server Error" \
-    "alpaca_handle_error 500 '{\"message\":\"Internal server error\"}' > /tmp/err.txt 2>&1 || true; grep -qi 'server error' /tmp/err.txt"
+    "alpaca_handle_error 500 '{\"message\":\"Internal server error\"}' > \"\$ERR_FILE\" 2>&1 || true; grep -qi 'server error' \"\$ERR_FILE\""
 
 # ============================================================================
 # TESTS: Logging

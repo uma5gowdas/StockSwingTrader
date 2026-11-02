@@ -19,6 +19,18 @@ ROBINHOOD_MCP_BANKING_URL="${ROBINHOOD_MCP_BANKING_URL:-https://banking-agent.ro
 ROBINHOOD_MCP_TOKENS_FILE="${HOME}/.robinhood_mcp_tokens.json"
 ROBINHOOD_MCP_LOG_FILE="${ROBINHOOD_MCP_LOG_FILE:-logs/robinhood_mcp.log}"
 
+# Private temp dir for the OAuth callback script and auth code (mktemp -d;
+# no fixed /tmp names). robinhood_mcp_ensure_tmp_dir creates it in the current
+# shell, so later $(robinhood_mcp_tmp_dir) subshells reuse the same dir.
+ROBINHOOD_MCP_TMP_DIR="${ROBINHOOD_MCP_TMP_DIR:-}"
+robinhood_mcp_ensure_tmp_dir() {
+    if [[ -z "$ROBINHOOD_MCP_TMP_DIR" || ! -d "$ROBINHOOD_MCP_TMP_DIR" ]]; then
+        ROBINHOOD_MCP_TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/sst_robinhood_mcp.XXXXXX") || return 1
+    fi
+}
+robinhood_mcp_tmp_dir() {
+    robinhood_mcp_ensure_tmp_dir && printf '%s\n' "$ROBINHOOD_MCP_TMP_DIR"
+}
 # Logging
 robinhood_mcp_log() {
     local level="$1"
@@ -47,8 +59,8 @@ robinhood_mcp_start_callback_server() {
     
     # Use nc (netcat) or Python to listen for callback
     if command -v python3 &>/dev/null; then
-        # Python HTTP server
-        cat > /tmp/robinhood_callback.py << 'PYEOF'
+        # Python HTTP server (script in the private temp dir)
+        cat > "$(robinhood_mcp_tmp_dir)/robinhood_callback.py" << 'PYEOF'
 #!/usr/bin/env python3
 import http.server
 import socketserver
@@ -79,7 +91,7 @@ with socketserver.TCPServer(("", PORT), CallbackHandler) as httpd:
     print(f"Listening on port {PORT}...")
     httpd.handle_request()
 PYEOF
-        python3 /tmp/robinhood_callback.py "$port" 2>/dev/null &
+        python3 "$(robinhood_mcp_tmp_dir)/robinhood_callback.py" "$port" 2>/dev/null &
         echo $!
     fi
 }
@@ -125,6 +137,7 @@ robinhood_mcp_oauth_init() {
     echo ""
     
     robinhood_mcp_open_browser "$auth_url"
+    robinhood_mcp_ensure_tmp_dir || return 1
     
     # Start callback server
     local callback_pid=$(robinhood_mcp_start_callback_server 8888 "$state")
@@ -136,9 +149,9 @@ robinhood_mcp_oauth_init() {
     local timeout=300
     local elapsed=0
     while [[ $elapsed -lt $timeout ]]; do
-        if [[ -f /tmp/robinhood_auth_code.txt ]]; then
-            local auth_code=$(cat /tmp/robinhood_auth_code.txt)
-            rm /tmp/robinhood_auth_code.txt
+        if [[ -f "$(robinhood_mcp_tmp_dir)/robinhood_auth_code.txt" ]]; then
+            local auth_code=$(cat "$(robinhood_mcp_tmp_dir)/robinhood_auth_code.txt")
+            rm "$(robinhood_mcp_tmp_dir)/robinhood_auth_code.txt"
             robinhood_mcp_log "INFO" "Received authorization code: $auth_code"
             echo "$auth_code"
             return 0

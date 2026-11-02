@@ -17,6 +17,10 @@
 # Lower q = trust price changes less, smoother output but lag
 # Higher r = trust price measurements less, smoother output but higher lag
 # ============================================================================
+KALMAN_FILTER_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${KALMAN_FILTER_LIB_DIR}/portable.sh"
+# Use <repo>/.venv when it exists (PATH only; SST_NO_REPO_VENV=1 disables)
+sst_use_repo_venv
 
 # ============================================================================
 # 1D Kalman Filter Implementation (Python-backed for precision)

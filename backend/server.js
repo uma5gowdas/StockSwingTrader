@@ -15,8 +15,9 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 // Paths can be overridden via env (used by tests/test_backend.js).
 const BASE_PATH = path.resolve(process.env.SST_BASE_PATH || path.join(__dirname, '..'));
-const LOG_FILE = path.resolve(process.env.SST_LOG_FILE || '/Users/P3291917/Builds/6/.agents/tasks/backend.log');
-const BACKTEST_DIR = path.resolve(process.env.BACKTEST_OUTPUT_DIR || '/Users/P3291917/Builds/6/.agents/tasks/backtest_results');
+// Defaults are repo-relative: <base>/logs/backend.log and <base>/output/backtests.
+const LOG_FILE = path.resolve(process.env.SST_LOG_FILE || path.join(BASE_PATH, 'logs', 'backend.log'));
+const BACKTEST_DIR = path.resolve(process.env.BACKTEST_OUTPUT_DIR || path.join(BASE_PATH, 'output', 'backtests'));
 
 // Ticker symbols: letters, digits, dot or dash, max 10 chars (same rule as the
 // frontend). Symbols are passed to bash scripts, so anything else is rejected.

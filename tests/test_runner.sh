@@ -3,7 +3,8 @@
 # StockSwingTrader: Master Test Runner
 # ============================================================================
 # Executes all test suites, parses each suite's own pass/fail counts and
-# writes a report to .agents/tasks/test-report.md.
+# writes a report to reports/test-report.md (git-ignored; SST_TEST_REPORT_FILE
+# overrides).
 #
 # A suite PASSES only when it exits 0, reports at least one passed test and
 # reports zero failures. A suite whose counts cannot be parsed FAILS.
@@ -17,8 +18,12 @@ set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-REPORT_DIR="${PROJECT_DIR}/.agents/tasks"
-REPORT_FILE="${REPORT_DIR}/test-report.md"
+REPORT_FILE="${SST_TEST_REPORT_FILE:-$PROJECT_DIR/reports/test-report.md}"
+REPORT_DIR="$(dirname "$REPORT_FILE")"
+# Use <repo>/.venv for python3 when it exists (PATH only; SST_NO_REPO_VENV=1
+# disables)
+source "$PROJECT_DIR/lib/portable.sh"
+sst_use_repo_venv
 
 export SST_OFFLINE=1
 # Agent-layer settings from the caller's shell would change the v2 output the
@@ -154,7 +159,7 @@ run_suite() {
     fi
 
     if [[ "$kind" == "venv" && ! -x "$AGENTS_PY" ]]; then
-        echo -e "${YELLOW}[SKIP]${NC} ${test_name}: agent venv not found (${AGENTS_VENV}); create it: /opt/homebrew/bin/python3.12 -m venv .venv-agents && .venv-agents/bin/pip install -r requirements-agents.txt"
+        echo -e "${YELLOW}[SKIP]${NC} ${test_name}: agent venv not found (${AGENTS_VENV}); create it: ./setup.sh --with-agents (or python3.12 -m venv .venv-agents && .venv-agents/bin/pip install -r requirements-agents.txt)"
         SUITES_SKIPPED=$((SUITES_SKIPPED + 1))
         record_row "$test_name" "⏭ SKIP" "-" "agent venv not found (${AGENTS_VENV})"
         return 0

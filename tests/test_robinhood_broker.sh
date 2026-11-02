@@ -14,6 +14,10 @@ set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+# Error-handler output goes to a private temp file (no fixed /tmp name)
+WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sst_broker_test.XXXXXX")"
+trap 'rm -rf "$WORK_DIR"' EXIT
+ERR_FILE="$WORK_DIR/err.txt"
 TEST_LOG_FILE="${PROJECT_ROOT}/logs/test_robinhood.log"
 TEST_RESULTS_FILE="${PROJECT_ROOT}/tests/test_results_robinhood.txt"
 TESTS_PASSED=0
@@ -324,15 +328,15 @@ run_test "robinhood_handle_error function exists" \
 
 # Test 6.2: Handle 401 Unauthorized
 run_test "Handle 401 Unauthorized error gracefully" \
-    "robinhood_handle_error 401 \"\$MOCK_401_ERROR\" > /tmp/err.txt 2>&1 || true; grep -qi 'invalid\\|auth' /tmp/err.txt"
+    "robinhood_handle_error 401 \"\$MOCK_401_ERROR\" > \"\$ERR_FILE\" 2>&1 || true; grep -qi 'invalid\\|auth' \"\$ERR_FILE\""
 
 # Test 6.3: Handle 403 Forbidden
 run_test "Handle 403 Forbidden error gracefully" \
-    "robinhood_handle_error 403 \"\$MOCK_403_ERROR\" > /tmp/err.txt 2>&1 || true; grep -qi 'forbidden\\|permission' /tmp/err.txt"
+    "robinhood_handle_error 403 \"\$MOCK_403_ERROR\" > \"\$ERR_FILE\" 2>&1 || true; grep -qi 'forbidden\\|permission' \"\$ERR_FILE\""
 
 # Test 6.4: Handle 500 Server error
 run_test "Handle 500 Server error gracefully" \
-    "robinhood_handle_error 500 '{\"detail\":\"Server error\"}' > /tmp/err.txt 2>&1 || true; grep -qi 'server' /tmp/err.txt"
+    "robinhood_handle_error 500 '{\"detail\":\"Server error\"}' > \"\$ERR_FILE\" 2>&1 || true; grep -qi 'server' \"\$ERR_FILE\""
 
 # Test 6.5: Error function returns non-zero on error codes
 run_test "robinhood_handle_error returns failure status for error codes" \

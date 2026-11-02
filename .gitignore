@@ -56,6 +56,12 @@ config.alpaca.sh
 config.live.sh
 # Order ledger, reconciliation baseline, kill switch (lib/order_safety.sh)
 .state/
+# Generated output: backtests, CLI reports (output/), test and ML training
+# reports (reports/)
+output/
+reports/
+# Old runner report location (before reports/)
+.agents/tasks/test-report.md
 
 # Git worktrees
 .worktrees/

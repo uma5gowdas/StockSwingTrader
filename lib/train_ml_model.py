@@ -42,7 +42,8 @@ MODELS_DIR = SCRIPT_DIR / 'models'
 MODELS_DIR.mkdir(exist_ok=True)
 
 MODEL_PATH = MODELS_DIR / 'xgboost_predictor.pkl'
-REPORT_PATH = Path('/Users/P3291917/Builds/6/.agents/tasks/ml-training-report.md')
+# Report: SST_ML_REPORT_PATH, else <repo>/reports/ml-training-report.md (git-ignored)
+REPORT_PATH = Path(os.environ.get('SST_ML_REPORT_PATH') or (SCRIPT_DIR.parent / 'reports' / 'ml-training-report.md'))
 
 SYMBOLS = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'NVDA', 'META', 'JPM', 'BRK.B', 'V']
 LOOKBACK_DAYS = 2 * 365  # 2 years
@@ -319,7 +320,7 @@ probabilities = model.predict_proba(X)[:, 1]
 
 ### Use Inference Script
 ```bash
-bash /Users/P3291917/Desktop/StockSwingTrader/lib/ml_predictor.sh predict AAPL 5
+bash lib/ml_predictor.sh predict AAPL 5
 ```
 
 ## Feature Importance
