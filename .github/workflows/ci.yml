@@ -1,0 +1,119 @@
+# Offline test suite on a fresh Linux machine for every push and pull request.
+# No secrets are used: every suite runs with SST_OFFLINE=1 against local stubs
+# and fixtures (no broker, no market data, no orders).
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Linux (ubuntu-24.04, full offline suite)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-agents.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: System packages
+        run: sudo apt-get update && sudo apt-get install -y jq bc
+
+      - name: Setup (core + agents)
+        run: ./setup.sh --non-interactive --with-agents --skip-smoke
+
+      - name: Doctor
+        run: ./setup.sh --doctor
+
+      - name: Test runner (offline)
+        run: SST_OFFLINE=1 bash tests/test_runner.sh
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report-linux
+          path: reports/test-report.md
+          if-no-files-found: warn
+
+  docker:
+    name: Docker image (smoke)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t sst:ci .
+
+      - name: Smoke tests in the image
+        run: >-
+          docker run --rm sst:ci bash -c
+          './setup.sh --doctor && bash tests/test_portable.sh && bash tests/test_setup.sh && bash tests/test_v2_cli_scoring.sh'
+
+  macos:
+    name: macOS (macos-14, manual)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-14
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-agents.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: System packages (bc, perl, curl are preinstalled)
+        run: brew install jq
+
+      - name: Setup (core + agents)
+        run: ./setup.sh --non-interactive --with-agents --skip-smoke
+
+      - name: Doctor
+        run: ./setup.sh --doctor
+
+      - name: Test runner (offline)
+        run: SST_OFFLINE=1 bash tests/test_runner.sh
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report-macos
+          path: reports/test-report.md
+          if-no-files-found: warn

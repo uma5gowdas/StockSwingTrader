@@ -1,0 +1,26 @@
+# Keep secrets, local state and machine-specific artefacts out of the build
+# context. config.template.sh is kept (setup.sh copies it to config.sh).
+.git
+.worktrees
+config.sh
+config.robinhood.sh
+config.live.sh
+config.alpaca.sh
+.env
+**/.env
+.venv
+.venv-agents
+**/node_modules
+cache
+logs
+output
+reports
+.state
+lib/models/*.pkl
+DEPLOYMENT_PACKAGE
+Users
+private
+mlruns
+**/__pycache__
+**/*.py[cod]
+.DS_Store
